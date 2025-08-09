@@ -1,0 +1,12 @@
+[
+  {
+    "slug": "carbon-brief",
+    "name": "Carbon Brief",
+    "rss": "https://www.carbonbrief.org/feed/"
+  },
+  {
+    "slug": "grist",
+    "name": "Grist",
+    "rss": "https://grist.org/feed/"
+  }
+]

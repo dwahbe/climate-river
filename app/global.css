@@ -1,0 +1,180 @@
+:root {
+  --bg: #0b0c10;
+  --panel: #111318;
+  --muted: #8b90a0;
+  --text: #e7e9ee;
+  --link: #8fd3ff;
+  --border: #1c1f26;
+  --accent: #2dd4bf; /* teal-ish */
+  --badged: #1b2a2a;
+  --radius: 14px;
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --bg: #f7f8fb;
+    --panel: #ffffff;
+    --muted: #606779;
+    --text: #0e1116;
+    --link: #0ea5e9;
+    --border: #e7eaf0;
+    --accent: #0ea5e9;
+    --badged: #e6f7fb;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+html,
+body {
+  height: 100%;
+}
+body {
+  margin: 0;
+  background: radial-gradient(
+      1200px 600px at 20% -10%,
+      rgba(45, 212, 191, 0.07),
+      transparent 50%
+    ),
+    radial-gradient(
+      1000px 500px at 100% 0%,
+      rgba(14, 165, 233, 0.06),
+      transparent 60%
+    ),
+    var(--bg);
+  color: var(--text);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+a {
+  color: var(--link);
+  text-decoration: none;
+}
+a:hover {
+  text-decoration: underline;
+}
+
+.container {
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 28px 20px 64px;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 18px 20px;
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  backdrop-filter: blur(6px);
+  background: color-mix(in oklab, var(--bg) 92%, transparent);
+  z-index: 10;
+}
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+}
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--badged);
+  color: var(--link);
+  font-size: 12px;
+  border: 1px solid color-mix(in oklab, var(--link) 22%, transparent);
+}
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  margin: 16px 0 22px;
+}
+.input {
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--border);
+  padding: 10px 12px;
+  border-radius: 10px;
+  outline: none;
+  min-width: 240px;
+}
+.btn {
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--text);
+  padding: 10px 14px;
+  border-radius: 10px;
+  cursor: pointer;
+}
+.btn:hover {
+  border-color: color-mix(in oklab, var(--link) 40%, var(--border));
+}
+
+.card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px 16px 12px;
+  transition: border-color 0.15s ease, transform 0.06s ease;
+}
+.card:hover {
+  border-color: color-mix(in oklab, var(--link) 28%, var(--border));
+  transform: translateY(-1px);
+}
+
+.meta {
+  color: var(--muted);
+  font-size: 12px;
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.title {
+  margin: 0 0 8px;
+  font-size: 17px;
+  line-height: 1.35;
+}
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: color-mix(in oklab, var(--panel) 75%, var(--bg));
+  color: var(--muted);
+}
+.grid {
+  display: grid;
+  gap: 14px;
+}
+.grid@sm {
+  grid-template-columns: 1fr;
+}
+.grid@md {
+  grid-template-columns: 1fr 1fr;
+}
+@media (min-width: 880px) {
+  .grid {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+.footer {
+  color: var(--muted);
+  font-size: 12px;
+  padding: 24px 0 0;
+  text-align: center;
+}
