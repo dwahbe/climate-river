@@ -1,7 +1,4 @@
-import './global.css' // <-- you said keep global.css
-import { Inter } from 'next/font/google'
-
-const inter = Inter({ subsets: ['latin'], display: 'swap' })
+import './global.css'
 
 export const metadata = {
   title: 'Climate River',
@@ -14,7 +11,7 @@ export default function RootLayout({
   children: React.ReactNode
 }) {
   return (
-    <html lang="en" className={inter.className}>
+    <html lang="en">
       <body>
         <header className="header">
           <div className="brand">

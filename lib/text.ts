@@ -1,4 +1,4 @@
-import sw from 'stopword';
+import { removeStopwords } from 'stopword';
 export function stripUtm(url: string): string {
   try {
     const u = new URL(url);
@@ -12,6 +12,6 @@ export function stripUtm(url: string): string {
 export function normalizeTitleKey(title: string): string {
   const lower = title.toLowerCase().replace(/[^a-z0-9\s]/g,' ');
   const tokens = lower.split(/\s+/).filter(Boolean);
-  const stopped = sw.removeStopwords(tokens);
+  const stopped = removeStopwords(tokens);
   return stopped.join(' ').slice(0,160);
 }
