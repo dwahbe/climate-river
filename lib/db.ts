@@ -2,9 +2,7 @@ import { Pool } from 'pg'
 
 let _pool: Pool | undefined
 const dev = process.env.NODE_ENV !== 'production'
-
-// Dev-only: allow self-signed/unknown CA so local works
-if (dev) process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0'
+if (dev) process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0' // dev only
 
 function getPool() {
   if (!_pool) {
@@ -14,8 +12,8 @@ function getPool() {
       connectionString: cs,
       max: dev ? 6 : 2,
       ssl: dev
-        ? { require: true, rejectUnauthorized: false } // <-- relax in dev
-        : { require: true }, // strict in prod
+        ? { require: true, rejectUnauthorized: false }
+        : { require: true },
     })
   }
   return _pool
@@ -30,5 +28,4 @@ export async function query<T = any>(text: string, params?: any[]) {
     client.release()
   }
 }
-
 export const pool = { end: async () => _pool?.end() }

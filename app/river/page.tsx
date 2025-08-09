@@ -3,100 +3,66 @@ export const dynamic = 'force-dynamic'
 
 import * as DB from '@/lib/db'
 import Link from 'next/link'
-import { notFound } from 'next/navigation'
 
-type Item = { title: string; url: string; source: string; published_at: string }
+type Row = {
+  cluster_id: number
+  lead_title: string
+  lead_url: string
+  published_at: string
+  size: number
+  score: number
+  sources_count: number
+}
 
-export default async function ClusterPage({
-  params,
-}: {
-  params: { id: string }
-}) {
-  const idRaw = params?.id ?? ''
-  if (!/^\d+$/.test(idRaw)) notFound()
-  const id = Number(idRaw)
-
-  let rows: Item[] = []
-  let error: string | null = null
-
-  try {
-    const res = await DB.query<Item>(
-      `
-      select
-        a.title,
-        a.canonical_url as url,
-        s.name as source,
-        a.published_at
+export default async function RiverPage() {
+  const { rows } = await DB.query<Row>(`
+    with lead as (
+      select cs.cluster_id, cs.size, cs.score,
+             a.title as lead_title, a.canonical_url as lead_url, a.published_at
+      from cluster_scores cs
+      join articles a on a.id = cs.lead_article_id
+      order by cs.score desc
+      limit 80
+    ),
+    srcs as (
+      select ac.cluster_id, count(distinct s.id) as sources_count
       from article_clusters ac
       join articles a on a.id = ac.article_id
-      join sources  s on s.id = a.source_id
-      where ac.cluster_id = $1
-      order by a.published_at desc
-    `,
-      [id]
+      join sources s on s.id = a.source_id
+      group by ac.cluster_id
     )
-    rows = res.rows
-  } catch (e: any) {
-    error = e?.message || String(e)
-    console.error('ClusterPage query error:', e)
-  }
-
-  const lead = rows[0]
+    select l.*, coalesce(s.sources_count, 1) as sources_count
+    from lead l left join srcs s on s.cluster_id = l.cluster_id
+  `)
 
   return (
     <main>
       <div className="toolbar">
-        <Link href="/river" className="btn">
-          ← Back to River
-        </Link>
-        <span className="pill">{rows.length} links</span>
+        <input className="input" placeholder="Search (coming soon)" disabled />
+        <span className="pill">Auto-updating</span>
+        <span className="pill">Neutral ranking</span>
       </div>
 
-      {error ? (
-        <div className="card" style={{ padding: 16 }}>
-          <h3 className="title">Couldn’t load this cluster</h3>
-          <div className="meta">Error: {error}</div>
-        </div>
-      ) : (
-        <>
-          <h1 style={{ margin: '8px 0 16px', fontSize: 22 }}>
-            {lead ? lead.title : 'Cluster'}
-          </h1>
-
-          {rows.length === 0 ? (
-            <p className="pill">No articles for this cluster.</p>
-          ) : (
-            <ul
-              style={{
-                listStyle: 'none',
-                padding: 0,
-                margin: 0,
-                display: 'grid',
-                gap: 10,
-              }}
-            >
-              {rows.map((it, i) => (
-                <li key={i} className="card" style={{ padding: 14 }}>
-                  <a
-                    href={it.url}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="title"
-                    style={{ display: 'inline-block', marginBottom: 6 }}
-                  >
-                    {it.title}
-                  </a>
-                  <div className="meta">
-                    <span>{it.source}</span>
-                    <span>•</span>
-                    <span>{new Date(it.published_at).toLocaleString()}</span>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          )}
-        </>
-      )}
+      <section className="grid">
+        {rows.map((r) => (
+          <article key={r.cluster_id} className="card">
+            <h3 className="title">
+              <a href={r.lead_url} target="_blank" rel="noreferrer">
+                {r.lead_title}
+              </a>
+            </h3>
+            <div className="meta">
+              <span>{new Date(r.published_at).toLocaleString()}</span>
+              <span>•</span>
+              <span>{r.size} stories</span>
+              <span>•</span>
+              <span>{r.sources_count} sources</span>
+              <span style={{ flex: 1 }} />
+              <Link href={`/river/${r.cluster_id}`}>Open cluster →</Link>
+            </div>
+          </article>
+        ))}
+      </section>
     </main>
   )
 }
