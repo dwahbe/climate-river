@@ -1,3 +1,6 @@
+export const runtime = 'nodejs'
+export const dynamic = 'force-dynamic'
+
 import * as DB from '@/lib/db'
 import Link from 'next/link'
 
@@ -11,18 +14,11 @@ type Row = {
   sources_count: number
 }
 
-export const dynamic = 'force-dynamic'
-
 export default async function RiverPage() {
   const { rows } = await DB.query<Row>(`
     with lead as (
-      select
-        cs.cluster_id,
-        cs.size,
-        cs.score,
-        a.title         as lead_title,
-        a.canonical_url as lead_url,
-        a.published_at
+      select cs.cluster_id, cs.size, cs.score,
+             a.title as lead_title, a.canonical_url as lead_url, a.published_at
       from cluster_scores cs
       join articles a on a.id = cs.lead_article_id
       order by cs.score desc
@@ -36,8 +32,7 @@ export default async function RiverPage() {
       group by ac.cluster_id
     )
     select l.*, coalesce(s.sources_count, 1) as sources_count
-    from lead l
-    left join srcs s on s.cluster_id = l.cluster_id
+    from lead l left join srcs s on s.cluster_id = l.cluster_id
   `)
 
   return (
