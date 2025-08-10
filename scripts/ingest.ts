@@ -1,6 +1,5 @@
 // scripts/ingest.ts
-import path from 'node:path'
-import { readFileSync } from 'node:fs'
+import sources from '@/data/sources.json'
 import Parser from 'rss-parser'
 import dayjs from 'dayjs'
 import { query, pool } from '@/lib/db'
@@ -19,9 +18,9 @@ type RssItem = {
   pubDate?: string
 }
 
-// -----------------------------
-// Helpers
-// -----------------------------
+/* ---------------------------------- */
+/* Helpers                            */
+/* ---------------------------------- */
 
 function slugify(input: string) {
   return input
@@ -109,28 +108,42 @@ async function mapLimit<T, R>(
   })
 }
 
-// -----------------------------
-// Minimal, idempotent schema guard
-// -----------------------------
+/* ---------------------------------- */
+/* Minimal, idempotent schema guard   */
+/* ---------------------------------- */
 async function ensureSchema() {
+  // sources
   await query(`
     create table if not exists sources (
       id            bigserial primary key,
       name          text not null,
       homepage_url  text,
-      feed_url      text unique,
+      feed_url      text not null unique,
       weight        int not null default 1,
-      slug          text not null
+      slug          text
     );
   `)
+
+  // ensure slug column exists (defensive) then backfill
   await query(
-    `alter table if exists sources add column if not exists slug text`
+    `alter table if exists sources add column if not exists slug text;`
   )
-  await query(`alter table if exists sources alter column slug set not null`)
+  await query(`
+    update sources
+       set slug = regexp_replace(
+         lower(coalesce(name, homepage_url, feed_url)),
+         '[^a-z0-9]+', '-', 'g'
+       )
+     where slug is null;
+  `)
+
+  // now enforce constraints / indexes
+  await query(`alter table if exists sources alter column slug set not null;`)
   await query(
-    `create unique index if not exists idx_sources_slug on sources(slug)`
+    `create unique index if not exists idx_sources_slug on sources(slug);`
   )
 
+  // articles
   await query(`
     create table if not exists articles (
       id            bigserial primary key,
@@ -141,7 +154,11 @@ async function ensureSchema() {
       fetched_at    timestamptz not null default now()
     );
   `)
+  await query(
+    `create index if not exists idx_articles_published_at on articles(published_at desc);`
+  )
 
+  // clusters
   await query(`
     create table if not exists clusters (
       id         bigserial primary key,
@@ -150,6 +167,7 @@ async function ensureSchema() {
     );
   `)
 
+  // linking table
   await query(`
     create table if not exists article_clusters (
       article_id bigint references articles(id) on delete cascade,
@@ -159,18 +177,35 @@ async function ensureSchema() {
   `)
 }
 
-// -----------------------------
-// Ingest helpers
-// -----------------------------
+/* ---------------------------------- */
+/* Ingest helpers                      */
+/* ---------------------------------- */
 async function upsertSources(defs: SourceDef[]) {
   if (!defs.length) return
-  const rows = defs.map((s) => ({
-    name: s.name,
-    homepage_url: s.homepage,
-    feed_url: s.feed,
-    weight: s.weight ?? 1,
-    slug: slugify(s.name || s.homepage || s.feed),
-  }))
+
+  const rows = defs.map((s) => {
+    const fallbackHost = (() => {
+      try {
+        return new URL(s.homepage).hostname
+      } catch {
+        /* noop */
+      }
+      try {
+        return new URL(s.feed).hostname
+      } catch {
+        return s.feed
+      }
+    })()
+    const slug = slugify(s.name || fallbackHost) || slugify(s.feed)
+
+    return {
+      name: s.name,
+      homepage_url: s.homepage,
+      feed_url: s.feed,
+      weight: s.weight ?? 1,
+      slug,
+    }
+  })
 
   const params: any[] = []
   const valuesSql = rows
@@ -208,7 +243,7 @@ async function insertArticle(
   sourceId: number,
   title: string,
   url: string,
-  publishedAt: string | undefined
+  publishedAt?: string
 ) {
   const row = await query<{ id: number }>(
     `
@@ -248,11 +283,25 @@ async function ensureClusterForArticle(articleId: number, title: string) {
 }
 
 async function ingestFromFeed(feedUrl: string, sourceId: number, limit = 20) {
-  const parser = new Parser()
-  const feed = await parser.parseURL(feedUrl)
-  const items = (feed.items || []) as RssItem[]
+  const parser = new Parser({
+    headers: {
+      'User-Agent':
+        'ClimateRiverBot/0.1 (+https://climate-news-gules.vercel.app)',
+    },
+    requestOptions: { timeout: 15000 },
+  })
 
+  let feed
+  try {
+    feed = await parser.parseURL(feedUrl)
+  } catch (e: any) {
+    console.warn(`Feed error for ${feedUrl}: ${e?.message || e}`)
+    return 0
+  }
+
+  const items = (feed.items || []) as RssItem[]
   let inserted = 0
+
   for (const it of items.slice(0, limit)) {
     const title = (it.title || '').trim()
     const link = (it.link || '').trim()
@@ -273,16 +322,14 @@ async function ingestFromFeed(feedUrl: string, sourceId: number, limit = 20) {
   return inserted
 }
 
-// -----------------------------
-// Main (exported)
-// -----------------------------
+/* ---------------------------------- */
+/* Main (exported)                     */
+/* ---------------------------------- */
 export async function run() {
   const start = Date.now()
   await ensureSchema()
 
-  const sourcesPath = path.join(process.cwd(), 'data', 'sources.json')
-  const raw = readFileSync(sourcesPath, 'utf8')
-  const defs = JSON.parse(raw) as SourceDef[]
+  const defs = sources as SourceDef[]
 
   await upsertSources(defs)
   const idByFeed = await sourceMap()
@@ -310,7 +357,7 @@ export async function run() {
   return { total, results }
 }
 
-// Allow `npm run ingest` to work, too
+/* Allow `npm run ingest` to work too */
 if (import.meta.url === `file://${process.argv[1]}`) {
   run().catch((err) => {
     console.error(err)
