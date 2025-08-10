@@ -4,6 +4,7 @@ export const dynamic = 'force-dynamic'
 
 import { NextResponse } from 'next/server'
 import { headers } from 'next/headers'
+import { run } from '@/scripts/ingest'
 
 function authorized(req: Request) {
   const h = headers()
@@ -19,40 +20,18 @@ function authorized(req: Request) {
   return isCron || (!!expected && (qToken === expected || bearer === expected))
 }
 
-async function runIngest(limit?: number) {
-  // Optional: allow a small batch to avoid function timeouts
-  try {
-    const mod: any = await import('@/scripts/ingest')
-    if (typeof mod.run === 'function') {
-      // If your ingest supports a limit parameter, pass it; otherwise just call run()
-      return await mod.run({ limit })
-    }
-    // Fallback to default export
-    if (typeof mod.default === 'function') {
-      return await mod.default({ limit })
-    }
-    throw new Error('scripts/ingest.ts must export run()')
-  } catch (e) {
-    throw e
-  }
-}
-
-async function handle(req: Request) {
+export async function GET(req: Request) {
   if (!authorized(req)) {
     return NextResponse.json(
       { ok: false, error: 'unauthorized' },
       { status: 401 }
     )
   }
-  const url = new URL(req.url)
-  const limitParam = url.searchParams.get('limit')
-  const limit = limitParam
-    ? Math.max(1, Math.min(50, Number(limitParam)))
-    : undefined
 
   const t0 = Date.now()
   try {
-    const result = await runIngest(limit)
+    // IMPORTANT: run() should NOT call endPool() on API requests
+    const result = await run()
     return NextResponse.json({ ok: true, took_ms: Date.now() - t0, result })
   } catch (e: any) {
     return NextResponse.json(
@@ -62,9 +41,4 @@ async function handle(req: Request) {
   }
 }
 
-export async function GET(req: Request) {
-  return handle(req)
-}
-export async function POST(req: Request) {
-  return handle(req)
-}
+export { GET as POST }
