@@ -1,11 +1,8 @@
-import './global.css' // <-- you said keep global.css
-import { Inter } from 'next/font/google'
-
-const inter = Inter({ subsets: ['latin'], display: 'swap' })
+import './global.css'
 
 export const metadata = {
   title: 'Climate River',
-  description: 'Neutral climate news river',
+  description: 'A minimal, neutral climate news stream.',
 }
 
 export default function RootLayout({
@@ -14,34 +11,31 @@ export default function RootLayout({
   children: React.ReactNode
 }) {
   return (
-    <html lang="en" className={inter.className}>
+    <html lang="en">
       <body>
-        <header className="header">
-          <div className="brand">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
-              <circle
-                cx="12"
-                cy="12"
-                r="10"
-                stroke="currentColor"
-                strokeWidth="1.4"
-                opacity="0.5"
-              />
-              <path
-                d="M4 14c3-1 5-4 8-4s5 3 8 4"
-                stroke="currentColor"
-                strokeWidth="1.4"
-              />
-            </svg>
-            Climate River <span className="badge">MVP</span>
+        <header className="head">
+          <div className="container">
+            <a className="brand" href="/">
+              <span className="seed" />
+              Climate&nbsp;River
+            </a>
+            <nav className="nav">
+              <a href="/river">River</a>
+              <a
+                href="https://github.com/dwahbe/climate-river-mvp"
+                target="_blank"
+                rel="noreferrer"
+              >
+                GitHub
+              </a>
+            </nav>
           </div>
-          <nav>
-            <a href="/river">River</a>
-          </nav>
         </header>
-        <div className="container">{children}</div>
-        <footer className="container footer">
-          Built for speed. Neutral by default.
+        <main className="main">{children}</main>
+        <footer className="foot">
+          <div className="container">
+            Neutral by default • Updates automatically
+          </div>
         </footer>
       </body>
     </html>

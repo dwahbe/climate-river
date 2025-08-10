@@ -1,79 +1,65 @@
-export const runtime = 'nodejs'
-export const dynamic = 'force-dynamic'
-
 import * as DB from '@/lib/db'
 import Link from 'next/link'
-import { notFound } from 'next/navigation'
 
-type Item = { title: string; url: string; source: string; published_at: string }
+type A = {
+  id: number
+  title: string
+  canonical_url: string
+  published_at: string
+  source_name: string
+}
 
-export default async function ClusterPage({
-  params,
-}: {
-  params: { id: string }
-}) {
-  if (!/^\d+$/.test(params.id)) notFound()
+export const dynamic = 'force-dynamic'
+
+function timeAgo(iso: string) {
+  const t = new Date(iso).getTime()
+  const mins = Math.max(1, Math.round((Date.now() - t) / 60000))
+  if (mins < 60) return `${mins}m`
+  const hrs = Math.round(mins / 60)
+  if (hrs < 48) return `${hrs}h`
+  const d = Math.round(hrs / 24)
+  return `${d}d`
+}
+
+export default async function Cluster({ params }: { params: { id: string } }) {
   const id = Number(params.id)
-
-  const { rows } = await DB.query<Item>(
+  const { rows } = await DB.query<A>(
     `
-    select a.title, a.canonical_url as url, s.name as source, a.published_at
+    select a.id, a.title, a.canonical_url, a.published_at, s.name as source_name
     from article_clusters ac
     join articles a on a.id = ac.article_id
-    join sources  s on s.id = a.source_id
+    join sources s on s.id = a.source_id
     where ac.cluster_id = $1
     order by a.published_at desc
   `,
     [id]
   )
 
-  const lead = rows[0]
-
   return (
-    <main>
-      <div className="toolbar">
-        <Link href="/river" className="btn">
-          ← Back to River
-        </Link>
-        <span className="pill">{rows.length} links</span>
+    <div className="container cluster">
+      <div className="head">
+        <h2 style={{ margin: '0 0 6px' }}>Cluster #{id}</h2>
+        <p style={{ margin: 0, color: 'var(--muted)' }}>
+          {rows.length} articles
+        </p>
+        <p style={{ margin: '10px 0 0' }}>
+          <Link href="/river">← Back to river</Link>
+        </p>
       </div>
-
-      <h1 style={{ margin: '8px 0 16px', fontSize: 22 }}>
-        {lead ? lead.title : `Cluster ${id}`}
-      </h1>
-
-      {rows.length === 0 ? (
-        <p className="pill">No articles for this cluster.</p>
-      ) : (
-        <ul
-          style={{
-            listStyle: 'none',
-            padding: 0,
-            margin: 0,
-            display: 'grid',
-            gap: 10,
-          }}
-        >
-          {rows.map((it, i) => (
-            <li key={i} className="card" style={{ padding: 14 }}>
-              <a
-                href={it.url}
-                target="_blank"
-                rel="noreferrer"
-                className="title"
-                style={{ display: 'inline-block', marginBottom: 6 }}
-              >
-                {it.title}
+      <div className="list">
+        {rows.map((a) => (
+          <article key={a.id} className="item">
+            <div className="a-title">
+              <a href={a.canonical_url} target="_blank" rel="noreferrer">
+                {a.title}
               </a>
-              <div className="meta">
-                <span>{it.source}</span>
-                <span>•</span>
-                <span>{new Date(it.published_at).toLocaleString()}</span>
-              </div>
-            </li>
-          ))}
-        </ul>
-      )}
-    </main>
+            </div>
+            <div className="a-meta">
+              {a.source_name} • {timeAgo(a.published_at)}
+            </div>
+          </article>
+        ))}
+      </div>
+    </div>
   )
 }

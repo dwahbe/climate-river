@@ -1,6 +1,12 @@
+/* -------- Base */
 :root {
-  color-scheme: dark;
+  --bg: #fffdf8; /* warm white */
+  --ink: #121212;
+  --muted: #6b6b6b;
+  --line: #eceae4;
+  --accent: #0f0f0f; /* minimalist dark accent */
 }
+
 * {
   box-sizing: border-box;
 }
@@ -10,114 +16,157 @@ body {
 }
 body {
   margin: 0;
-  background: #0b0d10;
-  color: #e8eaed;
-  font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Inter,
-    Arial, sans-serif;
+  color: var(--ink);
+  background: var(--bg);
+  font: 16px/1.6 ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Inter,
+    Roboto, 'Helvetica Neue', Arial, 'Noto Sans';
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
+
 a {
-  color: #8ab4ff;
-  text-decoration: none;
+  color: inherit;
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 4px;
 }
 a:hover {
-  text-decoration: underline;
+  text-decoration-color: var(--accent);
 }
 
 .container {
-  max-width: 1000px;
+  max-width: 820px;
   margin: 0 auto;
-  padding: 20px;
+  padding: 0 20px;
 }
-.header {
+
+/* -------- Header / Footer */
+.head {
   position: sticky;
   top: 0;
   z-index: 10;
+  background: rgba(255, 255, 255, 0.8);
+  backdrop-filter: saturate(1.1) blur(6px);
+  border-bottom: 1px solid var(--line);
+}
+.head .container {
+  height: 64px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
-  padding: 12px 20px;
-  background: rgba(8, 10, 12, 0.7);
-  backdrop-filter: blur(8px);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
 }
 .brand {
   display: flex;
   align-items: center;
   gap: 10px;
-  font-weight: 600;
+  font-weight: 700;
+  text-decoration: none;
 }
-.badge {
-  font-size: 12px;
-  padding: 2px 8px;
-  border-radius: 999px;
-  background: #1f2937;
+.seed {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: #0b8f78;
+  display: inline-block;
+}
+.nav a {
+  margin-left: 18px;
+  text-decoration: none;
+  color: var(--muted);
+}
+.nav a:hover {
+  color: var(--ink);
 }
 
-.footer {
-  opacity: 0.6;
-  font-size: 12px;
-  padding-top: 10px;
+.main {
+  min-height: calc(100vh - 120px);
+}
+.foot {
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+}
+.foot .container {
+  padding: 20px 0;
+  font-size: 13px;
 }
 
-.toolbar {
+/* -------- River (single column, Techmeme-style but quieter) */
+.river {
+  padding: 28px 0 64px;
+}
+.river .note {
+  color: var(--muted);
+  font-size: 14px;
+  margin: 6px 0 22px;
+}
+
+.entry {
+  padding: 18px 0;
+  border-bottom: 1px solid var(--line);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px 12px;
+}
+.entry:hover .title a {
+  text-decoration-color: var(--ink);
+}
+.title {
+  font-weight: 700;
+  letter-spacing: 0.1px;
+  line-height: 1.45;
+}
+.meta {
+  grid-column: 1 / -1;
+  color: var(--muted);
+  font-size: 13px;
   display: flex;
   gap: 10px;
   align-items: center;
-  margin: 8px 0 18px;
 }
-.input {
-  background: #0f1318;
-  border: 1px solid #253041;
-  color: #dbe3ee;
-  padding: 8px 10px;
-  border-radius: 10px;
-  min-width: 260px;
+.meta .dot {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--muted);
+  display: inline-block;
 }
-.pill {
-  font-size: 12px;
-  opacity: 0.8;
-  padding: 4px 8px;
-  border: 1px solid #253041;
+.badge {
+  padding: 2px 8px;
+  border: 1px solid var(--line);
   border-radius: 999px;
+  background: #fff;
 }
-.btn {
-  padding: 6px 10px;
-  border: 1px solid #253041;
+.score {
+  color: #0b8f78;
+  font-weight: 700;
+}
+
+/* -------- Cluster page */
+.cluster {
+  padding: 28px 0 64px;
+}
+.cluster .head {
+  padding: 16px 14px;
+  background: #fff;
+  border: 1px solid var(--line);
   border-radius: 10px;
-  color: inherit;
 }
-
-.grid {
-  display: grid;
-  gap: 14px;
-  grid-template-columns: 1fr;
+.cluster .list {
+  margin-top: 14px;
 }
-@media (min-width: 880px) {
-  .grid {
-    grid-template-columns: 1fr 1fr;
-  }
+.cluster .item {
+  padding: 14px 0;
+  border-bottom: 1px dashed var(--line);
 }
-
-.card {
-  padding: 14px;
-  border: 1px solid #253041;
-  border-radius: 14px;
-  background: linear-gradient(
-    180deg,
-    rgba(15, 19, 24, 0.6),
-    rgba(12, 16, 21, 0.6)
-  );
+.cluster .item:last-child {
+  border-bottom: 0;
 }
-.title {
-  margin: 0 0 6px;
+.cluster .a-title {
   font-weight: 600;
-  line-height: 1.35;
 }
-.meta {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  opacity: 0.75;
-  font-size: 12px;
+.cluster .a-meta {
+  color: var(--muted);
+  font-size: 13px;
+  margin-top: 2px;
 }
