@@ -37,11 +37,9 @@ function slugify(input: string) {
 function canonical(url: string) {
   try {
     const u = new URL(url)
-    // remove tracking params
     ;[...u.searchParams.keys()].forEach((k) => {
       if (/^utm_|^fbclid$|^gclid$|^mc_/i.test(k)) u.searchParams.delete(k)
     })
-    // strip fragments
     u.hash = ''
     return u.toString()
   } catch {
@@ -57,8 +55,6 @@ function clusterKey(title: string) {
     .replace(/[\u0300-\u036f]/g, '')
     .replace(/[^a-z0-9\s]/g, ' ')
   const words = t.split(/\s+/).filter(Boolean)
-
-  // minimal stopword-ish filter + keep “strong” tokens
   const SKIP = new Set([
     'the',
     'a',
@@ -83,11 +79,9 @@ function clusterKey(title: string) {
     'as',
   ])
   const kept = words.filter((w) => !SKIP.has(w) && w.length >= 3)
-  // keep first ~8 “strong” tokens to form a stable key
   return kept.slice(0, 8).join('-')
 }
 
-/** simple concurrency limiter */
 async function mapLimit<T, R>(
   items: T[],
   limit: number,
@@ -119,7 +113,6 @@ async function mapLimit<T, R>(
 // Minimal, idempotent schema guard
 // -----------------------------
 async function ensureSchema() {
-  // sources
   await query(`
     create table if not exists sources (
       id            bigserial primary key,
@@ -130,7 +123,6 @@ async function ensureSchema() {
       slug          text not null
     );
   `)
-  // add columns if an older table exists
   await query(
     `alter table if exists sources add column if not exists slug text`
   )
@@ -139,7 +131,6 @@ async function ensureSchema() {
     `create unique index if not exists idx_sources_slug on sources(slug)`
   )
 
-  // articles
   await query(`
     create table if not exists articles (
       id            bigserial primary key,
@@ -151,7 +142,6 @@ async function ensureSchema() {
     );
   `)
 
-  // clusters
   await query(`
     create table if not exists clusters (
       id         bigserial primary key,
@@ -159,6 +149,7 @@ async function ensureSchema() {
       created_at timestamptz not null default now()
     );
   `)
+
   await query(`
     create table if not exists article_clusters (
       article_id bigint references articles(id) on delete cascade,
@@ -169,7 +160,7 @@ async function ensureSchema() {
 }
 
 // -----------------------------
-// Ingest
+// Ingest helpers
 // -----------------------------
 async function upsertSources(defs: SourceDef[]) {
   if (!defs.length) return
@@ -283,13 +274,12 @@ async function ingestFromFeed(feedUrl: string, sourceId: number, limit = 20) {
 }
 
 // -----------------------------
-// Main
+// Main (exported)
 // -----------------------------
-async function run() {
+export async function run() {
   const start = Date.now()
   await ensureSchema()
 
-  // read sources.json from repo
   const sourcesPath = path.join(process.cwd(), 'data', 'sources.json')
   const raw = readFileSync(sourcesPath, 'utf8')
   const defs = JSON.parse(raw) as SourceDef[]
@@ -317,8 +307,10 @@ async function run() {
   )
 
   await pool.end()
+  return { total, results }
 }
 
+// Allow `npm run ingest` to work, too
 if (import.meta.url === `file://${process.argv[1]}`) {
   run().catch((err) => {
     console.error(err)
