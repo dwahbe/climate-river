@@ -1,3 +1,35 @@
+type SourceRaw = {
+  name: string
+  rss?: string
+  feed?: string
+  homepage?: string
+  weight?: number
+  slug?: string
+}
+
+/** Convert whatever the JSON has into our canonical SourceDef shape */
+function normalizeSource(s: SourceRaw): SourceDef {
+  // prefer explicit feed, else rss
+  const feed = s.feed ?? s.rss ?? ''
+  // best-effort homepage if not provided
+  const homepage =
+    s.homepage ??
+    (() => {
+      try {
+        return new URL(feed).origin
+      } catch {
+        return ''
+      }
+    })()
+
+  return {
+    name: s.name,
+    homepage,
+    feed,
+    weight: s.weight,
+  }
+}
+
 // scripts/ingest.ts
 import sources from '@/data/sources.json'
 import Parser from 'rss-parser'
@@ -329,7 +361,9 @@ export async function run() {
   const start = Date.now()
   await ensureSchema()
 
-  const defs = sources as SourceDef[]
+  const defs = (sources as SourceRaw[])
+    .map(normalizeSource)
+    .filter((d) => d.feed) // guard against any missing feed/rss entries
 
   await upsertSources(defs)
   const idByFeed = await sourceMap()
