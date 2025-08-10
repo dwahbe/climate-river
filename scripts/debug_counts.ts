@@ -1,10 +1,32 @@
-import { query, pool } from '@/lib/db'
+// scripts/debug_counts.ts
+import { query, endPool } from '@/lib/db'
+
 async function main() {
-  const s  = await query<{count:number}>('select count(*)::int as count from sources')
-  const a  = await query<{count:number}>('select count(*)::int as count from articles')
-  const c  = await query<{count:number}>('select count(*)::int as count from clusters')
-  const sc = await query<{count:number}>('select count(*)::int as count from cluster_scores')
-  console.log({ sources: s.rows[0]?.count, articles: a.rows[0]?.count, clusters: c.rows[0]?.count, scored: sc.rows[0]?.count })
-  await pool.end()
+  try {
+    const s = await query<{ count: number }>(
+      'select count(*)::int as count from sources'
+    )
+    const a = await query<{ count: number }>(
+      'select count(*)::int as count from articles'
+    )
+    const c = await query<{ count: number }>(
+      'select count(*)::int as count from clusters'
+    )
+
+    console.log('sources:', s.rows[0]?.count ?? 0)
+    console.log('articles:', a.rows[0]?.count ?? 0)
+    console.log('clusters:', c.rows[0]?.count ?? 0)
+  } finally {
+    await endPool() // close the pg pool for CLI usage
+  }
 }
-main().catch(e => { console.error(e); process.exit(1) })
+
+// allow `tsx scripts/debug_counts.ts`
+if (import.meta.url === `file://${process.argv[1]}`) {
+  main().catch((err) => {
+    console.error(err)
+    process.exit(1)
+  })
+}
+
+export default main
