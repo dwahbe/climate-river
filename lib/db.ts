@@ -1,22 +1,21 @@
-import 'server-only'
+// lib/db.ts
 import { Pool } from 'pg'
-import type { ConnectionOptions as TlsOptions } from 'tls'
 
 let _pool: Pool | undefined
+const dev = process.env.NODE_ENV !== 'production'
 
-function getPool() {
+function getPool(): Pool {
   if (!_pool) {
     const cs = process.env.DATABASE_URL
     if (!cs) throw new Error('DATABASE_URL is not set')
-
-    // Safe for Supabase pooled URLs; 'sslmode=require' is already in the URL.
-    // We pass a permissive TLS option to avoid cert issues in serverless.
-    const ssl: boolean | TlsOptions = { rejectUnauthorized: false }
-
     _pool = new Pool({
       connectionString: cs,
-      max: process.env.NODE_ENV !== 'production' ? 6 : 2,
-      ssl,
+      max: dev ? 6 : 2,
+      ssl: { require: true, rejectUnauthorized: false },
+    })
+    // Optional: keep the process alive on idle errors
+    _pool.on('error', (err) => {
+      console.warn('[pg pool] idle client error:', err.message)
     })
   }
   return _pool
@@ -32,5 +31,13 @@ export async function query<T = any>(text: string, params?: any[]) {
   }
 }
 
-// for scripts
-export const pool = { end: async () => _pool?.end() }
+/** Only use in CLI scripts, never from API routes */
+export async function endPool() {
+  if (_pool) {
+    try {
+      await _pool.end()
+    } finally {
+      _pool = undefined // allow a fresh pool on next use
+    }
+  }
+}

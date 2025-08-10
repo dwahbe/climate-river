@@ -1,3 +1,10 @@
+// scripts/ingest.ts
+import Parser from 'rss-parser'
+import dayjs from 'dayjs'
+import { query, endPool } from '@/lib/db'
+import sources from '@/data/sources.json'
+
+// ---------- Types ----------
 type SourceRaw = {
   name: string
   rss?: string
@@ -6,35 +13,6 @@ type SourceRaw = {
   weight?: number
   slug?: string
 }
-
-/** Convert whatever the JSON has into our canonical SourceDef shape */
-function normalizeSource(s: SourceRaw): SourceDef {
-  // prefer explicit feed, else rss
-  const feed = s.feed ?? s.rss ?? ''
-  // best-effort homepage if not provided
-  const homepage =
-    s.homepage ??
-    (() => {
-      try {
-        return new URL(feed).origin
-      } catch {
-        return ''
-      }
-    })()
-
-  return {
-    name: s.name,
-    homepage,
-    feed,
-    weight: s.weight,
-  }
-}
-
-// scripts/ingest.ts
-import sources from '@/data/sources.json'
-import Parser from 'rss-parser'
-import dayjs from 'dayjs'
-import { query, pool } from '@/lib/db'
 
 type SourceDef = {
   name: string
@@ -50,10 +28,7 @@ type RssItem = {
   pubDate?: string
 }
 
-/* ---------------------------------- */
-/* Helpers                            */
-/* ---------------------------------- */
-
+// ---------- Helpers ----------
 function slugify(input: string) {
   return input
     .toLowerCase()
@@ -61,7 +36,14 @@ function slugify(input: string) {
     .replace(/[\u0300-\u036f]/g, '')
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/(^-|-$)/g, '')
-    .slice(0, 80)
+    .slice(0, 64)
+}
+
+/** tiny stable hash for short suffixes */
+function shortHash(s: string) {
+  let h = 5381
+  for (let i = 0; i < s.length; i++) h = ((h << 5) + h) ^ s.charCodeAt(i)
+  return (h >>> 0).toString(36) // unsigned -> base36
 }
 
 /** remove common tracking params and normalize */
@@ -140,9 +122,30 @@ async function mapLimit<T, R>(
   })
 }
 
-/* ---------------------------------- */
-/* Minimal, idempotent schema guard   */
-/* ---------------------------------- */
+/** Convert whatever the JSON has into our canonical SourceDef shape */
+function normalizeSource(s: SourceRaw): SourceDef | null {
+  const feed = s.feed ?? s.rss ?? ''
+  if (!feed) return null
+
+  const homepage =
+    s.homepage ??
+    (() => {
+      try {
+        return new URL(feed).origin
+      } catch {
+        return ''
+      }
+    })()
+
+  return {
+    name: s.name,
+    homepage,
+    feed,
+    weight: s.weight,
+  }
+}
+
+// ---------- Minimal, idempotent schema guard ----------
 async function ensureSchema() {
   // sources
   await query(`
@@ -156,7 +159,6 @@ async function ensureSchema() {
     );
   `)
 
-  // ensure slug column exists (defensive) then backfill
   await query(
     `alter table if exists sources add column if not exists slug text;`
   )
@@ -168,12 +170,9 @@ async function ensureSchema() {
        )
      where slug is null;
   `)
-
-  // now enforce constraints / indexes
   await query(`alter table if exists sources alter column slug set not null;`)
-  await query(
-    `create unique index if not exists idx_sources_slug on sources(slug);`
-  )
+  await query(`create index if not exists idx_sources_slug on sources(slug);`)
+  // NOTE: no unique constraint here to avoid collisions from historical data
 
   // articles
   await query(`
@@ -209,26 +208,22 @@ async function ensureSchema() {
   `)
 }
 
-/* ---------------------------------- */
-/* Ingest helpers                      */
-/* ---------------------------------- */
+// ---------- Ingest helpers ----------
 async function upsertSources(defs: SourceDef[]) {
   if (!defs.length) return
 
   const rows = defs.map((s) => {
-    const fallbackHost = (() => {
-      try {
-        return new URL(s.homepage).hostname
-      } catch {
-        /* noop */
-      }
-      try {
-        return new URL(s.feed).hostname
-      } catch {
-        return s.feed
-      }
-    })()
-    const slug = slugify(s.name || fallbackHost) || slugify(s.feed)
+    const host =
+      (() => {
+        try {
+          return new URL(s.homepage || s.feed).hostname
+        } catch {
+          return s.feed
+        }
+      })() || s.name
+
+    // unique-ish: name-or-host + short hash of feed URL
+    const slug = `${slugify(s.name || host)}-${shortHash(s.feed)}`
 
     return {
       name: s.name,
@@ -354,16 +349,14 @@ async function ingestFromFeed(feedUrl: string, sourceId: number, limit = 20) {
   return inserted
 }
 
-/* ---------------------------------- */
-/* Main (exported)                     */
-/* ---------------------------------- */
-export async function run() {
+// ---------- Main (exported) ----------
+export async function run(opts: { closePool?: boolean } = {}) {
   const start = Date.now()
   await ensureSchema()
 
-  const defs = (sources as SourceRaw[])
+  const defs = (sources as unknown as SourceRaw[])
     .map(normalizeSource)
-    .filter((d) => d.feed) // guard against any missing feed/rss entries
+    .filter((d): d is SourceDef => !!d && !!d.feed)
 
   await upsertSources(defs)
   const idByFeed = await sourceMap()
@@ -387,13 +380,13 @@ export async function run() {
     )}s.`
   )
 
-  await pool.end()
+  if (opts.closePool) await endPool()
   return { total, results }
 }
 
-/* Allow `npm run ingest` to work too */
+// ---------- CLI entrypoint ----------
 if (import.meta.url === `file://${process.argv[1]}`) {
-  run().catch((err) => {
+  run({ closePool: true }).catch((err) => {
     console.error(err)
     process.exit(1)
   })
