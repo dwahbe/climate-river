@@ -1,21 +1,27 @@
 // lib/db.ts
 import { Pool } from 'pg'
+import type { ConnectionOptions } from 'tls'
 
 let _pool: Pool | undefined
 const dev = process.env.NODE_ENV !== 'production'
 
-function getPool(): Pool {
+function getPool() {
   if (!_pool) {
     const cs = process.env.DATABASE_URL
     if (!cs) throw new Error('DATABASE_URL is not set')
+
+    // For Supabase / hosted Postgres with SSL; no 'require' key here.
+    const ssl: boolean | ConnectionOptions = { rejectUnauthorized: false }
+
     _pool = new Pool({
       connectionString: cs,
       max: dev ? 6 : 2,
-      ssl: { require: true, rejectUnauthorized: false },
+      ssl,
     })
-    // Optional: keep the process alive on idle errors
+
+    // Optional: surface pool errors instead of crashing silently
     _pool.on('error', (err) => {
-      console.warn('[pg pool] idle client error:', err.message)
+      console.error('pg pool error:', err)
     })
   }
   return _pool
@@ -31,13 +37,10 @@ export async function query<T = any>(text: string, params?: any[]) {
   }
 }
 
-/** Only use in CLI scripts, never from API routes */
+/** Allow CLI scripts to close the pool; do NOT call from API routes. */
 export async function endPool() {
   if (_pool) {
-    try {
-      await _pool.end()
-    } finally {
-      _pool = undefined // allow a fresh pool on next use
-    }
+    await _pool.end()
+    _pool = undefined
   }
 }
