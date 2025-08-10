@@ -1,121 +1,241 @@
 // scripts/ingest.ts
+import path from 'node:path'
+import { readFileSync } from 'node:fs'
 import Parser from 'rss-parser'
-import { createHash } from 'crypto'
-import * as DB from '@/lib/db'
-import { stripUtm } from '@/lib/text'
-import { applySchema } from './schema'
-import { removeStopwords } from 'stopword'
+import dayjs from 'dayjs'
+import { query, pool } from '@/lib/db'
 
-type SourceRow = {
-  id: number
+type SourceDef = {
   name: string
-  feed_url: string
-  homepage_url?: string | null
-  weight: number
-}
-
-type FeedSource = {
-  name: string
-  feed_url: string
-  homepage_url?: string
+  homepage: string
+  feed: string
   weight?: number
 }
 
-const parser = new Parser({
-  timeout: 10000, // ms
-  headers: { 'user-agent': 'ClimateRiverBot/0.1 (+https://example.com)' },
-})
-
-function sha1(s: string) {
-  return createHash('sha1').update(s).digest('hex')
+type RssItem = {
+  title?: string
+  link?: string
+  isoDate?: string
+  pubDate?: string
 }
 
-function clusterKeyFromTitle(title: string) {
-  const base = (title || '')
+// -----------------------------
+// Helpers
+// -----------------------------
+
+function slugify(input: string) {
+  return input
     .toLowerCase()
-    .replace(/[’'“”"]/g, '')
-    .replace(/[^a-z0-9\s]/g, ' ')
-  const words = base.split(/\s+/).filter(Boolean)
-  const kept = removeStopwords(words)
-  const key = kept.slice(0, 8).join('-')
-  return key || sha1(base).slice(0, 16)
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/(^-|-$)/g, '')
+    .slice(0, 80)
 }
 
-async function upsertSource(s: FeedSource): Promise<number> {
-  const { rows } = await DB.query<{ id: number }>(
-    `
-    insert into sources (name, feed_url, homepage_url, weight)
-    values ($1,$2,$3,coalesce($4,1))
-    on conflict (feed_url)
-    do update set
-      name = excluded.name,
-      homepage_url = excluded.homepage_url,
-      weight = coalesce(excluded.weight, sources.weight)
-    returning id
-  `,
-    [s.name, s.feed_url, s.homepage_url ?? null, s.weight ?? 1]
-  )
-  return rows[0].id
-}
-
-async function ensureSourceRows(sources: FeedSource[]): Promise<SourceRow[]> {
-  const out: SourceRow[] = []
-  for (const s of sources) {
-    const id = await upsertSource(s)
-    out.push({
-      id,
-      name: s.name,
-      feed_url: s.feed_url,
-      homepage_url: s.homepage_url ?? null,
-      weight: s.weight ?? 1,
+/** remove common tracking params and normalize */
+function canonical(url: string) {
+  try {
+    const u = new URL(url)
+    // remove tracking params
+    ;[...u.searchParams.keys()].forEach((k) => {
+      if (/^utm_|^fbclid$|^gclid$|^mc_/i.test(k)) u.searchParams.delete(k)
     })
+    // strip fragments
+    u.hash = ''
+    return u.toString()
+  } catch {
+    return url
   }
-  return out
 }
 
-async function insertArticle(params: {
-  source_id: number
-  title: string
-  url?: string | null
-  canonical_url?: string | null
-  summary?: string | null
-  published_at?: Date | null
-}) {
-  const { source_id, title } = params
-  const canonical = (params.canonical_url || params.url || '').trim()
-  const hash = sha1((title || '') + '|' + canonical)
+/** tiny clustering key derived from the title (no external deps) */
+function clusterKey(title: string) {
+  const t = title
+    .toLowerCase()
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9\s]/g, ' ')
+  const words = t.split(/\s+/).filter(Boolean)
 
-  const { rows } = await DB.query<{ id: number }>(
+  // minimal stopword-ish filter + keep “strong” tokens
+  const SKIP = new Set([
+    'the',
+    'a',
+    'an',
+    'and',
+    'or',
+    'but',
+    'to',
+    'of',
+    'in',
+    'on',
+    'for',
+    'with',
+    'by',
+    'from',
+    'at',
+    'is',
+    'are',
+    'was',
+    'were',
+    'be',
+    'as',
+  ])
+  const kept = words.filter((w) => !SKIP.has(w) && w.length >= 3)
+  // keep first ~8 “strong” tokens to form a stable key
+  return kept.slice(0, 8).join('-')
+}
+
+/** simple concurrency limiter */
+async function mapLimit<T, R>(
+  items: T[],
+  limit: number,
+  fn: (t: T, idx: number) => Promise<R>
+) {
+  const ret: R[] = new Array(items.length)
+  let i = 0
+  let active = 0
+  return new Promise<R[]>((resolve, reject) => {
+    const next = () => {
+      if (i >= items.length && active === 0) return resolve(ret)
+      while (active < limit && i < items.length) {
+        const cur = i++
+        active++
+        fn(items[cur], cur)
+          .then((v) => (ret[cur] = v))
+          .catch(reject)
+          .finally(() => {
+            active--
+            next()
+          })
+      }
+    }
+    next()
+  })
+}
+
+// -----------------------------
+// Minimal, idempotent schema guard
+// -----------------------------
+async function ensureSchema() {
+  // sources
+  await query(`
+    create table if not exists sources (
+      id            bigserial primary key,
+      name          text not null,
+      homepage_url  text,
+      feed_url      text unique,
+      weight        int not null default 1,
+      slug          text not null
+    );
+  `)
+  // add columns if an older table exists
+  await query(
+    `alter table if exists sources add column if not exists slug text`
+  )
+  await query(`alter table if exists sources alter column slug set not null`)
+  await query(
+    `create unique index if not exists idx_sources_slug on sources(slug)`
+  )
+
+  // articles
+  await query(`
+    create table if not exists articles (
+      id            bigserial primary key,
+      source_id     bigint references sources(id) on delete cascade,
+      title         text not null,
+      canonical_url text not null unique,
+      published_at  timestamptz,
+      fetched_at    timestamptz not null default now()
+    );
+  `)
+
+  // clusters
+  await query(`
+    create table if not exists clusters (
+      id         bigserial primary key,
+      key        text unique,
+      created_at timestamptz not null default now()
+    );
+  `)
+  await query(`
+    create table if not exists article_clusters (
+      article_id bigint references articles(id) on delete cascade,
+      cluster_id bigint references clusters(id) on delete cascade,
+      primary key (article_id, cluster_id)
+    );
+  `)
+}
+
+// -----------------------------
+// Ingest
+// -----------------------------
+async function upsertSources(defs: SourceDef[]) {
+  if (!defs.length) return
+  const rows = defs.map((s) => ({
+    name: s.name,
+    homepage_url: s.homepage,
+    feed_url: s.feed,
+    weight: s.weight ?? 1,
+    slug: slugify(s.name || s.homepage || s.feed),
+  }))
+
+  const params: any[] = []
+  const valuesSql = rows
+    .map((r, i) => {
+      const o = i * 5
+      params.push(r.name, r.homepage_url, r.feed_url, r.weight, r.slug)
+      return `($${o + 1}, $${o + 2}, $${o + 3}, $${o + 4}, $${o + 5})`
+    })
+    .join(', ')
+
+  await query(
     `
-    insert into articles (source_id, title, url, canonical_url, summary, published_at, hash)
-    values ($1,$2,$3,$4,$5,$6,$7)
-    on conflict (hash) do nothing
+      insert into sources (name, homepage_url, feed_url, weight, slug)
+      values ${valuesSql}
+      on conflict (feed_url) do update set
+        name = excluded.name,
+        homepage_url = excluded.homepage_url,
+        weight = excluded.weight,
+        slug = excluded.slug
+    `,
+    params
+  )
+}
+
+async function sourceMap(): Promise<Record<string, { id: number }>> {
+  const { rows } = await query<{ id: number; feed_url: string }>(
+    `select id, feed_url from sources`
+  )
+  const map: Record<string, { id: number }> = {}
+  for (const r of rows) map[r.feed_url] = { id: r.id }
+  return map
+}
+
+async function insertArticle(
+  sourceId: number,
+  title: string,
+  url: string,
+  publishedAt: string | undefined
+) {
+  const row = await query<{ id: number }>(
+    `
+    insert into articles (source_id, title, canonical_url, published_at)
+    values ($1, $2, $3, $4)
+    on conflict (canonical_url) do nothing
     returning id
   `,
-    [
-      source_id,
-      title,
-      params.url ?? null,
-      canonical || null,
-      params.summary ?? null,
-      params.published_at ?? new Date(),
-      hash,
-    ]
+    [sourceId, title, url, publishedAt ? dayjs(publishedAt).toDate() : null]
   )
-
-  if (rows[0]?.id) return { id: rows[0].id, created: true }
-
-  // already exists: get id by hash
-  const found = await DB.query<{ id: number }>(
-    'select id from articles where hash=$1 limit 1',
-    [hash]
-  )
-  return { id: found.rows[0]?.id, created: false }
+  return row.rows[0]?.id
 }
 
-async function ensureClusterFor(title: string) {
-  const key = clusterKeyFromTitle(title)
-  const { rows } = await DB.query<{ id: number }>(
+async function ensureClusterForArticle(articleId: number, title: string) {
+  const key = clusterKey(title)
+  if (!key) return
+
+  const cluster = await query<{ id: number }>(
     `
     insert into clusters (key)
     values ($1)
@@ -124,120 +244,84 @@ async function ensureClusterFor(title: string) {
   `,
     [key]
   )
-  return rows[0].id
-}
+  const clusterId = cluster.rows[0].id
 
-async function linkArticleToCluster(article_id: number, cluster_id: number) {
-  await DB.query(
+  await query(
     `
     insert into article_clusters (article_id, cluster_id)
-    values ($1,$2)
+    values ($1, $2)
     on conflict do nothing
   `,
-    [article_id, cluster_id]
+    [articleId, clusterId]
   )
 }
 
-async function fetchSourcesList(): Promise<FeedSource[]> {
-  // Prefer the repo list; fallback to two known feeds so ingest always works
-  try {
-    // Works if tsconfig has "resolveJsonModule": true
-    const mod: any = await import('@/data/sources.json')
-    const list: FeedSource[] = (mod.default || mod) as any
-    if (Array.isArray(list) && list.length) return list
-  } catch {}
-  return [
-    {
-      name: 'Carbon Brief',
-      feed_url: 'https://www.carbonbrief.org/feed',
-      homepage_url: 'https://www.carbonbrief.org',
-      weight: 1,
-    },
-    {
-      name: 'Grist',
-      feed_url: 'https://grist.org/feed/',
-      homepage_url: 'https://grist.org',
-      weight: 1,
-    },
-  ]
-}
+async function ingestFromFeed(feedUrl: string, sourceId: number, limit = 20) {
+  const parser = new Parser()
+  const feed = await parser.parseURL(feedUrl)
+  const items = (feed.items || []) as RssItem[]
 
-async function ingestSource(s: SourceRow, maxNew: number) {
-  let created = 0
-  let linked = 0
+  let inserted = 0
+  for (const it of items.slice(0, limit)) {
+    const title = (it.title || '').trim()
+    const link = (it.link || '').trim()
+    if (!title || !link) continue
 
-  const feed = await parser.parseURL(s.feed_url)
-  for (const item of feed.items || []) {
-    if (created >= maxNew) break
-
-    const title = (item.title || '').trim()
-    if (!title) continue
-
-    const rawUrl = (item.link || item.guid || '').toString()
-    const canonical = stripUtm(rawUrl)
-
-    const pub = item.isoDate
-      ? new Date(item.isoDate)
-      : item.pubDate
-      ? new Date(item.pubDate)
-      : new Date()
-    const summary =
-      (item.contentSnippet || item.summary || '')
-        .replace(/\s+/g, ' ')
-        .trim()
-        .slice(0, 2000) || null
-
-    const ins = await insertArticle({
-      source_id: s.id,
+    const url = canonical(link)
+    const articleId = await insertArticle(
+      sourceId,
       title,
-      url: rawUrl || null,
-      canonical_url: canonical || null,
-      summary,
-      published_at: pub,
-    })
-
-    if (!ins.id) continue
-    if (ins.created) created++
-
-    const cluster_id = await ensureClusterFor(title)
-    await linkArticleToCluster(ins.id, cluster_id)
-    linked++
+      url,
+      it.isoDate || it.pubDate
+    )
+    if (articleId) {
+      inserted++
+      await ensureClusterForArticle(articleId, title)
+    }
   }
-
-  return { created, linked }
+  return inserted
 }
 
-export async function run(opts?: { limit?: number }) {
-  const t0 = Date.now()
-  await applySchema()
+// -----------------------------
+// Main
+// -----------------------------
+async function run() {
+  const start = Date.now()
+  await ensureSchema()
 
-  const sources = await fetchSourcesList()
-  const rows = await ensureSourceRows(sources)
+  // read sources.json from repo
+  const sourcesPath = path.join(process.cwd(), 'data', 'sources.json')
+  const raw = readFileSync(sourcesPath, 'utf8')
+  const defs = JSON.parse(raw) as SourceDef[]
 
-  // Limit total new items per run (avoid function timeouts). Default ~24.
-  const totalBudget = Math.max(1, Math.min(200, opts?.limit ?? 24))
-  const perSource = Math.max(
-    1,
-    Math.floor(totalBudget / Math.max(1, rows.length))
+  await upsertSources(defs)
+  const idByFeed = await sourceMap()
+
+  const results = await mapLimit(defs, 4, async (s) => {
+    try {
+      const sid = idByFeed[s.feed]?.id
+      if (!sid) return { name: s.name, inserted: 0, error: 'source id missing' }
+      const inserted = await ingestFromFeed(s.feed, sid, 25)
+      return { name: s.name, inserted }
+    } catch (e: any) {
+      return { name: s.name, inserted: 0, error: e?.message || String(e) }
+    }
+  })
+
+  const total = results.reduce((sum, r) => sum + r.inserted, 0)
+  console.log('Ingest results:', results)
+  console.log(
+    `Done. Inserted ${total} articles in ${Math.round(
+      (Date.now() - start) / 1000
+    )}s.`
   )
 
-  let created = 0
-  let linked = 0
-
-  for (const s of rows) {
-    const res = await ingestSource(s, perSource)
-    created += res.created
-    linked += res.linked
-  }
-
-  return {
-    ok: true,
-    sources: rows.length,
-    created,
-    linked,
-    took_ms: Date.now() - t0,
-  }
+  await pool.end()
 }
 
-// Keep default export for compatibility with any older imports
-export default { run }
+if (import.meta.url === `file://${process.argv[1]}`) {
+  run().catch((err) => {
+    console.error(err)
+    process.exit(1)
+  })
+}
