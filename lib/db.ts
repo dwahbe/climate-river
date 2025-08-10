@@ -1,4 +1,5 @@
 // lib/db.ts
+import 'server-only'
 import { Pool } from 'pg'
 
 let _pool: Pool | undefined

@@ -11,6 +11,7 @@ type Row = {
   sources_count: number
 }
 
+export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
 function timeAgo(iso: string) {
