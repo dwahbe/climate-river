@@ -46,6 +46,11 @@
   .content a.source-link {
     @apply no-underline hover:no-underline;
   }
+  .icon-btn {
+    @apply inline-flex items-center justify-center rounded-md p-2
+           text-zinc-600 hover:text-zinc-900 hover:bg-zinc-50
+           focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-300;
+  }
 }
 
 /* Optional tiny reset */
