@@ -7,8 +7,9 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "ingest": "tsx scripts/ingest.ts",
-    "rescore": "tsx scripts/rescore.ts"
+    "ingest": "tsx --env-file=.env.local scripts/ingest.ts",
+    "rescore": "tsx --env-file=.env.local scripts/rescore.ts",
+    "schema": "tsx --env-file=.env.local scripts/schema.ts"
   },
   "dependencies": {
     "dayjs": "^1.11.11",

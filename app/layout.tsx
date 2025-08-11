@@ -60,7 +60,7 @@ export default async function RootLayout({
                 fontWeight: 700,
               }}
             >
-              Climate River
+              Climate Roundup
             </Link>
           </div>
 

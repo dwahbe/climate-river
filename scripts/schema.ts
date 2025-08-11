@@ -1,64 +1,116 @@
 // scripts/schema.ts
-import * as DB from '@/lib/db'
+import { query, endPool } from '@/lib/db'
 
 /**
- * Idempotent schema for the MVP. No filesystem access.
- * The ingest route (or any script) should call `applySchema()` once before use.
+ * Idempotent schema guard.
+ * Safe to run repeatedly in local dev, Vercel preview, or production.
  */
-export const SCHEMA_SQL = `
--- SOURCES
-create table if not exists sources (
-  id            bigserial primary key,
-  name          text        not null,
-  homepage_url  text,
-  feed_url      text unique,
-  weight        real        not null default 1,
-  created_at    timestamptz not null default now()
-);
+export async function run() {
+  // --- sources --------------------------------------------------------------
+  await query(`
+    create table if not exists sources (
+      id            bigserial primary key,
+      name          text not null,
+      homepage_url  text,
+      feed_url      text not null unique,
+      weight        int  not null default 1,
+      slug          text
+    );
+  `)
 
--- ARTICLES
-create table if not exists articles (
-  id            bigserial primary key,
-  source_id     bigint      not null references sources(id) on delete cascade,
-  title         text        not null,
-  canonical_url text,
-  url           text,
-  summary       text,
-  hash          text        not null unique,     -- used for de-duping
-  published_at  timestamptz not null default now(),
-  created_at    timestamptz not null default now()
-);
-create index if not exists idx_articles_pub         on articles(published_at desc);
-create index if not exists idx_articles_source_pub  on articles(source_id, published_at desc);
+  // ensure slug exists & is populated
+  await query(
+    `alter table if exists sources add column if not exists slug text;`
+  )
+  await query(`
+    update sources
+       set slug = regexp_replace(
+         lower(coalesce(name, homepage_url, feed_url)),
+         '[^a-z0-9]+', '-', 'g'
+       )
+     where slug is null;
+  `)
+  await query(`create index if not exists idx_sources_slug on sources(slug);`)
 
--- CLUSTERS
-create table if not exists clusters (
-  id         bigserial primary key,
-  key        text        not null unique,        -- stable cluster key from tagger
-  created_at timestamptz not null default now()
-);
+  // --- articles -------------------------------------------------------------
+  await query(`
+    create table if not exists articles (
+      id            bigserial primary key,
+      source_id     bigint references sources(id) on delete cascade,
+      title         text not null,
+      canonical_url text not null unique,
+      published_at  timestamptz,
+      fetched_at    timestamptz not null default now(),
+      dek           text
+    );
+  `)
 
--- ARTICLE ↔ CLUSTER
-create table if not exists article_clusters (
-  article_id bigint not null references articles(id) on delete cascade,
-  cluster_id bigint not null references clusters(id) on delete cascade,
-  primary key (article_id, cluster_id)
-);
-create index if not exists idx_ac_cluster on article_clusters(cluster_id);
-create index if not exists idx_ac_article on article_clusters(article_id);
+  // add columns that may not exist yet
+  await query(
+    `alter table if exists articles add column if not exists dek text;`
+  )
+  await query(`
+    create index if not exists idx_articles_published_at
+      on articles(published_at desc);
+  `)
 
--- SCORES (no sources_count column; we compute it at read time)
-create table if not exists cluster_scores (
-  cluster_id      bigint primary key references clusters(id) on delete cascade,
-  lead_article_id bigint references articles(id) on delete set null,
-  size            int    not null default 0,
-  score           double precision not null default 0,
-  computed_at     timestamptz not null default now(),
-  score_notes     text
-);
-`
+  // --- clusters -------------------------------------------------------------
+  await query(`
+    create table if not exists clusters (
+      id         bigserial primary key,
+      key        text unique,
+      created_at timestamptz not null default now()
+    );
+  `)
+  // keep a unique index on (key)
+  await query(
+    `create unique index if not exists idx_clusters_key on clusters(key);`
+  )
 
-/** Call this once at startup (e.g., in ingest) to ensure the schema exists. */
-export async function applySchema() {
-  await DB.query(SCHEMA_SQL)
+  // --- article_clusters (link) ---------------------------------------------
+  await query(`
+    create table if not exists article_clusters (
+      article_id bigint references articles(id) on delete cascade,
+      cluster_id bigint references clusters(id) on delete cascade,
+      primary key (article_id, cluster_id)
+    );
+  `)
+
+  // --- cluster_scores (for ranking/lead selection) -------------------------
+  // Kept minimal: your rescore job can fill/refresh these rows.
+  await query(`
+    create table if not exists cluster_scores (
+      cluster_id      bigint primary key references clusters(id) on delete cascade,
+      lead_article_id bigint not null references articles(id) on delete cascade,
+      size            int    not null default 1,
+      score           double precision not null default 0,
+      updated_at      timestamptz not null default now()
+    );
+  `)
+  await query(`
+    create index if not exists idx_cluster_scores_score
+      on cluster_scores(score desc, updated_at desc);
+  `)
+
+  // (Optional) helpful FK indexes (no-ops if they already exist)
+  await query(
+    `create index if not exists idx_articles_source_id on articles(source_id);`
+  )
+  await query(
+    `create index if not exists idx_article_clusters_cluster_id on article_clusters(cluster_id);`
+  )
+  await query(
+    `create index if not exists idx_article_clusters_article_id on article_clusters(article_id);`
+  )
+
+  console.log('Schema ensured ✅')
+}
+
+if (import.meta.url === `file://${process.argv[1]}`) {
+  run()
+    .then(() => endPool())
+    .catch((err) => {
+      console.error(err)
+      endPool().finally(() => process.exit(1))
+    })
 }

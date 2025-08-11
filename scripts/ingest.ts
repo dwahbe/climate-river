@@ -6,19 +6,20 @@ import sources from '@/data/sources.json'
 
 // ---------- Types ----------
 type SourceRaw = {
+  slug?: string
   name: string
   rss?: string
   feed?: string
   homepage?: string
   weight?: number
-  slug?: string
 }
 
 type SourceDef = {
   name: string
   homepage: string
   feed: string
-  weight?: number
+  weight: number
+  slug: string
 }
 
 type RssItem = {
@@ -26,11 +27,16 @@ type RssItem = {
   link?: string
   isoDate?: string
   pubDate?: string
+  contentSnippet?: string
+  description?: string
+  summary?: string
+  content?: string
+  contentEncoded?: string // via customFields mapping for content:encoded
 }
 
-// ---------- Helpers ----------
+// ---------- Small helpers ----------
 function slugify(input: string) {
-  return input
+  return (input || '')
     .toLowerCase()
     .normalize('NFKD')
     .replace(/[\u0300-\u036f]/g, '')
@@ -39,14 +45,13 @@ function slugify(input: string) {
     .slice(0, 64)
 }
 
-/** tiny stable hash for short suffixes */
 function shortHash(s: string) {
   let h = 5381
   for (let i = 0; i < s.length; i++) h = ((h << 5) + h) ^ s.charCodeAt(i)
-  return (h >>> 0).toString(36) // unsigned -> base36
+  return (h >>> 0).toString(36)
 }
 
-/** remove common tracking params and normalize */
+/** remove tracking params and normalize */
 function canonical(url: string) {
   try {
     const u = new URL(url)
@@ -60,15 +65,15 @@ function canonical(url: string) {
   }
 }
 
-/** tiny clustering key derived from the title (no external deps) */
+/** quick title-derived key for clustering */
 function clusterKey(title: string) {
-  const t = title
+  const t = (title || '')
     .toLowerCase()
     .normalize('NFKD')
     .replace(/[\u0300-\u036f]/g, '')
     .replace(/[^a-z0-9\s]/g, ' ')
   const words = t.split(/\s+/).filter(Boolean)
-  const SKIP = new Set([
+  const STOP = new Set([
     'the',
     'a',
     'an',
@@ -91,10 +96,38 @@ function clusterKey(title: string) {
     'be',
     'as',
   ])
-  const kept = words.filter((w) => !SKIP.has(w) && w.length >= 3)
+  const kept = words.filter((w) => !STOP.has(w) && w.length >= 3)
   return kept.slice(0, 8).join('-')
 }
 
+function stripHtml(s: string) {
+  return s
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+function pick(...vals: Array<string | undefined | null>) {
+  for (const v of vals) if (v && v.trim()) return v
+  return ''
+}
+function toOneLiner(raw: string, max = 200) {
+  const txt = stripHtml(raw)
+  const m = txt.match(/(.{40,}?[\.!\?])\s/) // first sentence-ish if long enough
+  const cut = m?.[1] ?? txt
+  return cut.length > max ? cut.slice(0, max - 1).trimEnd() + '…' : cut
+}
+function makeDek(it: RssItem) {
+  const raw = pick(
+    it.contentSnippet,
+    it.description,
+    it.summary,
+    it.content,
+    it.contentEncoded
+  )
+  return raw ? toOneLiner(raw) : ''
+}
+
+/** bounded concurrency map */
 async function mapLimit<T, R>(
   items: T[],
   limit: number,
@@ -122,13 +155,12 @@ async function mapLimit<T, R>(
   })
 }
 
-/** Convert whatever the JSON has into our canonical SourceDef shape */
+// ---------- Normalize sources.json ----------
 function normalizeSource(s: SourceRaw): SourceDef | null {
   const feed = s.feed ?? s.rss ?? ''
   if (!feed) return null
-
   const homepage =
-    s.homepage ??
+    s.homepage ||
     (() => {
       try {
         return new URL(feed).origin
@@ -136,16 +168,19 @@ function normalizeSource(s: SourceRaw): SourceDef | null {
         return ''
       }
     })()
-
+  const slug =
+    (s.slug && slugify(s.slug)) ||
+    `${slugify(s.name || homepage)}-${shortHash(feed)}`
   return {
     name: s.name,
     homepage,
     feed,
-    weight: s.weight,
+    weight: s.weight ?? 1,
+    slug,
   }
 }
 
-// ---------- Minimal, idempotent schema guard ----------
+// ---------- Idempotent schema guard ----------
 async function ensureSchema() {
   // sources
   await query(`
@@ -154,11 +189,10 @@ async function ensureSchema() {
       name          text not null,
       homepage_url  text,
       feed_url      text not null unique,
-      weight        int not null default 1,
+      weight        int  not null default 1,
       slug          text
     );
   `)
-
   await query(
     `alter table if exists sources add column if not exists slug text;`
   )
@@ -166,15 +200,13 @@ async function ensureSchema() {
     update sources
        set slug = regexp_replace(
          lower(coalesce(name, homepage_url, feed_url)),
-         '[^a-z0-9]+', '-', 'g'
+         '[^a-z0-9]+','-','g'
        )
      where slug is null;
   `)
-  await query(`alter table if exists sources alter column slug set not null;`)
   await query(`create index if not exists idx_sources_slug on sources(slug);`)
-  // NOTE: no unique constraint here to avoid collisions from historical data
 
-  // articles
+  // articles (with dek)
   await query(`
     create table if not exists articles (
       id            bigserial primary key,
@@ -182,14 +214,19 @@ async function ensureSchema() {
       title         text not null,
       canonical_url text not null unique,
       published_at  timestamptz,
-      fetched_at    timestamptz not null default now()
+      fetched_at    timestamptz not null default now(),
+      dek           text
     );
   `)
   await query(
-    `create index if not exists idx_articles_published_at on articles(published_at desc);`
+    `alter table if exists articles add column if not exists dek text;`
   )
+  await query(`
+    create index if not exists idx_articles_published_at
+      on articles(published_at desc);
+  `)
 
-  // clusters
+  // clusters + link
   await query(`
     create table if not exists clusters (
       id         bigserial primary key,
@@ -197,8 +234,10 @@ async function ensureSchema() {
       created_at timestamptz not null default now()
     );
   `)
+  await query(
+    `create unique index if not exists idx_clusters_key on clusters(key);`
+  )
 
-  // linking table
   await query(`
     create table if not exists article_clusters (
       article_id bigint references articles(id) on delete cascade,
@@ -208,41 +247,17 @@ async function ensureSchema() {
   `)
 }
 
-// ---------- Ingest helpers ----------
+// ---------- DB helpers ----------
 async function upsertSources(defs: SourceDef[]) {
   if (!defs.length) return
-
-  const rows = defs.map((s) => {
-    const host =
-      (() => {
-        try {
-          return new URL(s.homepage || s.feed).hostname
-        } catch {
-          return s.feed
-        }
-      })() || s.name
-
-    // unique-ish: name-or-host + short hash of feed URL
-    const slug = `${slugify(s.name || host)}-${shortHash(s.feed)}`
-
-    return {
-      name: s.name,
-      homepage_url: s.homepage,
-      feed_url: s.feed,
-      weight: s.weight ?? 1,
-      slug,
-    }
-  })
-
   const params: any[] = []
-  const valuesSql = rows
+  const valuesSql = defs
     .map((r, i) => {
       const o = i * 5
-      params.push(r.name, r.homepage_url, r.feed_url, r.weight, r.slug)
+      params.push(r.name, r.homepage, r.feed, r.weight, r.slug)
       return `($${o + 1}, $${o + 2}, $${o + 3}, $${o + 4}, $${o + 5})`
     })
     .join(', ')
-
   await query(
     `
       insert into sources (name, homepage_url, feed_url, weight, slug)
@@ -270,16 +285,24 @@ async function insertArticle(
   sourceId: number,
   title: string,
   url: string,
-  publishedAt?: string
+  publishedAt?: string,
+  dek?: string
 ) {
   const row = await query<{ id: number }>(
     `
-    insert into articles (source_id, title, canonical_url, published_at)
-    values ($1, $2, $3, $4)
-    on conflict (canonical_url) do nothing
+    insert into articles (source_id, title, canonical_url, published_at, dek)
+    values ($1, $2, $3, $4, $5)
+    on conflict (canonical_url) do update
+      set dek = coalesce(articles.dek, excluded.dek)
     returning id
   `,
-    [sourceId, title, url, publishedAt ? dayjs(publishedAt).toDate() : null]
+    [
+      sourceId,
+      title,
+      url,
+      publishedAt ? dayjs(publishedAt).toDate() : null,
+      dek || null,
+    ]
   )
   return row.rows[0]?.id
 }
@@ -287,7 +310,6 @@ async function insertArticle(
 async function ensureClusterForArticle(articleId: number, title: string) {
   const key = clusterKey(title)
   if (!key) return
-
   const cluster = await query<{ id: number }>(
     `
     insert into clusters (key)
@@ -298,7 +320,6 @@ async function ensureClusterForArticle(articleId: number, title: string) {
     [key]
   )
   const clusterId = cluster.rows[0].id
-
   await query(
     `
     insert into article_clusters (article_id, cluster_id)
@@ -309,13 +330,17 @@ async function ensureClusterForArticle(articleId: number, title: string) {
   )
 }
 
+// ---------- Ingest ----------
 async function ingestFromFeed(feedUrl: string, sourceId: number, limit = 20) {
-  const parser = new Parser({
+  const parser = new Parser<RssItem>({
     headers: {
       'User-Agent':
         'ClimateRiverBot/0.1 (+https://climate-news-gules.vercel.app)',
     },
     requestOptions: { timeout: 15000 },
+    customFields: {
+      item: [['content:encoded', 'contentEncoded']],
+    },
   })
 
   let feed
@@ -323,34 +348,38 @@ async function ingestFromFeed(feedUrl: string, sourceId: number, limit = 20) {
     feed = await parser.parseURL(feedUrl)
   } catch (e: any) {
     console.warn(`Feed error for ${feedUrl}: ${e?.message || e}`)
-    return 0
+    return { scanned: 0, inserted: 0 }
   }
 
   const items = (feed.items || []) as RssItem[]
-  let inserted = 0
+  const slice = items.slice(0, limit)
 
-  for (const it of items.slice(0, limit)) {
+  let inserted = 0
+  for (const it of slice) {
     const title = (it.title || '').trim()
     const link = (it.link || '').trim()
     if (!title || !link) continue
 
     const url = canonical(link)
+    const dek = makeDek(it)
     const articleId = await insertArticle(
       sourceId,
       title,
       url,
-      it.isoDate || it.pubDate
+      it.isoDate || it.pubDate,
+      dek
     )
     if (articleId) {
       inserted++
       await ensureClusterForArticle(articleId, title)
     }
   }
-  return inserted
+
+  return { scanned: slice.length, inserted }
 }
 
 // ---------- Main (exported) ----------
-export async function run(opts: { closePool?: boolean } = {}) {
+export async function run(opts: { limit?: number; closePool?: boolean } = {}) {
   const start = Date.now()
   await ensureSchema()
 
@@ -361,23 +390,37 @@ export async function run(opts: { closePool?: boolean } = {}) {
   await upsertSources(defs)
   const idByFeed = await sourceMap()
 
+  const perFeedLimit = opts.limit ?? 25
   const results = await mapLimit(defs, 4, async (s) => {
     try {
       const sid = idByFeed[s.feed]?.id
-      if (!sid) return { name: s.name, inserted: 0, error: 'source id missing' }
-      const inserted = await ingestFromFeed(s.feed, sid, 25)
-      return { name: s.name, inserted }
+      if (!sid)
+        return {
+          name: s.name,
+          scanned: 0,
+          inserted: 0,
+          error: 'source id missing',
+        }
+      const { scanned, inserted } = await ingestFromFeed(
+        s.feed,
+        sid,
+        perFeedLimit
+      )
+      return { name: s.name, scanned, inserted }
     } catch (e: any) {
-      return { name: s.name, inserted: 0, error: e?.message || String(e) }
+      return {
+        name: s.name,
+        scanned: 0,
+        inserted: 0,
+        error: e?.message || String(e),
+      }
     }
   })
 
-  const total = results.reduce((sum, r) => sum + r.inserted, 0)
+  const total = results.reduce((sum, r: any) => sum + (r.inserted || 0), 0)
   console.log('Ingest results:', results)
   console.log(
-    `Done. Inserted ${total} articles in ${Math.round(
-      (Date.now() - start) / 1000
-    )}s.`
+    `Done. Inserted ${total} in ${Math.round((Date.now() - start) / 1000)}s.`
   )
 
   if (opts.closePool) await endPool()
@@ -388,6 +431,6 @@ export async function run(opts: { closePool?: boolean } = {}) {
 if (import.meta.url === `file://${process.argv[1]}`) {
   run({ closePool: true }).catch((err) => {
     console.error(err)
-    process.exit(1)
+    endPool().finally(() => process.exit(1))
   })
 }
