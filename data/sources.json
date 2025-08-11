@@ -1,5 +1,45 @@
 [
   {
+    "slug": "bbc-science-environment",
+    "name": "BBC — Science & Environment",
+    "rss": "https://feeds.bbci.co.uk/news/science_and_environment/rss.xml"
+  },
+  {
+    "slug": "guardian-climate-crisis",
+    "name": "The Guardian — Climate crisis",
+    "rss": "https://www.theguardian.com/environment/climate-crisis/rss"
+  },
+  {
+    "slug": "inside-climate-news",
+    "name": "Inside Climate News",
+    "rss": "https://insideclimatenews.org/feed/"
+  },
+  {
+    "slug": "yale-climate-connections",
+    "name": "Yale Climate Connections",
+    "rss": "https://yaleclimateconnections.org/feed/"
+  },
+  {
+    "slug": "cleantechnica",
+    "name": "CleanTechnica",
+    "rss": "https://cleantechnica.com/feed/"
+  },
+  {
+    "slug": "climate-home-news",
+    "name": "Climate Home News",
+    "rss": "https://www.climatechangenews.com/feed/"
+  },
+  {
+    "slug": "nasa-climate-news",
+    "name": "NASA Climate — News",
+    "rss": "https://climate.nasa.gov/news/rss.xml"
+  },
+  {
+    "slug": "sciencedaily-climate",
+    "name": "ScienceDaily — Climate",
+    "rss": "https://www.sciencedaily.com/rss/earth_climate.xml"
+  },
+  {
     "slug": "carbon-brief",
     "name": "Carbon Brief",
     "rss": "https://www.carbonbrief.org/feed/"
