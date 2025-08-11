@@ -1,49 +1,54 @@
+// app/api/rescore/route.ts
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
 import { NextResponse } from 'next/server'
-import * as DB from '@/lib/db'
+import { headers } from 'next/headers'
 
-export async function GET() {
-  // Recompute a simple score = size + freshness factor
-  await DB.query(`
-    insert into cluster_scores (
-      cluster_id,
-      lead_article_id,
-      size,
-      score,
-      computed_at,
-      score_notes
-    )
-    select
-      c.id as cluster_id,
-      (
-        select a2.id
-        from articles a2
-        join article_clusters ac2 on ac2.article_id = a2.id
-        where ac2.cluster_id = c.id
-        order by a2.published_at desc
-        limit 1
-      ) as lead_article_id,
-      count(ac.article_id) as size,
-      (
-        -- size weight + freshness (newer is better)
-        (count(ac.article_id)) * 0.6
-        + (extract(epoch from (now() - max(a.published_at))) / -3600.0) * 0.4
-      ) as score,
-      now() as computed_at,
-      'freshness + size' as score_notes
-    from clusters c
-    join article_clusters ac on ac.cluster_id = c.id
-    join articles a on a.id = ac.article_id
-    group by c.id
-    on conflict (cluster_id) do update
-      set size = excluded.size,
-          score = excluded.score,
-          lead_article_id = excluded.lead_article_id,
-          computed_at = excluded.computed_at,
-          score_notes = excluded.score_notes
-  `)
+/** Same auth policy as /api/ingest */
+function authorized(req: Request) {
+  const h = headers()
+  const url = new URL(req.url)
 
-  return NextResponse.json({ ok: true })
+  const isCron =
+    h.get('x-vercel-cron') === '1' ||
+    /vercel-cron/i.test(h.get('user-agent') || '') ||
+    url.searchParams.get('cron') === '1'
+
+  const qToken = url.searchParams.get('token')?.trim()
+  const bearer = (h.get('authorization') || '')
+    .replace(/^Bearer\s+/i, '')
+    .trim()
+  const expected = (process.env.ADMIN_TOKEN || '').trim()
+
+  return isCron || (!!expected && (qToken === expected || bearer === expected))
 }
+
+async function runRescore() {
+  const mod: any = await import('@/scripts/rescore')
+  if (typeof mod.run === 'function') return mod.run({})
+  if (typeof mod.default === 'function') return mod.default({})
+  throw new Error('scripts/rescore.ts must export run()')
+}
+
+export async function GET(req: Request) {
+  if (!authorized(req)) {
+    return NextResponse.json(
+      { ok: false, error: 'unauthorized' },
+      { status: 401 }
+    )
+  }
+
+  const t0 = Date.now()
+  try {
+    const result = await runRescore()
+    return NextResponse.json({ ok: true, took_ms: Date.now() - t0, result })
+  } catch (e: any) {
+    return NextResponse.json(
+      { ok: false, error: e?.message || String(e) },
+      { status: 500 }
+    )
+  }
+}
+
+export const POST = GET
