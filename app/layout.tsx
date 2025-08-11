@@ -2,6 +2,7 @@
 import './global.css'
 import Link from 'next/link'
 import * as DB from '@/lib/db'
+import { Analytics } from '@vercel/analytics/next'
 
 export const metadata = { title: 'Climate River' }
 export const dynamic = 'force-dynamic'
@@ -76,6 +77,7 @@ export default async function RootLayout({
         </main>
 
         <div className="pb-[env(safe-area-inset-bottom)]" />
+        <Analytics />
       </body>
     </html>
   )
