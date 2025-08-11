@@ -1,5 +1,6 @@
-import * as DB from '@/lib/db'
+// app/river/page.tsx
 import Link from 'next/link'
+import * as DB from '@/lib/db'
 
 type Row = {
   cluster_id: number
@@ -11,35 +12,23 @@ type Row = {
   sources_count: number
 }
 
-export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
-function timeAgo(iso: string) {
-  const t = new Date(iso).getTime()
-  const mins = Math.max(1, Math.round((Date.now() - t) / 60000))
-  if (mins < 60) return `${mins}m`
-  const hrs = Math.round(mins / 60)
-  if (hrs < 48) return `${hrs}h`
-  const d = Math.round(hrs / 24)
-  return `${d}d`
-}
-function host(u: string) {
-  try {
-    return new URL(u).hostname.replace(/^www\./, '')
-  } catch {
-    return ''
-  }
-}
-
 export default async function RiverPage() {
+  // Main river rows
   const { rows } = await DB.query<Row>(`
     with lead as (
-      select cs.cluster_id, cs.size, cs.score,
-             a.title as lead_title, a.canonical_url as lead_url, a.published_at
+      select
+        cs.cluster_id,
+        cs.size,
+        cs.score,
+        a.title         as lead_title,
+        a.canonical_url as lead_url,
+        a.published_at
       from cluster_scores cs
       join articles a on a.id = cs.lead_article_id
       order by cs.score desc
-      limit 120
+      limit 80
     ),
     srcs as (
       select ac.cluster_id, count(distinct s.id) as sources_count
@@ -49,34 +38,74 @@ export default async function RiverPage() {
       group by ac.cluster_id
     )
     select l.*, coalesce(s.sources_count, 1) as sources_count
-    from lead l left join srcs s on s.cluster_id = l.cluster_id
+    from lead l
+    left join srcs s on s.cluster_id = l.cluster_id
   `)
 
+  // Latest ingest time (fallback to now if empty)
+  const latest = await DB.query<{ ts: string }>(`
+    select coalesce(max(fetched_at), now()) as ts
+    from articles
+  `)
+  const lastTs = latest.rows[0]?.ts ?? new Date().toISOString()
+
+  // Format in Mexico City time (matches your working timezone)
+  const lastFormatted = new Intl.DateTimeFormat('en-US', {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+    timeZone: 'America/Mexico_City',
+  }).format(new Date(lastTs))
+
   return (
-    <div className="container river">
-      <p className="note">
-        A quiet stream of climate stories. Sorted by momentum.
-      </p>
-      {rows.map((r) => (
-        <article key={r.cluster_id} className="entry">
-          <h3 className="title">
-            <a href={r.lead_url} target="_blank" rel="noreferrer">
-              {r.lead_title}
-            </a>
-          </h3>
-          <div className="score">{Math.round(r.score)}</div>
-          <div className="meta">
-            <span>{host(r.lead_url)}</span>
-            <span className="dot" />
-            <span>{timeAgo(r.published_at)}</span>
-            <span className="dot" />
-            <span className="badge">{r.size} articles</span>
-            <span className="badge">{r.sources_count} sources</span>
-            <span style={{ flex: 1 }} />
-            <Link href={`/river/${r.cluster_id}`}>Open cluster →</Link>
-          </div>
-        </article>
-      ))}
-    </div>
+    <main style={{ padding: '24px 24px 56px', maxWidth: 880 }}>
+      <section style={{ display: 'grid', gap: 14 }}>
+        {rows.map((r) => (
+          <article
+            key={r.cluster_id}
+            style={{ padding: '14px 0', borderBottom: '1px solid #f1f5f9' }}
+          >
+            <h3
+              style={{
+                fontSize: 16,
+                fontWeight: 600,
+                lineHeight: 1.35,
+                marginBottom: 6,
+              }}
+            >
+              <a
+                href={r.lead_url}
+                target="_blank"
+                rel="noreferrer"
+                style={{ textDecoration: 'none', color: '#0f172a' }}
+              >
+                {r.lead_title}
+              </a>
+            </h3>
+            <div
+              style={{
+                display: 'flex',
+                gap: 8,
+                alignItems: 'center',
+                color: '#6b7280',
+                fontSize: 12,
+              }}
+            >
+              <span>{new Date(r.published_at).toLocaleString()}</span>
+              <span>•</span>
+              <span>{r.size} stories</span>
+              <span>•</span>
+              <span>{r.sources_count} sources</span>
+              <span style={{ flex: 1 }} />
+              <Link
+                href={`/river/${r.cluster_id}`}
+                style={{ color: '#334155' }}
+              >
+                Open cluster →
+              </Link>
+            </div>
+          </article>
+        ))}
+      </section>
+    </main>
   )
 }
