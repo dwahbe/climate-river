@@ -1,7 +1,6 @@
 {
-  "framework": "nextjs",
   "crons": [
-    { "path": "/api/ingest?limit=25", "schedule": "*/20 * * * *" },
+    { "path": "/api/ingest", "schedule": "*/20 * * * *" },
     { "path": "/api/rescore", "schedule": "*/30 * * * *" }
   ]
 }

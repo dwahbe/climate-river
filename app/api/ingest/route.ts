@@ -1,19 +1,22 @@
+// app/api/ingest/route.ts
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
 import { NextResponse } from 'next/server'
 import { headers } from 'next/headers'
 
-function authorized(req: Request) {
+const DEFAULT_CRON_LIMIT = 25
+
+function authorized() {
   const h = headers()
   const isCron = h.get('x-vercel-cron') === '1'
-  const url = new URL(req.url)
-  const qToken = url.searchParams.get('token')?.trim()
-  const bearer = (h.get('authorization') || '')
-    .replace(/^Bearer\s+/i, '')
-    .trim()
   const expected = (process.env.ADMIN_TOKEN || '').trim()
-  return isCron || (!!expected && (qToken === expected || bearer === expected))
+
+  const auth = h.get('authorization') || ''
+  const bearer = auth.replace(/^Bearer\s+/i, '').trim()
+
+  // If not a cron call, allow requests that present the admin token
+  return isCron || (!!expected && bearer === expected)
 }
 
 async function runIngest(limit?: number) {
@@ -24,21 +27,22 @@ async function runIngest(limit?: number) {
 }
 
 export async function GET(req: Request) {
-  const h = headers()
-  if (!authorized(req)) {
+  if (!authorized()) {
     return NextResponse.json(
       { ok: false, error: 'unauthorized' },
       { status: 401 }
     )
   }
+
+  const h = headers()
+  const isCron = h.get('x-vercel-cron') === '1'
+
   const url = new URL(req.url)
   const q = url.searchParams.get('limit')
-  // If triggered by cron and no explicit limit, cap the batch size
-  const isCron = h.get('x-vercel-cron') === '1'
   const limit = q
     ? Math.max(1, Math.min(50, Number(q)))
     : isCron
-    ? 25
+    ? DEFAULT_CRON_LIMIT
     : undefined
 
   const t0 = Date.now()
