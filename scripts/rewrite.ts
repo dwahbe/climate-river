@@ -41,7 +41,7 @@ function sanitizeHeadline(s: string) {
     .replace(/^[“"'\s]+|[”"'\s]+$/g, '') // strip quotes
     .replace(/\s+/g, ' ') // collapse spaces
     .trim()
-  // Avoid trailing punctuation that often creeps in
+  // Avoid trailing punctuation
   t = t.replace(/[|•–—\-]+$/g, '').trim()
   return t
 }
@@ -58,12 +58,6 @@ function passesChecks(original: string, draft: string) {
       .trim()
   if (!norm(t) || norm(t) === norm(original)) return false
   return true
-}
-
-/** Fallback without an API key: use dek or trimmed original */
-function fallbackRewrite(title: string, dek?: string | null) {
-  const src = sanitizeHeadline((dek || title).slice(0, MAX_CHARS + 10))
-  return src.length > MAX_CHARS ? src.slice(0, MAX_CHARS - 1) + '…' : src
 }
 
 /* --------------------------- OpenAI integration --------------------------- */
@@ -169,7 +163,6 @@ async function mapLimit<T, R>(
 }
 
 async function fetchBatch(limit = 40) {
-  // Keep simple (no SKIP LOCKED transaction); safe for single cron
   const { rows } = await query<Row>(
     `
     select a.id, a.title, a.dek, a.canonical_url
@@ -185,13 +178,11 @@ async function fetchBatch(limit = 40) {
 }
 
 async function processOne(r: Row) {
-  const tryLLM = await generateWithOpenAI(r.title, r.dek)
-  let final = tryLLM.text || ''
-  if (!passesChecks(r.title, final)) {
-    final = fallbackRewrite(r.title, r.dek)
-  }
+  // Try LLM
+  const llm = await generateWithOpenAI(r.title, r.dek)
+  const draft = llm.text || ''
 
-  if (passesChecks(r.title, final)) {
+  if (passesChecks(r.title, draft)) {
     await query(
       `update articles
          set rewritten_title = $1,
@@ -199,19 +190,22 @@ async function processOne(r: Row) {
              rewrite_model  = $2,
              rewrite_notes  = $3
        where id = $4`,
-      [final, tryLLM.model || 'fallback', tryLLM.notes || 'fallback', r.id]
+      [draft, llm.model || 'unknown', llm.notes || 'ok', r.id]
     )
     return { ok: 1, failed: 0 }
-  } else {
-    await query(
-      `update articles
-         set rewrite_model = $1,
-             rewrite_notes = $2
-       where id = $3`,
-      [tryLLM.model || 'none', tryLLM.notes || 'invalid_draft', r.id]
-    )
-    return { ok: 0, failed: 1 }
   }
+
+  // No valid rewrite -> **default to original title**
+  // We intentionally do NOT set rewritten_title here,
+  // so UI uses COALESCE(rewritten_title, title) = original title.
+  await query(
+    `update articles
+       set rewrite_model = $1,
+           rewrite_notes = $2
+     where id = $3`,
+    [llm.model || 'none', llm.notes || 'no_valid_rewrite', r.id]
+  )
+  return { ok: 0, failed: 1 }
 }
 
 async function batch(limit = 40, concurrency = 4) {
