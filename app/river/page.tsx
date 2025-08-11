@@ -10,7 +10,7 @@ type Row = {
   lead_dek: string | null
   lead_source: string | null
   lead_homepage: string | null
-  published_at: string
+  published_at: string | null
   size: number
   score: number
   sources_count: number
@@ -35,13 +35,13 @@ export default async function RiverPage() {
         cs.cluster_id,
         cs.size,
         cs.score,
-        a.id             as lead_article_id,
-        a.title          as lead_title,
-        a.canonical_url  as lead_url,
-        a.dek            as lead_dek,
+        a.id                                   as lead_article_id,
+        coalesce(a.rewritten_title, a.title)   as lead_title,
+        a.canonical_url                        as lead_url,
+        a.dek                                  as lead_dek,
         a.published_at,
-        s.name           as lead_source,
-        s.homepage_url   as lead_homepage
+        s.name                                 as lead_source,
+        s.homepage_url                         as lead_homepage
       from cluster_scores cs
       join articles a on a.id = cs.lead_article_id
       left join sources s on s.id = a.source_id
@@ -102,8 +102,10 @@ export default async function RiverPage() {
         const shown = secondaries.length
         const moreCount = Math.max(0, r.subs_total - shown)
         const isCluster = r.size > 1
-
         const publisher = r.lead_source || hostFrom(r.lead_url)
+        const ts = r.published_at
+          ? new Date(r.published_at).toLocaleString()
+          : '—'
 
         return (
           <article key={r.cluster_id} className="py-3 border-b border-zinc-300">
@@ -124,6 +126,7 @@ export default async function RiverPage() {
                 )}
               </div>
             )}
+
             {/* Headline */}
             <h3 className="text-[18px] sm:text-[19px] md:text-[20px] font-semibold leading-snug tracking-tight">
               <a
@@ -135,6 +138,7 @@ export default async function RiverPage() {
                 {r.lead_title}
               </a>
             </h3>
+
             {/* Dek */}
             {r.lead_dek && (
               <p className="mt-1 text-sm sm:text-[0.95rem] text-zinc-600">
@@ -144,7 +148,7 @@ export default async function RiverPage() {
 
             {/* Meta */}
             <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] sm:text-xs text-zinc-500">
-              <span>{new Date(r.published_at).toLocaleString()}</span>
+              <span>{ts}</span>
 
               {isCluster && (
                 <>
@@ -157,7 +161,7 @@ export default async function RiverPage() {
                     {r.sources_count}{' '}
                     {r.sources_count === 1 ? 'source' : 'sources'}
                   </span>
-                  <span className="ms-auto" />
+                  <span className="ml-auto" />
                   <Link
                     href={`/river/${r.cluster_id}`}
                     className="text-zinc-600 hover:text-zinc-800"

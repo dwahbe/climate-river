@@ -10,7 +10,8 @@
     "ingest": "tsx --env-file=.env.local scripts/ingest.ts",
     "rescore": "tsx --env-file=.env.local scripts/rescore.ts",
     "schema": "tsx --env-file=.env.local scripts/schema.ts",
-    "format": "prettier --write ."
+    "format": "prettier --write .",
+    "rewrite": "tsx --env-file=.env.local scripts/rewrite.ts"
   },
   "dependencies": {
     "@vercel/analytics": "^1.5.0",
