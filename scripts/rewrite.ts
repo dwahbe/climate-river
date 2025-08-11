@@ -14,7 +14,6 @@ const OPENAI_URL =
   '/chat/completions'
 
 function getModel() {
-  // Default to GPT-5 Nano per your plan; overridable via env
   return (process.env.REWRITE_MODEL || 'gpt-5-nano').trim()
 }
 
@@ -38,10 +37,9 @@ function buildPrompt(input: { title: string; dek?: string | null }) {
 
 function sanitizeHeadline(s: string) {
   let t = (s || '')
-    .replace(/^[“"'\s]+|[”"'\s]+$/g, '') // strip quotes
-    .replace(/\s+/g, ' ') // collapse spaces
+    .replace(/^[“"'\s]+|[”"'\s]+$/g, '')
+    .replace(/\s+/g, ' ')
     .trim()
-  // Avoid trailing punctuation
   t = t.replace(/[|•–—\-]+$/g, '').trim()
   return t
 }
@@ -50,7 +48,6 @@ function passesChecks(original: string, draft: string) {
   if (!draft) return false
   const t = sanitizeHeadline(draft)
   if (t.length < 10 || t.length > Math.min(MAX_CHARS + 5, 140)) return false
-  // crude sameness check
   const norm = (s: string) =>
     s
       .toLowerCase()
@@ -98,7 +95,6 @@ async function generateWithOpenAI(
 
       if (!res.ok) {
         const errText = await res.text().catch(() => '')
-        // retry on 429/5xx
         if (res.status === 429 || (res.status >= 500 && res.status <= 599)) {
           throw new Error(`retryable:${res.status}:${errText.slice(0, 120)}`)
         }
@@ -116,7 +112,6 @@ async function generateWithOpenAI(
       return { text, model: getModel(), notes: 'ok' }
     } catch (e: any) {
       if (attempt < retries) {
-        // basic backoff with jitter
         await sleep(400 * (attempt + 1) + Math.random() * 250)
         continue
       }
@@ -162,26 +157,24 @@ async function mapLimit<T, R>(
   })
 }
 
-async function fetchBatch(limit = 40) {
+async function fetchBatch(limit = 40, force = false) {
   const { rows } = await query<Row>(
     `
     select a.id, a.title, a.dek, a.canonical_url
     from articles a
-    where a.rewritten_title is null
-      and coalesce(a.published_at, now()) > now() - interval '21 days'
+    where coalesce(a.published_at, now()) > now() - interval '21 days'
+      and ($2::bool OR a.rewritten_title is null)
     order by a.fetched_at desc
     limit $1
   `,
-    [limit]
+    [limit, !!force]
   )
   return rows
 }
 
 async function processOne(r: Row) {
-  // Try LLM
   const llm = await generateWithOpenAI(r.title, r.dek)
   const draft = llm.text || ''
-
   if (passesChecks(r.title, draft)) {
     await query(
       `update articles
@@ -195,9 +188,6 @@ async function processOne(r: Row) {
     return { ok: 1, failed: 0 }
   }
 
-  // No valid rewrite -> **default to original title**
-  // We intentionally do NOT set rewritten_title here,
-  // so UI uses COALESCE(rewritten_title, title) = original title.
   await query(
     `update articles
        set rewrite_model = $1,
@@ -208,8 +198,8 @@ async function processOne(r: Row) {
   return { ok: 0, failed: 1 }
 }
 
-async function batch(limit = 40, concurrency = 4) {
-  const rows = await fetchBatch(limit)
+async function batch(limit = 40, concurrency = 4, force = false) {
+  const rows = await fetchBatch(limit, force)
   let ok = 0
   let failed = 0
 
@@ -222,15 +212,18 @@ async function batch(limit = 40, concurrency = 4) {
   return { count: rows.length, ok, failed }
 }
 
-export async function run(opts: { limit?: number; closePool?: boolean } = {}) {
-  const res = await batch(opts.limit ?? 40, 4)
+export async function run(
+  opts: { limit?: number; force?: boolean; closePool?: boolean } = {}
+) {
+  const res = await batch(opts.limit ?? 40, 4, !!opts.force)
   if (opts.closePool) await endPool()
   return res
 }
 
-// CLI support: `npm run rewrite`
+// CLI support
 if (import.meta.url === `file://${process.argv[1]}`) {
-  run({ closePool: true })
+  const force = process.env.FORCE === '1'
+  run({ closePool: true, force })
     .then((r) => {
       console.log('rewrite results:', r)
       process.exit(0)
