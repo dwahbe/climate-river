@@ -1,6 +1,6 @@
 {
   "crons": [
-    { "path": "/api/ingest", "schedule": "*/15 * * * *" },
-    { "path": "/api/rescore", "schedule": "*/30 * * * *" }
+    { "path": "/api/ingest", "schedule": "0 1 * * *" },
+    { "path": "/api/rescore", "schedule": "0 1 * * *" }
   ]
 }
