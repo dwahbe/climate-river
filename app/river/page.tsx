@@ -46,7 +46,7 @@ export default async function RiverPage() {
       join articles a on a.id = cs.lead_article_id
       left join sources s on s.id = a.source_id
       order by cs.score desc
-      limit 80
+      limit 20
     ),
     srcs as (
       select ac.cluster_id, count(distinct s.id) as sources_count
@@ -95,211 +95,112 @@ export default async function RiverPage() {
     left join srcs s on s.cluster_id = l.cluster_id
   `)
 
-  const latest = await DB.query<{ ts: string }>(`
-    select coalesce(max(fetched_at), now()) as ts
-    from articles
-  `)
-  const lastTs = latest.rows[0]?.ts ?? new Date().toISOString()
-  const lastFormatted = new Intl.DateTimeFormat('en-US', {
-    dateStyle: 'medium',
-    timeStyle: 'short',
-    timeZone: 'America/Mexico_City',
-  }).format(new Date(lastTs))
-
   return (
-    <main
-      style={{
-        padding: '20px 24px 56px',
-        maxWidth: 880,
-      }}
-    >
-      <section style={{ display: 'grid', gap: 6 }}>
-        {rows.map((r) => {
-          const secondaries = (r.subs ?? []) as SubLink[]
-          const shown = secondaries.length
-          const moreCount = Math.max(0, r.subs_total - shown)
-          const isCluster = r.size > 1
+    <section className="grid gap-3 sm:gap-3.5">
+      {rows.map((r) => {
+        const secondaries = (r.subs ?? []) as SubLink[]
+        const shown = secondaries.length
+        const moreCount = Math.max(0, r.subs_total - shown)
+        const isCluster = r.size > 1
 
-          const publisher = r.lead_source || hostFrom(r.lead_url)
-          const Bullet = () => (
-            <span aria-hidden style={{ opacity: 0.6 }}>
-              •
-            </span>
-          )
+        const publisher = r.lead_source || hostFrom(r.lead_url)
 
-          return (
-            <article
-              key={r.cluster_id}
-              style={{
-                padding: '18px 0',
-                borderBottom: '1px solid #e5e7eb',
-              }}
-            >
-              {/* Publisher (tiny) */}
-              {publisher && (
-                <div
-                  style={{
-                    fontSize: 12,
-                    color: '#475569',
-                    fontWeight: 600,
-                    letterSpacing: '.02em',
-                    marginBottom: 2,
-                  }}
-                >
-                  {r.lead_homepage ? (
+        return (
+          <article key={r.cluster_id} className="py-3 border-b border-zinc-300">
+            {/* Publisher */}
+            {publisher && (
+              <div className="text-[11px] sm:text-xs font-medium tracking-wide text-zinc-500 mb-1">
+                {r.lead_homepage ? (
+                  <a
+                    href={r.lead_homepage}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="source-link text-zinc-500 hover:text-zinc-700"
+                  >
+                    {publisher}
+                  </a>
+                ) : (
+                  publisher
+                )}
+              </div>
+            )}
+            {/* Headline */}
+            <h3 className="text-[18px] sm:text-[19px] md:text-[20px] font-semibold leading-snug tracking-tight">
+              <a
+                href={r.lead_url}
+                target="_blank"
+                rel="noreferrer"
+                className="headline-link text-zinc-950 hover:text-zinc-900 transition-colors"
+              >
+                {r.lead_title}
+              </a>
+            </h3>
+            {/* Dek */}
+            {r.lead_dek && (
+              <p className="mt-1 text-sm sm:text-[0.95rem] text-zinc-600">
+                {r.lead_dek}
+              </p>
+            )}
+
+            {/* Meta */}
+            <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] sm:text-xs text-zinc-500">
+              <span>{new Date(r.published_at).toLocaleString()}</span>
+
+              {isCluster && (
+                <>
+                  <span>•</span>
+                  <span>
+                    {r.size} {r.size === 1 ? 'story' : 'stories'}
+                  </span>
+                  <span>•</span>
+                  <span>
+                    {r.sources_count}{' '}
+                    {r.sources_count === 1 ? 'source' : 'sources'}
+                  </span>
+                  <span className="ms-auto" />
+                  <Link
+                    href={`/river/${r.cluster_id}`}
+                    className="text-zinc-600 hover:text-zinc-800"
+                  >
+                    Open cluster →
+                  </Link>
+                </>
+              )}
+            </div>
+
+            {/* More (cluster only) */}
+            {isCluster && secondaries.length > 0 && (
+              <div className="mt-1.5 text-[13px] leading-6 text-zinc-700">
+                <span className="font-semibold text-zinc-900">More:</span>{' '}
+                {secondaries.map((s, i) => (
+                  <span key={s.url}>
                     <a
-                      href={r.lead_homepage}
+                      href={s.url}
                       target="_blank"
                       rel="noreferrer"
-                      style={{
-                        color: 'inherit',
-                        textDecoration: 'none',
-                      }}
+                      className="text-zinc-900 hover:underline decoration-zinc-300"
                     >
-                      {publisher}
+                      {s.source}
                     </a>
-                  ) : (
-                    publisher
-                  )}
-                </div>
-              )}
-
-              {/* Headline + dek */}
-              <h3
-                style={{
-                  fontSize: 19,
-                  fontWeight: 700,
-                  lineHeight: 1.35,
-                  margin: 0,
-                  letterSpacing: '-0.01em',
-                }}
-              >
-                <a
-                  href={r.lead_url}
-                  target="_blank"
-                  rel="noreferrer"
-                  style={{
-                    textDecoration: 'none',
-                    color: '#0f172a',
-                  }}
-                >
-                  {r.lead_title}
-                </a>
-              </h3>
-
-              {r.lead_dek && (
-                <p
-                  style={{
-                    margin: '6px 0 0',
-                    color: '#475569',
-                    fontSize: 14,
-                    lineHeight: 1.5,
-                    display: '-webkit-box',
-                    WebkitLineClamp: 2,
-                    WebkitBoxOrient: 'vertical' as any,
-                    overflow: 'hidden',
-                  }}
-                >
-                  {r.lead_dek}
-                </p>
-              )}
-
-              {/* Meta line */}
-              <div
-                style={{
-                  display: 'flex',
-                  gap: 10,
-                  alignItems: 'center',
-                  color: '#6b7280',
-                  fontSize: 12,
-                  marginTop: 8,
-                  flexWrap: 'wrap',
-                }}
-              >
-                <span>{new Date(r.published_at).toLocaleString()}</span>
-
-                {isCluster && (
+                    {i < secondaries.length - 1 ? ', ' : ''}
+                  </span>
+                ))}
+                {moreCount > 0 && (
                   <>
-                    <Bullet />
-                    <span>
-                      {r.size} {r.size === 1 ? 'story' : 'stories'}
-                    </span>
-                    <Bullet />
-                    <span>
-                      {r.sources_count}{' '}
-                      {r.sources_count === 1 ? 'source' : 'sources'}
-                    </span>
-                    <span style={{ flex: 1 }} />
+                    {shown > 0 ? ', ' : null}
                     <Link
                       href={`/river/${r.cluster_id}`}
-                      style={{
-                        color: '#334155',
-                        textDecoration: 'none',
-                      }}
+                      className="text-zinc-700 hover:text-zinc-900"
                     >
-                      Open cluster →
+                      and {moreCount} more
                     </Link>
                   </>
                 )}
               </div>
-
-              {/* Compact “More:” list only for multi-story clusters */}
-              {isCluster && secondaries.length > 0 && (
-                <div
-                  style={{
-                    marginTop: 8,
-                    color: '#334155',
-                    fontSize: 13,
-                    lineHeight: 1.6,
-                  }}
-                >
-                  <span style={{ fontWeight: 600, color: '#0f172a' }}>
-                    More:
-                  </span>{' '}
-                  {secondaries.map((s, i) => (
-                    <span key={s.url}>
-                      <a
-                        href={s.url}
-                        target="_blank"
-                        rel="noreferrer"
-                        style={{
-                          color: '#0f172a',
-                          textDecoration: 'none',
-                        }}
-                      >
-                        {s.source}
-                      </a>
-                      {i < secondaries.length - 1 ? ', ' : ''}
-                    </span>
-                  ))}
-                  {moreCount > 0 && (
-                    <>
-                      {shown > 0 ? ', ' : null}
-                      <Link
-                        href={`/river/${r.cluster_id}`}
-                        style={{ color: '#334155', textDecoration: 'none' }}
-                      >
-                        and {moreCount} more
-                      </Link>
-                    </>
-                  )}
-                </div>
-              )}
-            </article>
-          )
-        })}
-      </section>
-
-      <div
-        style={{
-          textAlign: 'center',
-          color: '#6b7280',
-          fontSize: 12,
-          marginTop: 24,
-        }}
-      >
-        Last updated {lastFormatted}
-      </div>
-    </main>
+            )}
+          </article>
+        )
+      })}
+    </section>
   )
 }

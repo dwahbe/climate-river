@@ -3,6 +3,7 @@ import './global.css'
 import Link from 'next/link'
 import * as DB from '@/lib/db'
 
+export const metadata = { title: 'Climate River' }
 export const dynamic = 'force-dynamic'
 
 export default async function RootLayout({
@@ -10,87 +11,55 @@ export default async function RootLayout({
 }: {
   children: React.ReactNode
 }) {
-  // get latest “fetched_at” (fallback to now)
   const latest = await DB.query<{ ts: string }>(`
     select coalesce(max(fetched_at), now()) as ts
     from articles
   `)
-  const ts = latest.rows[0]?.ts ?? new Date().toISOString()
-
+  const lastTs = latest.rows[0]?.ts ?? new Date().toISOString()
   const lastFormatted = new Intl.DateTimeFormat('en-US', {
     dateStyle: 'medium',
     timeStyle: 'short',
     timeZone: 'America/Mexico_City',
-  }).format(new Date(ts))
+  }).format(new Date(lastTs))
 
   return (
-    <html lang="en">
-      <body>
-        {/* top nav */}
-        <nav
-          style={{
-            display: 'grid',
-            gridTemplateColumns: '1fr auto 1fr',
-            alignItems: 'center',
-            padding: '16px 24px',
-            borderBottom: '1px solid #e5e7eb',
-            background: '#fff',
-            position: 'sticky',
-            top: 0,
-            zIndex: 50,
-          }}
-        >
-          {/* left: brand */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <span
-              style={{
-                width: 10,
-                height: 10,
-                borderRadius: 9999,
-                background: '#10938d', // teal dot
-                display: 'inline-block',
-              }}
-            />
-            <Link
-              href="/"
-              style={{
-                textDecoration: 'none',
-                color: '#0f172a',
-                fontSize: 22,
-                fontWeight: 700,
-              }}
-            >
-              Climate Roundup
+    <html lang="en" className="h-full">
+      <body className="min-h-full bg-zinc-50 text-zinc-900 antialiased">
+        <nav className="sticky top-0 z-30 bg-white/80 backdrop-blur border-b border-zinc-100">
+          <div className="mx-auto max-w-5xl px-4 sm:px-6 py-3 sm:py-4 relative flex items-center">
+            {/* Left: brand */}
+            <Link href="/" className="flex items-center gap-2 nav-link">
+              <span className="h-2.5 w-2.5 rounded-full bg-emerald-600" />
+              <span className="font-semibold text-base sm:text-lg tracking-tight">
+                Climate River
+              </span>
             </Link>
-          </div>
 
-          {/* center: last updated */}
-          <div
-            style={{
-              textAlign: 'center',
-              color: '#6b7280',
-              fontSize: 12,
-              letterSpacing: 0.2,
-            }}
-          >
-            Last updated {lastFormatted}
-          </div>
+            {/* Center: plain last-updated text (no box) */}
+            <div className="absolute left-1/2 -translate-x-1/2 hidden sm:block text-xs sm:text-sm text-zinc-500">
+              Last updated {lastFormatted}
+            </div>
 
-          {/* right: github */}
-          <div style={{ textAlign: 'right' }}>
-            <a
-              href="https://github.com/dwahbe/climate-river-mvp"
-              target="_blank"
-              rel="noreferrer"
-              style={{ color: '#334155', textDecoration: 'none' }}
-            >
-              GitHub
-            </a>
+            {/* Right: GitHub */}
+            <div className="ml-auto">
+              <a
+                href="https://github.com/dwahbe/climate-river-mvp"
+                target="_blank"
+                rel="noreferrer"
+                className="btn-ghost"
+              >
+                GitHub
+              </a>
+            </div>
           </div>
         </nav>
 
-        {/* page content */}
-        {children}
+        {/* Page container (links styled via .content in global.css) */}
+        <main className="mx-auto max-w-5xl px-4 sm:px-6 py-6 content">
+          {children}
+        </main>
+
+        <div className="pb-[env(safe-area-inset-bottom)]" />
       </body>
     </html>
   )
