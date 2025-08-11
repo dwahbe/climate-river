@@ -9,7 +9,8 @@
     "start": "next start",
     "ingest": "tsx --env-file=.env.local scripts/ingest.ts",
     "rescore": "tsx --env-file=.env.local scripts/rescore.ts",
-    "schema": "tsx --env-file=.env.local scripts/schema.ts"
+    "schema": "tsx --env-file=.env.local scripts/schema.ts",
+    "format": "prettier --write ."
   },
   "dependencies": {
     "dayjs": "^1.11.11",
@@ -22,12 +23,13 @@
     "string-similarity": "^4.0.4"
   },
   "devDependencies": {
-    "@types/node": "^20.14.10",
+    "@types/node": "^20.19.10",
     "@types/pg": "^8.15.5",
     "@types/react": "^18.2.74",
     "@types/react-dom": "^18.2.24",
     "@types/string-similarity": "^4.0.2",
-    "tsx": "^4.16.2",
-    "typescript": "^5.5.4"
+    "prettier": "^3.6.2",
+    "tsx": "^4.20.3",
+    "typescript": "^5.9.2"
   }
 }
