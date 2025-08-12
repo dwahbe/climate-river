@@ -9,11 +9,17 @@ type Row = {
 }
 
 const MAX_CHARS = 110
-const OPENAI_URL =
+
+// Prefer Responses API for gpt-5-* and 4o-* models
+const RESPONSES_URL =
+  (process.env.OPENAI_BASE_URL?.trim() || 'https://api.openai.com/v1') +
+  '/responses'
+const CHAT_URL =
   (process.env.OPENAI_BASE_URL?.trim() || 'https://api.openai.com/v1') +
   '/chat/completions'
 
 function getModel() {
+  // Default to GPT-5 Nano per plan; can override with REWRITE_MODEL
   return (process.env.REWRITE_MODEL || 'gpt-5-nano').trim()
 }
 
@@ -72,18 +78,15 @@ async function generateWithOpenAI(
   const apiKey = process.env.OPENAI_API_KEY?.trim()
   if (!apiKey) return { text: null, model: null, notes: 'no_api_key' }
 
-  const body = {
-    model: getModel(),
-    messages: [{ role: 'user', content: buildPrompt({ title, dek }) }],
-    max_tokens: 80,
-    temperature: 0.2,
-  }
+  const model = getModel()
+  const prompt = buildPrompt({ title, dek })
 
-  for (let attempt = 0; attempt <= retries; attempt++) {
+  // Helper to POST
+  const post = async (url: string, body: any) => {
     const ctrl = new AbortController()
     const t = setTimeout(() => ctrl.abort(), abortMs)
     try {
-      const res = await fetch(OPENAI_URL, {
+      const res = await fetch(url, {
         method: 'POST',
         signal: ctrl.signal,
         headers: {
@@ -92,24 +95,78 @@ async function generateWithOpenAI(
         },
         body: JSON.stringify(body),
       })
+      const text = await res.text()
+      let json: any = null
+      try {
+        json = JSON.parse(text)
+      } catch {
+        /* keep raw text for notes */
+      }
+      return { ok: res.ok, status: res.status, json, raw: text }
+    } finally {
+      clearTimeout(t)
+    }
+  }
 
-      if (!res.ok) {
-        const errText = await res.text().catch(() => '')
-        if (res.status === 429 || (res.status >= 500 && res.status <= 599)) {
-          throw new Error(`retryable:${res.status}:${errText.slice(0, 120)}`)
+  // Try Responses API first (correct for gpt-5-*, gpt-4o-* families)
+  const responsesBody = {
+    model,
+    input: prompt,
+    temperature: 0.2,
+    // IMPORTANT: Responses API uses max_output_tokens (not max_tokens)
+    max_output_tokens: 80,
+  }
+
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      let r = await post(RESPONSES_URL, responsesBody)
+
+      // If the model doesn't support /responses (or other error), fall back once to Chat
+      if (!r.ok) {
+        const msg = r.json?.error?.message || r.raw || ''
+        const isRetryable =
+          r.status === 429 || (r.status >= 500 && r.status <= 599)
+
+        // One-time fallback to Chat Completions (uses max_tokens)
+        if (
+          attempt === 0 &&
+          (msg.includes('not supported') ||
+            msg.includes('Unknown url') ||
+            msg.includes('Unsupported') ||
+            r.status === 404)
+        ) {
+          const chatBody = {
+            model,
+            messages: [{ role: 'user', content: prompt }],
+            temperature: 0.2,
+            max_tokens: 80,
+          }
+          r = await post(CHAT_URL, chatBody)
         }
-        return {
-          text: null,
-          model: getModel(),
-          notes: `api_error:${res.status}:${errText.slice(0, 200)}`,
+
+        if (!r.ok) {
+          if (isRetryable && attempt < retries) {
+            await sleep(400 * (attempt + 1) + Math.random() * 250)
+            continue
+          }
+          return {
+            text: null,
+            model,
+            notes: `api_error:${r.status}:${(r.json?.error?.message || r.raw || '').slice(0, 200)}`,
+          }
         }
       }
 
-      const json = await res.json()
-      const text = sanitizeHeadline(
-        json?.choices?.[0]?.message?.content?.trim() || ''
-      )
-      return { text, model: getModel(), notes: 'ok' }
+      // Parse Responses API success
+      const j = r.json
+      let out =
+        j?.output_text ??
+        j?.output?.[0]?.content?.[0]?.text ??
+        j?.choices?.[0]?.message?.content ??
+        '' // fallback path for Chat
+
+      const cleaned = sanitizeHeadline(String(out || '').trim())
+      return { text: cleaned, model, notes: 'ok' }
     } catch (e: any) {
       if (attempt < retries) {
         await sleep(400 * (attempt + 1) + Math.random() * 250)
@@ -117,15 +174,13 @@ async function generateWithOpenAI(
       }
       return {
         text: null,
-        model: getModel(),
-        notes: `fetch_error:${e?.message || e}`,
+        model,
+        notes: `fetch_error:${e?.message || String(e)}`,
       }
-    } finally {
-      clearTimeout(t)
     }
   }
 
-  return { text: null, model: getModel(), notes: 'unreachable' }
+  return { text: null, model, notes: 'unreachable' }
 }
 
 /* ------------------------------- Runner -------------------------------- */
@@ -157,17 +212,17 @@ async function mapLimit<T, R>(
   })
 }
 
-async function fetchBatch(limit = 40, force = false) {
+async function fetchBatch(limit = 40) {
   const { rows } = await query<Row>(
     `
     select a.id, a.title, a.dek, a.canonical_url
     from articles a
-    where coalesce(a.published_at, now()) > now() - interval '21 days'
-      and ($2::bool OR a.rewritten_title is null)
+    where a.rewritten_title is null
+      and coalesce(a.published_at, now()) > now() - interval '21 days'
     order by a.fetched_at desc
     limit $1
   `,
-    [limit, !!force]
+    [limit]
   )
   return rows
 }
@@ -175,6 +230,7 @@ async function fetchBatch(limit = 40, force = false) {
 async function processOne(r: Row) {
   const llm = await generateWithOpenAI(r.title, r.dek)
   const draft = llm.text || ''
+
   if (passesChecks(r.title, draft)) {
     await query(
       `update articles
@@ -188,6 +244,7 @@ async function processOne(r: Row) {
     return { ok: 1, failed: 0 }
   }
 
+  // No valid rewrite -> do not set rewritten_title (UI falls back to original)
   await query(
     `update articles
        set rewrite_model = $1,
@@ -198,8 +255,8 @@ async function processOne(r: Row) {
   return { ok: 0, failed: 1 }
 }
 
-async function batch(limit = 40, concurrency = 4, force = false) {
-  const rows = await fetchBatch(limit, force)
+async function batch(limit = 40, concurrency = 4) {
+  const rows = await fetchBatch(limit)
   let ok = 0
   let failed = 0
 
@@ -212,18 +269,15 @@ async function batch(limit = 40, concurrency = 4, force = false) {
   return { count: rows.length, ok, failed }
 }
 
-export async function run(
-  opts: { limit?: number; force?: boolean; closePool?: boolean } = {}
-) {
-  const res = await batch(opts.limit ?? 40, 4, !!opts.force)
+export async function run(opts: { limit?: number; closePool?: boolean } = {}) {
+  const res = await batch(opts.limit ?? 40, 4)
   if (opts.closePool) await endPool()
   return res
 }
 
-// CLI support
+// CLI support: `npm run rewrite`
 if (import.meta.url === `file://${process.argv[1]}`) {
-  const force = process.env.FORCE === '1'
-  run({ closePool: true, force })
+  run({ closePool: true })
     .then((r) => {
       console.log('rewrite results:', r)
       process.exit(0)
