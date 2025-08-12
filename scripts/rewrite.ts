@@ -9,24 +9,20 @@ type Row = {
 }
 
 const MAX_CHARS = 110
-const MAX_DEK_CHARS = 600 // trim long RSS summaries to keep prompts tight
 
-// Prefer the Responses API for gpt-5-* / gpt-4o-* models
-const BASE_URL =
-  process.env.OPENAI_BASE_URL?.trim() || 'https://api.openai.com/v1'
-const RESPONSES_URL = `${BASE_URL}/responses`
-const CHAT_URL = `${BASE_URL}/chat/completions`
+const BASE = process.env.OPENAI_BASE_URL?.trim() || 'https://api.openai.com/v1'
+const RESPONSES_URL = BASE + '/responses'
+const CHAT_URL = BASE + '/chat/completions'
 
 function getModel() {
-  // default per plan; overridable via env
   return (process.env.REWRITE_MODEL || 'gpt-5-nano').trim()
 }
-
-/* ------------------------- Prompt & validation ------------------------- */
+function getFallbackModel() {
+  return (process.env.REWRITE_MODEL_FALLBACK || '').trim() || null
+}
 
 function buildPrompt(input: { title: string; dek?: string | null }) {
-  const dek = input.dek ? input.dek.slice(0, MAX_DEK_CHARS) : null
-  const lines = [
+  const parts = [
     'Rewrite a neutral, factual, one-line news headline.',
     `Requirements:
 - Use present tense.
@@ -36,17 +32,16 @@ function buildPrompt(input: { title: string; dek?: string | null }) {
 - <= ${MAX_CHARS} characters.`,
     `Original title: ${input.title}`,
   ]
-  if (dek) lines.push(`Dek/summary: ${dek}`)
-  lines.push('Output ONLY the rewritten headline (no quotes, no prefix).')
-  return lines.join('\n')
+  if (input.dek) parts.push(`Dek/summary: ${input.dek}`)
+  parts.push('Output ONLY the rewritten headline (no quotes, no prefix).')
+  return parts.join('\n')
 }
 
 function sanitizeHeadline(s: string) {
   let t = (s || '')
-    .replace(/^[“"'\s]+|[”"'\s]+$/g, '') // strip quotes
-    .replace(/\s+/g, ' ') // collapse spaces
+    .replace(/^[“"'\s]+|[”"'\s]+$/g, '')
+    .replace(/\s+/g, ' ')
     .trim()
-  // Avoid odd trailing punctuation or divider chars
   t = t.replace(/[|•–—\-]+$/g, '').trim()
   return t
 }
@@ -55,28 +50,51 @@ function passesChecks(original: string, draft: string) {
   if (!draft) return false
   const t = sanitizeHeadline(draft)
   if (t.length < 10 || t.length > Math.min(MAX_CHARS + 5, 140)) return false
-
-  // crude sameness check to avoid just echoing original
   const norm = (s: string) =>
     s
       .toLowerCase()
       .replace(/[\W_]+/g, ' ')
       .trim()
   if (!norm(t) || norm(t) === norm(original)) return false
-
   return true
 }
-
-/* --------------------------- OpenAI integration --------------------------- */
 
 async function sleep(ms: number) {
   return new Promise((r) => setTimeout(r, ms))
 }
 
+async function postJSON(
+  url: string,
+  body: any,
+  apiKey: string,
+  abortMs = 20_000
+) {
+  const ctrl = new AbortController()
+  const to = setTimeout(() => ctrl.abort(), abortMs)
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      signal: ctrl.signal,
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(body),
+    })
+    const raw = await res.text()
+    let json: any = null
+    try {
+      json = JSON.parse(raw)
+    } catch {}
+    return { ok: res.ok, status: res.status, json, raw }
+  } finally {
+    clearTimeout(to)
+  }
+}
+
 async function generateWithOpenAI(
   title: string,
   dek?: string | null,
-  abortMs = 20_000,
   retries = 2
 ): Promise<{ text: string | null; model: string | null; notes: string }> {
   const apiKey = process.env.OPENAI_API_KEY?.trim()
@@ -85,108 +103,86 @@ async function generateWithOpenAI(
   const model = getModel()
   const prompt = buildPrompt({ title, dek })
 
-  // tiny helper to POST and capture both JSON and raw text for notes
-  const post = async (url: string, body: any) => {
-    const ctrl = new AbortController()
-    const t = setTimeout(() => ctrl.abort(), abortMs)
-    try {
-      const res = await fetch(url, {
-        method: 'POST',
-        signal: ctrl.signal,
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(body),
-      })
-      const raw = await res.text()
-      let json: any = null
-      try {
-        json = JSON.parse(raw)
-      } catch {
-        /* keep raw text if not JSON */
-      }
-      return { ok: res.ok, status: res.status, json, raw }
-    } finally {
-      clearTimeout(t)
-    }
-  }
-
-  // First choice: Responses API (uses max_output_tokens and supports gpt-5-*, 4o-*)
-  const responsesBody = {
+  // Bodies to try (in order)
+  const responsesBodyStructured = {
     model,
-    input: [{ role: 'user', content: prompt }], // array form is most compatible
+    input: [
+      {
+        role: 'user',
+        content: [{ type: 'text', text: prompt }],
+      },
+    ],
     temperature: 0.2,
-    max_output_tokens: 80, // NOTE: not max_tokens
-    user: 'rewrite:headline',
+    max_output_tokens: 80,
+  }
+  const responsesBodyString = {
+    model,
+    input: prompt,
+    temperature: 0.2,
+    max_output_tokens: 80,
+  }
+  const chatBody = {
+    model,
+    messages: [{ role: 'user', content: prompt }],
+    temperature: 0.2,
+    // Chat uses max_tokens (some gateways may still reject this model on Chat)
+    max_tokens: 80,
   }
 
-  for (let attempt = 0; attempt <= retries; attempt++) {
-    try {
-      let r = await post(RESPONSES_URL, responsesBody)
+  const attempts: Array<{
+    kind: 'responses-structured' | 'responses-string' | 'chat' | 'chat-fallback'
+    url: string
+    body: any
+  }> = [
+    {
+      kind: 'responses-structured',
+      url: RESPONSES_URL,
+      body: responsesBodyStructured,
+    },
+    { kind: 'responses-string', url: RESPONSES_URL, body: responsesBodyString },
+    { kind: 'chat', url: CHAT_URL, body: chatBody },
+  ]
 
-      // If model/host doesn’t support /responses or returns other error, try Chat once
+  const fallbackModel = getFallbackModel()
+  if (fallbackModel) {
+    attempts.push({
+      kind: 'chat-fallback',
+      url: CHAT_URL,
+      body: { ...chatBody, model: fallbackModel },
+    })
+  }
+
+  const errors: string[] = []
+
+  for (let attempt = 0; attempt < attempts.length; attempt++) {
+    for (let retry = 0; retry <= retries; retry++) {
+      const a = attempts[attempt]
+      const r = await postJSON(a.url, a.body, apiKey)
       if (!r.ok) {
-        const msg = (r.json?.error?.message || r.raw || '').toString()
-        const isRetryable =
+        const msg = r.json?.error?.message || r.raw || ''
+        errors.push(`${a.kind}:${r.status}:${msg.slice(0, 120)}`)
+        const retryable =
           r.status === 429 || (r.status >= 500 && r.status <= 599)
-
-        const looksUnsupported =
-          attempt === 0 &&
-          (msg.toLowerCase().includes('not supported') ||
-            msg.toLowerCase().includes('unknown url') ||
-            msg.toLowerCase().includes('unsupported') ||
-            r.status === 404)
-
-        if (looksUnsupported) {
-          // Chat Completions fallback (uses max_tokens)
-          const chatBody = {
-            model,
-            messages: [{ role: 'user', content: prompt }],
-            temperature: 0.2,
-            max_tokens: 80,
-            user: 'rewrite:headline',
-          }
-          r = await post(CHAT_URL, chatBody)
+        if (retryable && retry < retries) {
+          await sleep(400 * (retry + 1) + Math.random() * 250)
+          continue
         }
-
-        if (!r.ok) {
-          if (isRetryable && attempt < retries) {
-            await sleep(400 * (attempt + 1) + Math.random() * 250)
-            continue
-          }
-          return {
-            text: null,
-            model,
-            notes: `api_error:${r.status}:${(r.json?.error?.message || r.raw || '').slice(0, 200)}`,
-          }
-        }
+        break // move to next attempt kind
       }
 
-      // Success: pull content from Responses API (or Chat fallback)
+      // Parse success for both Responses and Chat
       const j = r.json
       const out =
         j?.output_text ??
         j?.output?.[0]?.content?.[0]?.text ??
         j?.choices?.[0]?.message?.content ??
         ''
-
       const cleaned = sanitizeHeadline(String(out || '').trim())
-      return { text: cleaned, model, notes: 'ok' }
-    } catch (e: any) {
-      if (attempt < retries) {
-        await sleep(400 * (attempt + 1) + Math.random() * 250)
-        continue
-      }
-      return {
-        text: null,
-        model,
-        notes: `fetch_error:${e?.message || String(e)}`,
-      }
+      return { text: cleaned, model: a.body.model || model, notes: a.kind }
     }
   }
 
-  return { text: null, model, notes: 'unreachable' }
+  return { text: null, model, notes: `all_failed:${errors.join(' | ')}` }
 }
 
 /* ------------------------------- Runner -------------------------------- */
@@ -197,8 +193,8 @@ async function mapLimit<T, R>(
   fn: (t: T, i: number) => Promise<R>
 ) {
   const ret: R[] = new Array(items.length)
-  let i = 0
-  let active = 0
+  let i = 0,
+    active = 0
   return new Promise<R[]>((resolve, reject) => {
     const next = () => {
       if (i >= items.length && active === 0) return resolve(ret)
@@ -250,7 +246,7 @@ async function processOne(r: Row) {
     return { ok: 1, failed: 0 }
   }
 
-  // No valid rewrite -> do not set rewritten_title (UI falls back to original)
+  // No valid rewrite -> record notes but don't overwrite original title
   await query(
     `update articles
        set rewrite_model = $1,
@@ -263,15 +259,13 @@ async function processOne(r: Row) {
 
 async function batch(limit = 40, concurrency = 4) {
   const rows = await fetchBatch(limit)
-  let ok = 0
-  let failed = 0
-
+  let ok = 0,
+    failed = 0
   await mapLimit(rows, concurrency, async (r) => {
     const res = await processOne(r)
     ok += res.ok
     failed += res.failed
   })
-
   return { count: rows.length, ok, failed }
 }
 
@@ -281,7 +275,7 @@ export async function run(opts: { limit?: number; closePool?: boolean } = {}) {
   return res
 }
 
-// CLI support: `npm run rewrite`
+// CLI: npm run rewrite
 if (import.meta.url === `file://${process.argv[1]}`) {
   run({ closePool: true })
     .then((r) => {
