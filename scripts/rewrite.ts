@@ -9,23 +9,23 @@ type Row = {
 }
 
 const MAX_CHARS = 110
+const MAX_DEK_CHARS = 600 // trim long RSS summaries to keep prompts tight
 
-// Prefer Responses API for gpt-5-* and 4o-* models
-const RESPONSES_URL =
-  (process.env.OPENAI_BASE_URL?.trim() || 'https://api.openai.com/v1') +
-  '/responses'
-const CHAT_URL =
-  (process.env.OPENAI_BASE_URL?.trim() || 'https://api.openai.com/v1') +
-  '/chat/completions'
+// Prefer the Responses API for gpt-5-* / gpt-4o-* models
+const BASE_URL =
+  process.env.OPENAI_BASE_URL?.trim() || 'https://api.openai.com/v1'
+const RESPONSES_URL = `${BASE_URL}/responses`
+const CHAT_URL = `${BASE_URL}/chat/completions`
 
 function getModel() {
-  // Default to GPT-5 Nano per plan; can override with REWRITE_MODEL
+  // default per plan; overridable via env
   return (process.env.REWRITE_MODEL || 'gpt-5-nano').trim()
 }
 
 /* ------------------------- Prompt & validation ------------------------- */
 
 function buildPrompt(input: { title: string; dek?: string | null }) {
+  const dek = input.dek ? input.dek.slice(0, MAX_DEK_CHARS) : null
   const lines = [
     'Rewrite a neutral, factual, one-line news headline.',
     `Requirements:
@@ -36,16 +36,17 @@ function buildPrompt(input: { title: string; dek?: string | null }) {
 - <= ${MAX_CHARS} characters.`,
     `Original title: ${input.title}`,
   ]
-  if (input.dek) lines.push(`Dek/summary: ${input.dek}`)
+  if (dek) lines.push(`Dek/summary: ${dek}`)
   lines.push('Output ONLY the rewritten headline (no quotes, no prefix).')
   return lines.join('\n')
 }
 
 function sanitizeHeadline(s: string) {
   let t = (s || '')
-    .replace(/^[“"'\s]+|[”"'\s]+$/g, '')
-    .replace(/\s+/g, ' ')
+    .replace(/^[“"'\s]+|[”"'\s]+$/g, '') // strip quotes
+    .replace(/\s+/g, ' ') // collapse spaces
     .trim()
+  // Avoid odd trailing punctuation or divider chars
   t = t.replace(/[|•–—\-]+$/g, '').trim()
   return t
 }
@@ -54,12 +55,15 @@ function passesChecks(original: string, draft: string) {
   if (!draft) return false
   const t = sanitizeHeadline(draft)
   if (t.length < 10 || t.length > Math.min(MAX_CHARS + 5, 140)) return false
+
+  // crude sameness check to avoid just echoing original
   const norm = (s: string) =>
     s
       .toLowerCase()
       .replace(/[\W_]+/g, ' ')
       .trim()
   if (!norm(t) || norm(t) === norm(original)) return false
+
   return true
 }
 
@@ -81,7 +85,7 @@ async function generateWithOpenAI(
   const model = getModel()
   const prompt = buildPrompt({ title, dek })
 
-  // Helper to POST
+  // tiny helper to POST and capture both JSON and raw text for notes
   const post = async (url: string, body: any) => {
     const ctrl = new AbortController()
     const t = setTimeout(() => ctrl.abort(), abortMs)
@@ -95,51 +99,53 @@ async function generateWithOpenAI(
         },
         body: JSON.stringify(body),
       })
-      const text = await res.text()
+      const raw = await res.text()
       let json: any = null
       try {
-        json = JSON.parse(text)
+        json = JSON.parse(raw)
       } catch {
-        /* keep raw text for notes */
+        /* keep raw text if not JSON */
       }
-      return { ok: res.ok, status: res.status, json, raw: text }
+      return { ok: res.ok, status: res.status, json, raw }
     } finally {
       clearTimeout(t)
     }
   }
 
-  // Try Responses API first (correct for gpt-5-*, gpt-4o-* families)
+  // First choice: Responses API (uses max_output_tokens and supports gpt-5-*, 4o-*)
   const responsesBody = {
     model,
-    input: prompt,
+    input: [{ role: 'user', content: prompt }], // array form is most compatible
     temperature: 0.2,
-    // IMPORTANT: Responses API uses max_output_tokens (not max_tokens)
-    max_output_tokens: 80,
+    max_output_tokens: 80, // NOTE: not max_tokens
+    user: 'rewrite:headline',
   }
 
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
       let r = await post(RESPONSES_URL, responsesBody)
 
-      // If the model doesn't support /responses (or other error), fall back once to Chat
+      // If model/host doesn’t support /responses or returns other error, try Chat once
       if (!r.ok) {
-        const msg = r.json?.error?.message || r.raw || ''
+        const msg = (r.json?.error?.message || r.raw || '').toString()
         const isRetryable =
           r.status === 429 || (r.status >= 500 && r.status <= 599)
 
-        // One-time fallback to Chat Completions (uses max_tokens)
-        if (
+        const looksUnsupported =
           attempt === 0 &&
-          (msg.includes('not supported') ||
-            msg.includes('Unknown url') ||
-            msg.includes('Unsupported') ||
+          (msg.toLowerCase().includes('not supported') ||
+            msg.toLowerCase().includes('unknown url') ||
+            msg.toLowerCase().includes('unsupported') ||
             r.status === 404)
-        ) {
+
+        if (looksUnsupported) {
+          // Chat Completions fallback (uses max_tokens)
           const chatBody = {
             model,
             messages: [{ role: 'user', content: prompt }],
             temperature: 0.2,
             max_tokens: 80,
+            user: 'rewrite:headline',
           }
           r = await post(CHAT_URL, chatBody)
         }
@@ -157,13 +163,13 @@ async function generateWithOpenAI(
         }
       }
 
-      // Parse Responses API success
+      // Success: pull content from Responses API (or Chat fallback)
       const j = r.json
-      let out =
+      const out =
         j?.output_text ??
         j?.output?.[0]?.content?.[0]?.text ??
         j?.choices?.[0]?.message?.content ??
-        '' // fallback path for Chat
+        ''
 
       const cleaned = sanitizeHeadline(String(out || '').trim())
       return { text: cleaned, model, notes: 'ok' }
