@@ -15,7 +15,7 @@ const RESPONSES_URL = BASE + '/responses'
 const CHAT_URL = BASE + '/chat/completions'
 
 function getModel() {
-  return (process.env.REWRITE_MODEL || 'gpt-5-nano').trim()
+  return (process.env.REWRITE_MODEL || 'gpt-4o-mini').trim()
 }
 function getFallbackModel() {
   return (process.env.REWRITE_MODEL_FALLBACK || '').trim() || null
