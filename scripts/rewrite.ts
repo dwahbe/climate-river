@@ -10,19 +10,27 @@ type Row = {
 
 const MAX_CHARS = 110
 
+// Endpoints
 const BASE = process.env.OPENAI_BASE_URL?.trim() || 'https://api.openai.com/v1'
-const RESPONSES_URL = BASE + '/responses'
-const CHAT_URL = BASE + '/chat/completions'
+const RESPONSES_URL = `${BASE}/responses`
+const CHAT_URL = `${BASE}/chat/completions`
 
+// Config
 function getModel() {
+  // Default to 4o-mini (you can override with REWRITE_MODEL in Vercel)
   return (process.env.REWRITE_MODEL || 'gpt-4o-mini').trim()
 }
-function getFallbackModel() {
-  return (process.env.REWRITE_MODEL_FALLBACK || '').trim() || null
+
+// Let operator pick "responses" explicitly via env, otherwise prefer Chat for stability.
+function preferResponses() {
+  const mode = (process.env.REWRITE_MODE || '').toLowerCase()
+  return mode === 'responses'
 }
 
+/* ------------------------- Prompt & validation ------------------------- */
+
 function buildPrompt(input: { title: string; dek?: string | null }) {
-  const parts = [
+  const lines = [
     'Rewrite a neutral, factual, one-line news headline.',
     `Requirements:
 - Use present tense.
@@ -32,16 +40,17 @@ function buildPrompt(input: { title: string; dek?: string | null }) {
 - <= ${MAX_CHARS} characters.`,
     `Original title: ${input.title}`,
   ]
-  if (input.dek) parts.push(`Dek/summary: ${input.dek}`)
-  parts.push('Output ONLY the rewritten headline (no quotes, no prefix).')
-  return parts.join('\n')
+  if (input.dek) lines.push(`Dek/summary: ${input.dek}`)
+  lines.push('Output ONLY the rewritten headline (no quotes, no prefix).')
+  return lines.join('\n')
 }
 
 function sanitizeHeadline(s: string) {
   let t = (s || '')
-    .replace(/^[“"'\s]+|[”"'\s]+$/g, '')
-    .replace(/\s+/g, ' ')
+    .replace(/^[“"'\s]+|[”"'\s]+$/g, '') // strip quotes
+    .replace(/\s+/g, ' ') // collapse spaces
     .trim()
+  // Avoid trailing decorative punctuation
   t = t.replace(/[|•–—\-]+$/g, '').trim()
   return t
 }
@@ -59,18 +68,38 @@ function passesChecks(original: string, draft: string) {
   return true
 }
 
+/* --------------------------- OpenAI integration --------------------------- */
+
 async function sleep(ms: number) {
   return new Promise((r) => setTimeout(r, ms))
 }
 
-async function postJSON(
+type PostResult = {
+  ok: boolean
+  status: number
+  json: any
+  raw: string
+  headers: Headers
+}
+
+async function post(
   url: string,
   body: any,
-  apiKey: string,
-  abortMs = 20_000
-) {
+  abortMs = 20000
+): Promise<PostResult> {
+  const apiKey = process.env.OPENAI_API_KEY?.trim()
+  if (!apiKey) {
+    return {
+      ok: false,
+      status: 0,
+      json: null,
+      raw: 'no_api_key',
+      headers: new Headers(),
+    }
+  }
+
   const ctrl = new AbortController()
-  const to = setTimeout(() => ctrl.abort(), abortMs)
+  const t = setTimeout(() => ctrl.abort(), abortMs)
   try {
     const res = await fetch(url, {
       method: 'POST',
@@ -81,108 +110,162 @@ async function postJSON(
       },
       body: JSON.stringify(body),
     })
-    const raw = await res.text()
+    const text = await res.text()
     let json: any = null
     try {
-      json = JSON.parse(raw)
-    } catch {}
-    return { ok: res.ok, status: res.status, json, raw }
+      json = JSON.parse(text)
+    } catch {
+      // keep raw text
+    }
+    return {
+      ok: res.ok,
+      status: res.status,
+      json,
+      raw: text,
+      headers: res.headers,
+    }
   } finally {
-    clearTimeout(to)
+    clearTimeout(t)
   }
+}
+
+function extractFromResponsesJSON(j: any): string {
+  // Preferred single helper property
+  if (typeof j?.output_text === 'string') return j.output_text
+
+  // Structured content array
+  const arr = j?.output?.[0]?.content
+  if (Array.isArray(arr)) {
+    // look for either output_text or text element
+    const hit = arr.find(
+      (p: any) =>
+        p &&
+        typeof p === 'object' &&
+        (p.type === 'output_text' || p.type === 'text') &&
+        typeof p.text === 'string'
+    )
+    if (hit?.text) return hit.text
+  }
+
+  // Nothing found
+  return ''
+}
+
+function extractFromChatJSON(j: any): string {
+  return j?.choices?.[0]?.message?.content ?? ''
 }
 
 async function generateWithOpenAI(
   title: string,
   dek?: string | null,
+  abortMs = 20000,
   retries = 2
-): Promise<{ text: string | null; model: string | null; notes: string }> {
-  const apiKey = process.env.OPENAI_API_KEY?.trim()
-  if (!apiKey) return { text: null, model: null, notes: 'no_api_key' }
-
+): Promise<{ text: string | null; model: string; notes: string }> {
   const model = getModel()
   const prompt = buildPrompt({ title, dek })
 
-  // Bodies to try (in order)
-  const responsesBodyStructured = {
-    model,
-    input: [
+  const tryOnce = async (mode: 'responses' | 'chat'): Promise<PostResult> => {
+    if (mode === 'responses') {
+      // Responses API uses max_output_tokens
+      return post(
+        RESPONSES_URL,
+        { model, input: prompt, temperature: 0.2, max_output_tokens: 80 },
+        abortMs
+      )
+    }
+    // Chat Completions uses max_tokens
+    return post(
+      CHAT_URL,
       {
-        role: 'user',
-        content: [{ type: 'text', text: prompt }],
+        model,
+        messages: [{ role: 'user', content: prompt }],
+        temperature: 0.2,
+        max_tokens: 80,
       },
-    ],
-    temperature: 0.2,
-    max_output_tokens: 80,
-  }
-  const responsesBodyString = {
-    model,
-    input: prompt,
-    temperature: 0.2,
-    max_output_tokens: 80,
-  }
-  const chatBody = {
-    model,
-    messages: [{ role: 'user', content: prompt }],
-    temperature: 0.2,
-    // Chat uses max_tokens (some gateways may still reject this model on Chat)
-    max_tokens: 80,
+      abortMs
+    )
   }
 
-  const attempts: Array<{
-    kind: 'responses-structured' | 'responses-string' | 'chat' | 'chat-fallback'
-    url: string
-    body: any
-  }> = [
-    {
-      kind: 'responses-structured',
-      url: RESPONSES_URL,
-      body: responsesBodyStructured,
-    },
-    { kind: 'responses-string', url: RESPONSES_URL, body: responsesBodyString },
-    { kind: 'chat', url: CHAT_URL, body: chatBody },
-  ]
+  const mainMode: 'responses' | 'chat' = preferResponses()
+    ? 'responses'
+    : 'chat'
+  const fallbackMode: 'responses' | 'chat' =
+    mainMode === 'responses' ? 'chat' : 'responses'
 
-  const fallbackModel = getFallbackModel()
-  if (fallbackModel) {
-    attempts.push({
-      kind: 'chat-fallback',
-      url: CHAT_URL,
-      body: { ...chatBody, model: fallbackModel },
-    })
-  }
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      // First, try the preferred mode
+      let r = await tryOnce(mainMode)
 
-  const errors: string[] = []
-
-  for (let attempt = 0; attempt < attempts.length; attempt++) {
-    for (let retry = 0; retry <= retries; retry++) {
-      const a = attempts[attempt]
-      const r = await postJSON(a.url, a.body, apiKey)
-      if (!r.ok) {
+      // On error or empty, try fallback once (only on first attempt)
+      if (!r.ok || (!r.json && !r.raw)) {
         const msg = r.json?.error?.message || r.raw || ''
-        errors.push(`${a.kind}:${r.status}:${msg.slice(0, 120)}`)
         const retryable =
           r.status === 429 || (r.status >= 500 && r.status <= 599)
-        if (retryable && retry < retries) {
-          await sleep(400 * (retry + 1) + Math.random() * 250)
-          continue
+        const unsupported =
+          r.status === 404 ||
+          msg.toLowerCase().includes('not supported') ||
+          msg.toLowerCase().includes('unknown')
+
+        if ((unsupported || !r.ok) && attempt === 0) {
+          const r2 = await tryOnce(fallbackMode)
+          // use fallback if it succeeded; otherwise keep the original response for error reporting
+          if (r2.ok) r = r2
+          else if (r2.status) r = r2
         }
-        break // move to next attempt kind
+
+        if (!r.ok) {
+          if (retryable && attempt < retries) {
+            await sleep(400 * (attempt + 1) + Math.random() * 250)
+            continue
+          }
+          return {
+            text: null,
+            model,
+            notes: `api_error:${r.status}:${(r.json?.error?.message || r.raw || '').slice(0, 200)}`,
+          }
+        }
       }
 
-      // Parse success for both Responses and Chat
-      const j = r.json
-      const out =
-        j?.output_text ??
-        j?.output?.[0]?.content?.[0]?.text ??
-        j?.choices?.[0]?.message?.content ??
-        ''
-      const cleaned = sanitizeHeadline(String(out || '').trim())
-      return { text: cleaned, model: a.body.model || model, notes: a.kind }
+      // Parse success (both APIs handled)
+      let out = ''
+      if (r.json && typeof r.json === 'object') {
+        out =
+          extractFromResponsesJSON(r.json) || extractFromChatJSON(r.json) || ''
+      }
+
+      // If JSON path yielded nothing, accept raw text bodies too
+      if (!out && typeof r.raw === 'string') {
+        out = r.raw.trim()
+        if (out) {
+          // Keep a breadcrumb for diagnostics
+          return {
+            text: sanitizeHeadline(out),
+            model,
+            notes: 'responses-string',
+          }
+        }
+      }
+
+      if (!out) {
+        return { text: null, model, notes: `empty_output:${r.status}` }
+      }
+
+      return { text: sanitizeHeadline(String(out).trim()), model, notes: 'ok' }
+    } catch (e: any) {
+      if (attempt < retries) {
+        await sleep(400 * (attempt + 1) + Math.random() * 250)
+        continue
+      }
+      return {
+        text: null,
+        model,
+        notes: `fetch_error:${e?.message || String(e)}`,
+      }
     }
   }
 
-  return { text: null, model, notes: `all_failed:${errors.join(' | ')}` }
+  return { text: null, model, notes: 'unreachable' }
 }
 
 /* ------------------------------- Runner -------------------------------- */
@@ -193,8 +276,8 @@ async function mapLimit<T, R>(
   fn: (t: T, i: number) => Promise<R>
 ) {
   const ret: R[] = new Array(items.length)
-  let i = 0,
-    active = 0
+  let i = 0
+  let active = 0
   return new Promise<R[]>((resolve, reject) => {
     const next = () => {
       if (i >= items.length && active === 0) return resolve(ret)
@@ -217,13 +300,13 @@ async function mapLimit<T, R>(
 async function fetchBatch(limit = 40) {
   const { rows } = await query<Row>(
     `
-    select a.id, a.title, a.dek, a.canonical_url
-    from articles a
-    where a.rewritten_title is null
-      and coalesce(a.published_at, now()) > now() - interval '21 days'
-    order by a.fetched_at desc
-    limit $1
-  `,
+      select a.id, a.title, a.dek, a.canonical_url
+      from articles a
+      where a.rewritten_title is null
+        and coalesce(a.published_at, now()) > now() - interval '21 days'
+      order by a.fetched_at desc
+      limit $1
+    `,
     [limit]
   )
   return rows
@@ -246,7 +329,7 @@ async function processOne(r: Row) {
     return { ok: 1, failed: 0 }
   }
 
-  // No valid rewrite -> record notes but don't overwrite original title
+  // Leave original title; just record why it failed.
   await query(
     `update articles
        set rewrite_model = $1,
@@ -259,13 +342,15 @@ async function processOne(r: Row) {
 
 async function batch(limit = 40, concurrency = 4) {
   const rows = await fetchBatch(limit)
-  let ok = 0,
-    failed = 0
+  let ok = 0
+  let failed = 0
+
   await mapLimit(rows, concurrency, async (r) => {
     const res = await processOne(r)
     ok += res.ok
     failed += res.failed
   })
+
   return { count: rows.length, ok, failed }
 }
 
@@ -275,7 +360,7 @@ export async function run(opts: { limit?: number; closePool?: boolean } = {}) {
   return res
 }
 
-// CLI: npm run rewrite
+// CLI support: `npm run rewrite`
 if (import.meta.url === `file://${process.argv[1]}`) {
   run({ closePool: true })
     .then((r) => {
