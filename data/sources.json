@@ -48,5 +48,60 @@
     "slug": "grist",
     "name": "Grist",
     "rss": "https://grist.org/feed/"
+  },
+  {
+    "slug": "nyt-climate",
+    "name": "New York Times — Climate",
+    "rss": "https://rss.nytimes.com/services/xml/rss/nyt/Climate.xml"
+  },
+  {
+    "slug": "reuters-environment",
+    "name": "Reuters — Climate/Environment",
+    "rss": "https://feeds.reuters.com/reuters/environment"
+  },
+  {
+    "slug": "washpost-climate-environment",
+    "name": "Washington Post — Climate & Environment",
+    "rss": "https://www.washingtonpost.com/climate-environment/?outputType=rss"
+  },
+  {
+    "slug": "ft-climate-capital",
+    "name": "Financial Times — Climate Capital",
+    "rss": "https://www.ft.com/climate-capital?format=rss"
+  },
+  {
+    "slug": "npr-environment",
+    "name": "NPR — Environment",
+    "rss": "https://feeds.npr.org/118497594/rss.xml"
+  },
+  {
+    "slug": "conversation-environment-us",
+    "name": "The Conversation (US) — Environment",
+    "rss": "https://theconversation.com/us/environment/articles.atom"
+  },
+  {
+    "slug": "noaa-climate-gov",
+    "name": "NOAA Climate.gov — All",
+    "rss": "https://www.climate.gov/feeds/all/rss.xml"
+  },
+  {
+    "slug": "nature-climate-change",
+    "name": "Nature — Climate change",
+    "rss": "https://www.nature.com/subjects/climate-change/rss"
+  },
+  {
+    "slug": "economist-climate-change",
+    "name": "The Economist — Climate change",
+    "rss": "https://www.economist.com/climate-change/rss.xml"
+  },
+  {
+    "slug": "mit-tech-review-climate",
+    "name": "MIT Technology Review — Climate",
+    "rss": "https://www.technologyreview.com/topic/climate-change/feed/"
+  },
+  {
+    "slug": "physorg-environment",
+    "name": "Phys.org — Earth/Environment",
+    "rss": "https://phys.org/rss-feed/earth-news/"
   }
 ]
