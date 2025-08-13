@@ -1,0 +1,5 @@
+<!-- Crisp, scalable favicon (seed dot in your brand green) -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <circle cx="256" cy="256" r="200" fill="#10b981"></circle>
+  <circle cx="256" cy="256" r="84" fill="#059669" opacity="0.22"></circle>
+</svg>
