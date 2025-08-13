@@ -5,35 +5,46 @@ export const dynamic = 'force-dynamic'
 import { NextResponse } from 'next/server'
 import { headers } from 'next/headers'
 
-/** Allow either: Vercel Cron, ?cron=1, or a valid ADMIN_TOKEN (query or Bearer). */
+/** --- Types for dynamic imports (keeps TS happy without ts-expect-error) --- */
+type IngestMod = {
+  run: (opts?: { limit?: number; closePool?: boolean }) => Promise<any>
+}
+type DiscoverMod = {
+  run: (opts?: { limitPerQuery?: number; closePool?: boolean }) => Promise<any>
+}
+
+/** --- Auth helper --- */
 function authorized(req: Request) {
   const h = headers()
+  const isCron = h.get('x-vercel-cron') === '1'
+
   const url = new URL(req.url)
-
-  const isCron =
-    h.get('x-vercel-cron') === '1' || // normal Vercel Cron header
-    /vercel-cron/i.test(h.get('user-agent') || '') || // fallback via UA
-    url.searchParams.get('cron') === '1' // explicit flag we add in vercel.json
-
   const qToken = url.searchParams.get('token')?.trim()
-  const bearer = (h.get('authorization') || '')
-    .replace(/^Bearer\s+/i, '')
-    .trim()
-  const expected = (process.env.ADMIN_TOKEN || '').trim()
 
+  const auth = h.get('authorization') || ''
+  const bearer = auth.replace(/^Bearer\s+/i, '').trim()
+
+  const expected = (process.env.ADMIN_TOKEN || '').trim()
   return isCron || (!!expected && (qToken === expected || bearer === expected))
 }
 
-async function runIngest(limit?: number) {
-  // scripts/ingest exports run(opts). We keep it typed as any to avoid coupling.
-  const mod: any = await import('@/scripts/ingest')
-  if (typeof mod.run === 'function') return mod.run({ limit }) // serverless: do NOT pass closePool
-  if (typeof mod.default === 'function') return mod.default({ limit })
-  throw new Error('scripts/ingest.ts must export run()')
+/** --- Small helpers --- */
+function getIntParam(
+  url: URL,
+  key: string,
+  { min, max }: { min?: number; max?: number } = {}
+): number | undefined {
+  const raw = url.searchParams.get(key)
+  if (!raw) return undefined
+  const n = Number(raw)
+  if (!Number.isFinite(n)) return undefined
+  if (min !== undefined && n < min) return min
+  if (max !== undefined && n > max) return max
+  return n
 }
 
-export async function GET(req: Request) {
-  const h = headers()
+/** --- Runner --- */
+async function handle(req: Request) {
   if (!authorized(req)) {
     return NextResponse.json(
       { ok: false, error: 'unauthorized' },
@@ -41,28 +52,59 @@ export async function GET(req: Request) {
     )
   }
 
+  const h = headers()
+  const isCron = h.get('x-vercel-cron') === '1'
   const url = new URL(req.url)
-  const q = url.searchParams.get('limit')
-  const isCron =
-    h.get('x-vercel-cron') === '1' ||
-    /vercel-cron/i.test(h.get('user-agent') || '') ||
-    url.searchParams.get('cron') === '1'
-  const limit = q
-    ? Math.max(1, Math.min(50, Number(q)))
-    : isCron
-    ? 25
-    : undefined
+
+  // Controls
+  let ingestLimit = getIntParam(url, 'limit', { min: 1, max: 50 })
+  const wantDiscover =
+    (url.searchParams.get('discover') || '').toLowerCase() === '1' ||
+    (url.searchParams.get('discover') || '').toLowerCase() === 'true'
+  const discoverLimit = getIntParam(url, 'discoverLimit', { min: 1, max: 50 })
+
+  // Default to a conservative batch size when called by cron without an explicit limit
+  if (isCron && ingestLimit === undefined) ingestLimit = 25
 
   const t0 = Date.now()
+  const result: Record<string, any> = {}
+
   try {
-    const result = await runIngest(limit)
-    return NextResponse.json({ ok: true, took_ms: Date.now() - t0, result })
+    // Ingest pass
+    {
+      const { run } = (await import('@/scripts/ingest')) as IngestMod
+      result.ingest = await run({ limit: ingestLimit })
+    }
+
+    // Optional discovery pass (if you have scripts/discover.ts)
+    if (wantDiscover) {
+      try {
+        const { run } = (await import('@/scripts/discover')) as DiscoverMod
+        result.discover = await run({ limitPerQuery: discoverLimit })
+      } catch (e: any) {
+        // If discover module isn't present or fails, return a soft error but keep 200
+        result.discover = { ok: false, error: e?.message || String(e) }
+      }
+    }
+
+    return NextResponse.json({
+      ok: true,
+      took_ms: Date.now() - t0,
+      cron: isCron,
+      params: { ingestLimit, wantDiscover, discoverLimit },
+      result,
+    })
   } catch (e: any) {
     return NextResponse.json(
       { ok: false, error: e?.message || String(e) },
       { status: 500 }
     )
   }
+}
+
+/** --- HTTP handlers --- */
+export async function GET(req: Request) {
+  return handle(req)
 }
 
 export const POST = GET

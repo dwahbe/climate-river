@@ -4,21 +4,38 @@ export const dynamic = 'force-dynamic'
 
 import { NextResponse } from 'next/server'
 import { headers } from 'next/headers'
+import { endPool } from '@/lib/db'
 
+/**
+ * Allow:
+ *  - Vercel Cron (x-vercel-cron header or user-agent contains vercel-cron)
+ *  - ADMIN_TOKEN via Bearer token or ?token=...
+ *  - Optional ?cron=1 for manual tests
+ */
 function authorized(req: Request) {
   const h = headers()
+  const url = new URL(req.url)
+
   const isCron =
     h.get('x-vercel-cron') === '1' ||
     /vercel-cron/i.test(h.get('user-agent') || '') ||
-    new URL(req.url).searchParams.get('cron') === '1'
+    url.searchParams.get('cron') === '1'
 
+  const expected = (process.env.ADMIN_TOKEN || '').trim()
+  const qToken = url.searchParams.get('token')?.trim()
   const bearer = (h.get('authorization') || '')
     .replace(/^Bearer\s+/i, '')
     .trim()
-  const qToken = new URL(req.url).searchParams.get('token')?.trim()
-  const expected = (process.env.ADMIN_TOKEN || '').trim()
 
-  return isCron || (!!expected && (bearer === expected || qToken === expected))
+  return isCron || (!!expected && (qToken === expected || bearer === expected))
+}
+
+/** Safely invoke a script module's `run` (or its default). */
+async function safeRun(modPromise: Promise<any>, opts?: any) {
+  const mod: any = await modPromise
+  const fn: any = mod?.run ?? mod?.default
+  if (typeof fn !== 'function') return { ok: false, error: 'no_run_export' }
+  return await fn(opts)
 }
 
 export async function GET(req: Request) {
@@ -30,36 +47,66 @@ export async function GET(req: Request) {
   }
 
   const t0 = Date.now()
-  try {
-    const ingest: any = await import('@/scripts/ingest')
-    const rewrite: any = await import('@/scripts/rewrite')
-    const rescore: any = await import('@/scripts/rescore')
+  const url = new URL(req.url)
 
-    // Daily: full pass, then rescore (sequential)
-    const ing =
-      typeof ingest.run === 'function'
-        ? await ingest.run({})
-        : await ingest.default?.({})
-    const rew =
-      typeof rewrite.run === 'function'
-        ? await rewrite.run({ limit: 200 })
-        : await rewrite.default?.({ limit: 200 })
-    const sco =
-      typeof rescore.run === 'function'
-        ? await rescore.run({})
-        : await rescore.default?.({})
+  // Heavier defaults for the daily job (override with ?limit=...)
+  const limit = Math.max(
+    1,
+    Math.min(500, Number(url.searchParams.get('limit') || 150))
+  )
+  const discoverLimit = Math.max(
+    1,
+    Math.min(200, Number(url.searchParams.get('discover') || 60))
+  )
+  const rewriteLimit = Math.max(
+    1,
+    Math.min(400, Number(url.searchParams.get('rewrite') || 120))
+  )
+
+  try {
+    // 1) Broader feed discovery (a bit higher than delta)
+    const discoverResult = await safeRun(import('@/scripts/discover'), {
+      limit: discoverLimit,
+      closePool: false,
+    })
+
+    // 2) Ingest across ALL sources (seed + discovered) with higher cap
+    const ingestResult = await safeRun(import('@/scripts/ingest'), {
+      limit,
+      closePool: false,
+    })
+
+    // 3) Rescore clusters after new data
+    const rescoreResult = await safeRun(import('@/scripts/rescore'), {
+      closePool: false,
+    })
+
+    // 4) Rewrite more recent headlines daily (uses configured model, e.g. gpt-4o-mini)
+    const rewriteResult = await safeRun(import('@/scripts/rewrite'), {
+      limit: rewriteLimit,
+      closePool: false,
+    })
+
+    await endPool()
 
     return NextResponse.json({
       ok: true,
       took_ms: Date.now() - t0,
-      result: { ingest: ing, rewrite: rew, rescore: sco },
+      result: {
+        discover: discoverResult,
+        ingest: ingestResult,
+        rescore: rescoreResult,
+        rewrite: rewriteResult,
+      },
     })
-  } catch (e: any) {
+  } catch (err: any) {
+    await endPool().catch(() => {})
     return NextResponse.json(
-      { ok: false, error: e?.message || String(e) },
+      { ok: false, error: err?.message || String(err) },
       { status: 500 }
     )
   }
 }
 
+// Support POST for manual triggering
 export const POST = GET
