@@ -57,12 +57,12 @@
   {
     "slug": "reuters-environment",
     "name": "Reuters — Climate/Environment",
-    "rss": "https://feeds.reuters.com/reuters/environment"
+    "rss": "https://www.reuters.com/world/environment/rss"
   },
   {
     "slug": "washpost-climate-environment",
     "name": "Washington Post — Climate & Environment",
-    "rss": "https://www.washingtonpost.com/climate-environment/?outputType=rss"
+    "rss": "https://feeds.washingtonpost.com/rss/rss_climate-environment"
   },
   {
     "slug": "ft-climate-capital",
@@ -72,7 +72,7 @@
   {
     "slug": "npr-environment",
     "name": "NPR — Environment",
-    "rss": "https://feeds.npr.org/118497594/rss.xml"
+    "rss": "https://feeds.npr.org/1007/rss.xml"
   },
   {
     "slug": "conversation-environment-us",
@@ -82,12 +82,12 @@
   {
     "slug": "noaa-climate-gov",
     "name": "NOAA Climate.gov — All",
-    "rss": "https://www.climate.gov/feeds/all/rss.xml"
+    "rss": "https://www.climate.gov/feeds/all.rss"
   },
   {
     "slug": "nature-climate-change",
     "name": "Nature — Climate change",
-    "rss": "https://www.nature.com/subjects/climate-change/rss"
+    "rss": "https://www.nature.com/subjects/climate-change.rss"
   },
   {
     "slug": "economist-climate-change",
