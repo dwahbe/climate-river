@@ -1,12 +1,12 @@
 [
   {
     "slug": "bbc-science-environment",
-    "name": "BBC — Science & Environment",
+    "name": "BBC",
     "rss": "https://feeds.bbci.co.uk/news/science_and_environment/rss.xml"
   },
   {
     "slug": "guardian-climate-crisis",
-    "name": "The Guardian — Climate crisis",
+    "name": "The Guardian",
     "rss": "https://www.theguardian.com/environment/climate-crisis/rss"
   },
   {
@@ -31,12 +31,12 @@
   },
   {
     "slug": "nasa-climate-news",
-    "name": "NASA Climate — News",
+    "name": "NASA Climate",
     "rss": "https://climate.nasa.gov/news/rss.xml"
   },
   {
     "slug": "sciencedaily-climate",
-    "name": "ScienceDaily — Climate",
+    "name": "ScienceDaily",
     "rss": "https://www.sciencedaily.com/rss/earth_climate.xml"
   },
   {
@@ -51,62 +51,62 @@
   },
   {
     "slug": "nyt-climate",
-    "name": "New York Times — Climate",
+    "name": "New York Times",
     "rss": "https://rss.nytimes.com/services/xml/rss/nyt/Climate.xml"
   },
   {
     "slug": "reuters-environment",
-    "name": "Reuters — Climate/Environment",
+    "name": "Reuters",
     "rss": "https://www.reuters.com/world/environment/rss"
   },
   {
     "slug": "washpost-climate-environment",
-    "name": "Washington Post — Climate & Environment",
+    "name": "Washington Post",
     "rss": "https://feeds.washingtonpost.com/rss/rss_climate-environment"
   },
   {
     "slug": "ft-climate-capital",
-    "name": "Financial Times — Climate Capital",
+    "name": "Financial Times",
     "rss": "https://www.ft.com/climate-capital?format=rss"
   },
   {
     "slug": "npr-environment",
-    "name": "NPR — Environment",
+    "name": "NPR",
     "rss": "https://feeds.npr.org/1007/rss.xml"
   },
   {
     "slug": "conversation-environment-us",
-    "name": "The Conversation (US) — Environment",
+    "name": "The Conversation (US)",
     "rss": "https://theconversation.com/us/environment/articles.atom"
   },
   {
     "slug": "noaa-climate-gov",
-    "name": "NOAA Climate.gov — All",
+    "name": "NOAA Climate.gov",
     "rss": "https://www.climate.gov/feeds/all.rss"
   },
   {
     "slug": "nature-climate-change",
-    "name": "Nature — Climate change",
+    "name": "Nature",
     "rss": "https://www.nature.com/subjects/climate-change.rss"
   },
   {
     "slug": "economist-climate-change",
-    "name": "The Economist — Climate change",
+    "name": "The Economist",
     "rss": "https://www.economist.com/climate-change/rss.xml"
   },
   {
     "slug": "mit-tech-review-climate",
-    "name": "MIT Technology Review — Climate",
+    "name": "MIT Technology Review",
     "rss": "https://www.technologyreview.com/topic/climate-change/feed/"
   },
   {
     "slug": "physorg-environment",
-    "name": "Phys.org — Earth/Environment",
+    "name": "Phys.org",
     "rss": "https://phys.org/rss-feed/earth-news/"
   },
   {
     "slug": "bloomberg-climate",
-    "name": "Bloomberg — Climate",
+    "name": "Bloomberg",
     "rss": "https://www.bloomberg.com/feeds/climate.rss"
   },
   {
