@@ -1,5 +1,51 @@
+# ── Dependencies ─────────────────────────────────────────────
 node_modules/
+.pnp/
+.pnp.js
+
+# ── Next.js output ───────────────────────────────────────────
 .next/
+out/
+
+# ── Build / coverage ─────────────────────────────────────────
+dist/
+coverage/
+.nyc_output/
+
+# ── Caches ───────────────────────────────────────────────────
+.cache/
+.eslintcache
+.stylelintcache
+.turbo/
+.parcel-cache/
+
+# ── Logs ─────────────────────────────────────────────────────
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ── Environment secrets (keep only the template) ─────────────
 .env
 .env.local
+
+# ── Lockfiles (we use pnpm; keep pnpm-lock.yaml tracked) ─────
+package-lock.json
+yarn.lock
+# NOTE: do NOT ignore pnpm-lock.yaml
+
+# ── Vercel / hosting ─────────────────────────────────────────
+.vercel
+
+# ── Supabase local (if you use the CLI) ──────────────────────
+supabase/.temp/
+supabase/.branches/
+supabase/.logs/
+
+# ── OS / Editor junk ─────────────────────────────────────────
 .DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
