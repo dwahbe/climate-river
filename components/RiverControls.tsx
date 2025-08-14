@@ -17,10 +17,11 @@ function Tab({
     <button
       onClick={onClick}
       className={clsx(
-        'relative min-w-16 px-3 py-2 text-sm font-medium',
+        'relative px-3 py-2 text-sm font-medium',
         'text-zinc-600 hover:text-zinc-900 transition-colors',
         active && 'text-zinc-900'
       )}
+      aria-current={active ? 'page' : undefined}
     >
       <span>{children}</span>
       <span
@@ -47,8 +48,8 @@ export default function RiverControls() {
   }
 
   return (
-    <div className="mx-auto max-w-3xl">
-      <div className="flex items-center justify-center gap-6">
+    <div>
+      <div className="flex items-center justify-start gap-2">
         <Tab active={view === 'top'} onClick={() => setView('top')}>
           Top
         </Tab>
