@@ -13,24 +13,13 @@ export default async function RootLayout({
 }: {
   children: React.ReactNode
 }) {
-  const latest = await DB.query<{ ts: string }>(`
-    select coalesce(max(fetched_at), now()) as ts
-    from articles
-  `)
-  const lastTs = latest.rows[0]?.ts ?? new Date().toISOString()
-  const lastFormatted = new Intl.DateTimeFormat('en-US', {
-    dateStyle: 'medium',
-    timeStyle: 'short',
-    timeZone: 'America/Mexico_City',
-  }).format(new Date(lastTs))
-
   return (
     <html lang="en" className="h-full">
       <body className="min-h-full bg-zinc-50 text-zinc-900 antialiased">
         <nav className="sticky top-0 z-30 bg-white/80 backdrop-blur border-b border-zinc-100">
           <div className="mx-auto max-w-5xl px-4 sm:px-6">
-            {/* Three columns: left / center / right — all vertically centered */}
-            <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-3 py-3 sm:py-4">
+            {/* Two columns: left / right — all vertically centered */}
+            <div className="flex items-center justify-between py-3 sm:py-4">
               {/* Left: brand + mini nav */}
               <div className="flex items-center gap-4">
                 <Link href="/" className="flex items-center gap-2 no-underline">
@@ -41,10 +30,10 @@ export default async function RootLayout({
                 </Link>
                 <div className="hidden sm:flex items-center gap-3 text-sm">
                   <Link
-                    href="/river"
+                    href="/"
                     className="text-zinc-600 hover:text-zinc-900 no-underline"
                   >
-                    River
+                    Home
                   </Link>
                   <span className="text-zinc-300">/</span>
                   <Link
@@ -56,13 +45,8 @@ export default async function RootLayout({
                 </div>
               </div>
 
-              {/* Center: last updated */}
-              <div className="justify-self-center text-xs sm:text-sm text-zinc-500">
-                Last updated {lastFormatted}
-              </div>
-
               {/* Right: GitHub icon */}
-              <div className="justify-self-end">
+              <div>
                 <a
                   href="https://github.com/dwahbe/climate-river-mvp"
                   target="_blank"

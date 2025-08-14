@@ -57,6 +57,18 @@ export default async function RiverPage({
   const topWindowHours = 72
   const limit = 28
 
+  // Get last updated timestamp
+  const latest = await DB.query(`
+    select coalesce(max(fetched_at), now()) as ts
+    from articles
+  `)
+  const lastTs = latest.rows[0]?.ts ?? new Date().toISOString()
+  const lastFormatted = new Intl.DateTimeFormat('en-US', {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+    timeZone: 'America/Mexico_City',
+  }).format(new Date(lastTs))
+
   const { rows } = await DB.query<Row>(
     `
     WITH lead AS (
@@ -184,7 +196,7 @@ export default async function RiverPage({
     <>
       <header className="sticky top-0 z-10 bg-transparent">
         <div className="mx-auto max-w-3xl px-4 sm:px-6 py-2 sm:py-2.5">
-          <RiverControls />
+          <RiverControls lastUpdated={lastFormatted} />
         </div>
       </header>
 
@@ -209,7 +221,7 @@ export default async function RiverPage({
                     {r.lead_author && (
                       <span className="text-zinc-700">{r.lead_author}</span>
                     )}
-                    {r.lead_author && (
+                    {r.lead_author && publisher && (
                       <span className="px-1 text-zinc-400">•</span>
                     )}
                     {r.lead_homepage ? (
@@ -244,34 +256,22 @@ export default async function RiverPage({
                   </p>
                 )}
 
-                <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] sm:text-xs text-zinc-500">
+                {/* Timestamp */}
+                <div className="mt-2 text-xs text-zinc-500">
                   <LocalTime iso={r.published_at} />
-                  {isCluster && (
-                    <>
-                      <span>·</span>
-                      <span>
-                        {r.size} {r.size === 1 ? 'story' : 'stories'}
-                      </span>
-                      <span>·</span>
-                      <span>
-                        {r.sources_count}{' '}
-                        {r.sources_count === 1 ? 'source' : 'sources'}
-                      </span>
-                      <span className="ml-auto" />
-                      <Link
-                        href={`/river/${r.cluster_id}`}
-                        className="opacity-70 group-hover:opacity-100 text-zinc-600 hover:text-zinc-800 transition"
-                        prefetch={false}
-                      >
-                        Open →
-                      </Link>
-                    </>
-                  )}
                 </div>
 
+                {/* Read more sources */}
                 {isCluster && secondaries.length > 0 && (
-                  <div className="mt-2 text-[13px] leading-6 text-zinc-700">
-                    <span className="sr-only">More sources:</span>
+                  <div className="mt-2 text-sm text-zinc-700">
+                    <Link
+                      href={`/river/${r.cluster_id}`}
+                      className="no-underline hover:underline text-zinc-600 hover:text-zinc-800 transition-colors font-medium"
+                      prefetch={false}
+                    >
+                      Read more:
+                    </Link>
+                    <span> </span>
                     {secondaries.map((s, i) => {
                       const href = `/api/click?aid=${s.article_id}&url=${encodeURIComponent(
                         s.url
@@ -282,7 +282,7 @@ export default async function RiverPage({
                             href={href}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="no-underline hover:underline text-zinc-800"
+                            className="no-underline hover:underline text-zinc-700 hover:text-zinc-900 transition-colors"
                             title={s.title}
                           >
                             {s.source ?? hostFrom(s.url)}
@@ -293,20 +293,6 @@ export default async function RiverPage({
                         </span>
                       )
                     })}
-                    {moreCount > 0 && (
-                      <>
-                        {secondaries.length > 0 && (
-                          <span className="text-zinc-400">, </span>
-                        )}
-                        <Link
-                          href={`/river/${r.cluster_id}`}
-                          className="no-underline hover:underline text-zinc-700 hover:text-zinc-900"
-                          prefetch={false}
-                        >
-                          and {moreCount} more
-                        </Link>
-                      </>
-                    )}
                   </div>
                 )}
               </article>
