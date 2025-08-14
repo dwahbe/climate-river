@@ -1,27 +1,29 @@
 // app/river/page.tsx
 import Link from 'next/link'
 import * as DB from '@/lib/db'
+import LocalTime from '@/components/LocalTime'
 
 type SubLink = {
   title: string
   url: string
-  source: string
+  source: string | null
   author: string | null
   published_at: string
 }
+
 type Row = {
   cluster_id: number
   lead_title: string
   lead_url: string
   lead_dek: string | null
-  lead_source: string | null
-  lead_homepage: string | null
+  lead_source: string | null // coalesced: articles.publisher_name -> sources.name
+  lead_homepage: string | null // coalesced: articles.publisher_homepage -> sources.homepage_url
   lead_author: string | null
   published_at: string
   size: number
   score: number
   sources_count: number
-  subs: SubLink[] | null
+  subs: SubLink[] // always an array thanks to SQL coalesce('[]'::json)
   subs_total: number
 }
 
@@ -42,14 +44,15 @@ export default async function RiverPage() {
         cs.cluster_id,
         cs.size,
         cs.score,
-        a.id             as lead_article_id,
+        a.id as lead_article_id,
         coalesce(a.rewritten_title, a.title) as lead_title,
         a.canonical_url  as lead_url,
         a.dek            as lead_dek,
         a.author         as lead_author,
         a.published_at,
-        s.name           as lead_source,
-        s.homepage_url   as lead_homepage
+        -- Prefer per-article publisher (e.g., Google News true outlet), else source default
+        coalesce(a.publisher_name, s.name)             as lead_source,
+        coalesce(a.publisher_homepage, s.homepage_url) as lead_homepage
       from cluster_scores cs
       join articles a on a.id = cs.lead_article_id
       left join sources s on s.id = a.source_id
@@ -88,14 +91,15 @@ export default async function RiverPage() {
         select coalesce(json_agg(row_to_json(x) order by x.published_at desc), '[]'::json)
         from (
           select
-            a2.title as title,
+            a2.title         as title,
             a2.canonical_url as url,
-            s2.name as source,
-            a2.author as author,
+            -- Left join so we don't drop rows if a source record is missing
+            coalesce(a2.publisher_name, s2.name) as source,
+            a2.author       as author,
             a2.published_at
           from article_clusters ac2
           join articles a2 on a2.id = ac2.article_id
-          join sources s2  on s2.id = a2.source_id
+          left join sources s2 on s2.id = a2.source_id
           where ac2.cluster_id = l.cluster_id
             and a2.id <> l.lead_article_id
           order by a2.published_at desc
@@ -104,12 +108,13 @@ export default async function RiverPage() {
       ) as subs
     from lead l
     left join srcs s on s.cluster_id = l.cluster_id
+    order by l.score desc
   `)
 
   return (
     <section className="grid gap-3 sm:gap-3.5">
       {rows.map((r) => {
-        const secondaries = (r.subs ?? []) as SubLink[]
+        const secondaries = r.subs ?? []
         const shown = secondaries.length
         const moreCount = Math.max(0, r.subs_total - shown)
         const isCluster = r.size > 1
@@ -131,7 +136,7 @@ export default async function RiverPage() {
                   <a
                     href={r.lead_homepage}
                     target="_blank"
-                    rel="noreferrer"
+                    rel="noopener noreferrer"
                     className="source-link text-zinc-500 hover:text-zinc-700"
                   >
                     {publisher}
@@ -147,7 +152,7 @@ export default async function RiverPage() {
               <a
                 href={r.lead_url}
                 target="_blank"
-                rel="noreferrer"
+                rel="noopener noreferrer"
                 className="headline-link text-zinc-950 hover:text-zinc-900 transition-colors"
               >
                 {r.lead_title}
@@ -163,7 +168,7 @@ export default async function RiverPage() {
 
             {/* Meta & open cluster link */}
             <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] sm:text-xs text-zinc-500">
-              <span>{new Date(r.published_at).toLocaleString()}</span>
+              <LocalTime iso={r.published_at} />
 
               {isCluster && (
                 <>
@@ -176,7 +181,7 @@ export default async function RiverPage() {
                     {r.sources_count}{' '}
                     {r.sources_count === 1 ? 'source' : 'sources'}
                   </span>
-                  <span className="ms-auto" />
+                  <span className="ml-auto" />
                   <Link
                     href={`/river/${r.cluster_id}`}
                     className="text-zinc-600 hover:text-zinc-800"
@@ -193,15 +198,14 @@ export default async function RiverPage() {
                 <span className="font-semibold text-zinc-900">More:</span>{' '}
                 {secondaries.map((s, i) => (
                   <span key={s.url}>
-                    {/* show publisher name only (Techmeme-style), but keep link to the article */}
                     <a
                       href={s.url}
                       target="_blank"
-                      rel="noreferrer"
+                      rel="noopener noreferrer"
                       className="text-zinc-900 hover:underline decoration-zinc-300"
                       title={s.title}
                     >
-                      {s.source}
+                      {s.source ?? hostFrom(s.url)}
                     </a>
                     {i < secondaries.length - 1 ? ', ' : ''}
                   </span>

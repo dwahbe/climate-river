@@ -4,9 +4,131 @@ import dayjs from 'dayjs'
 import { query, endPool } from '@/lib/db'
 import sources from '@/data/sources.json'
 
-/* =========================
-   Types
-========================= */
+// ---------- Parser configured once (captures <source>, rich content) ----------
+type RssItem = {
+  title?: string
+  link?: string
+  isoDate?: string
+  pubDate?: string
+  description?: string
+  content?: string
+  contentSnippet?: string
+  summary?: string
+  // customFields we map in:
+  contentEncoded?: string
+  source?: any
+  creator?: string
+  author?: string
+}
+
+const parser = new Parser<RssItem>({
+  headers: {
+    'User-Agent':
+      'ClimateRiverBot/0.1 (+https://climate-news-gules.vercel.app)',
+  },
+  requestOptions: { timeout: 20000 },
+  customFields: {
+    item: [
+      // Publisher embedded by Google News: <source url="...">Publisher</source>
+      ['source', 'source', { keepArray: true }],
+      // Rich content
+      ['content:encoded', 'contentEncoded'],
+      // Common fields
+      'content',
+      'contentSnippet',
+      'summary',
+      // Authors
+      ['dc:creator', 'creator'],
+      'author',
+    ],
+  },
+})
+
+// ---------- Helpers ----------
+function isGoogleNewsFeed(feedUrl: string) {
+  try {
+    return new URL(feedUrl).hostname.includes('news.google.com')
+  } catch {
+    return false
+  }
+}
+
+/** Unwrap Google News redirect to publisher URL when present */
+function unGoogleLink(link: string) {
+  try {
+    const u = new URL(link)
+    if (u.hostname.includes('news.google.com')) {
+      const direct = u.searchParams.get('url')
+      if (direct) return direct
+    }
+    return link
+  } catch {
+    return link
+  }
+}
+
+function extractPublisherFromGoogleItem(item: RssItem): {
+  name?: string
+  homepage?: string
+} {
+  const src = (item as any)?.source
+  // rss-parser usually shapes <source> as { _: 'Publisher', $: { url: '...' } }
+  const first = Array.isArray(src) ? src[0] : src
+  if (first) {
+    const name =
+      (typeof first === 'string'
+        ? first
+        : (first['#'] ?? first._ ?? first.text ?? first.value)) || undefined
+    const homepage =
+      (typeof first === 'object' && (first.$?.url ?? first.url)) || undefined
+    if (name || homepage) return { name: String(name).trim(), homepage }
+  }
+
+  // Fallback: title suffix like "Title — Publisher"
+  if (item.title) {
+    const m = item.title.match(/\s[-—]\s([^]+)$/)
+    if (m) {
+      const name = m[1].trim()
+      const homepage = /\b[a-z0-9.-]+\.[a-z]{2,}\b/i.test(name)
+        ? `https://${name}`
+        : undefined
+      return { name, homepage }
+    }
+  }
+  return {}
+}
+
+function cleanGoogleNewsTitle(title: string) {
+  return title.replace(/\s[-—]\s[^-—]+$/, '').trim()
+}
+
+function stripHtml(s: string) {
+  return (s || '')
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+function pick(...vals: Array<string | undefined | null>) {
+  for (const v of vals) if (v && v.trim()) return v
+  return ''
+}
+function oneLine(raw: string, max = 200) {
+  const txt = stripHtml(raw)
+  const m = txt.match(/(.{40,}?[\.!\?])\s/) // first sentence-ish if long enough
+  const cut = m?.[1] ?? txt
+  return cut.length > max ? cut.slice(0, max - 1).trimEnd() + '…' : cut
+}
+function bestDek(it: RssItem) {
+  const raw = pick(
+    it.contentSnippet,
+    it.summary,
+    it.description,
+    it.content,
+    it.contentEncoded
+  )
+  return raw ? oneLine(raw) : null
+}
+
 type SourceRaw = {
   slug?: string
   name: string
@@ -22,31 +144,7 @@ type SourceDef = {
   weight: number
   slug: string
 }
-type RssItem = {
-  title?: string
-  link?: string
-  isoDate?: string
-  pubDate?: string
 
-  // content
-  contentSnippet?: string
-  description?: string
-  summary?: string
-  content?: string
-  'content:encoded'?: string
-  contentEncoded?: string // we map content:encoded -> contentEncoded
-
-  // authors (many feeds)
-  author?: string
-  creator?: string
-  creators?: string[]
-  'dc:creator'?: string
-  authors?: Array<{ name?: string }>
-}
-
-/* =========================
-   Small utilities
-========================= */
 function slugify(input: string) {
   return (input || '')
     .toLowerCase()
@@ -61,33 +159,6 @@ function shortHash(s: string) {
   for (let i = 0; i < s.length; i++) h = ((h << 5) + h) ^ s.charCodeAt(i)
   return (h >>> 0).toString(36)
 }
-function stripHtml(s: string) {
-  return (s || '')
-    .replace(/<[^>]*>/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-}
-function pick(...vals: Array<string | undefined | null>) {
-  for (const v of vals) if (v && v.trim()) return v
-  return ''
-}
-function toOneLiner(raw: string, max = 200) {
-  const txt = stripHtml(raw)
-  const m = txt.match(/(.{40,}?[\.!\?])\s/) // first sentence-ish if long enough
-  const cut = m?.[1] ?? txt
-  return cut.length > max ? cut.slice(0, max - 1).trimEnd() + '…' : cut
-}
-function makeDek(it: RssItem) {
-  const raw = pick(
-    it.contentSnippet,
-    it.description,
-    it.summary,
-    it.content,
-    it.contentEncoded
-  )
-  return raw ? toOneLiner(raw) : ''
-}
-/** remove tracking params and normalize */
 function canonical(url: string) {
   try {
     const u = new URL(url)
@@ -100,7 +171,6 @@ function canonical(url: string) {
     return url
   }
 }
-/** quick title-derived key for clustering */
 function clusterKey(title: string) {
   const t = (title || '')
     .toLowerCase()
@@ -134,15 +204,15 @@ function clusterKey(title: string) {
   const kept = words.filter((w) => !STOP.has(w) && w.length >= 3)
   return kept.slice(0, 8).join('-')
 }
-/** bounded concurrency map */
+
 async function mapLimit<T, R>(
   items: T[],
   limit: number,
   fn: (t: T, idx: number) => Promise<R>
 ) {
   const ret: R[] = new Array(items.length)
-  let i = 0
-  let active = 0
+  let i = 0,
+    active = 0
   return new Promise<R[]>((resolve, reject) => {
     const next = () => {
       if (i >= items.length && active === 0) return resolve(ret)
@@ -162,64 +232,7 @@ async function mapLimit<T, R>(
   })
 }
 
-/* =========================
-   Author + Google News helpers
-========================= */
-function getAuthor(it: RssItem): string | undefined {
-  const fromArr = (it.authors && it.authors[0]?.name) || it.creators?.[0]
-  const dc = (it as any)['dc:creator']
-
-  const raw = it.author || it.creator || fromArr || dc || undefined
-
-  if (raw) return String(raw).trim()
-
-  const guess = pick(it.contentSnippet, it.description, it.summary)
-  const m = guess?.match(/^\s*by\s+([A-Z][^,–—-]+?)(?:\s*[–—-]|,|\.)/i)
-  return m ? m[1].trim() : undefined
-}
-function isGoogleNewsFeed(feedUrl: string) {
-  try {
-    return new URL(feedUrl).hostname.includes('news.google.com')
-  } catch {
-    return false
-  }
-}
-function extractHrefs(html?: string): string[] {
-  if (!html) return []
-  const out: string[] = []
-  const re = /href="([^"]+)"/gi
-  let m: RegExpExecArray | null
-  while ((m = re.exec(html))) out.push(m[1])
-  return out
-}
-/** For Google News items, try to find the original publisher URL from content */
-function bestLinkFromGoogleItem(it: RssItem): string | undefined {
-  const candidates = [
-    ...extractHrefs(it.contentEncoded),
-    ...extractHrefs(it.content),
-    ...extractHrefs(it.summary),
-    ...extractHrefs(it.description),
-  ]
-  for (const u of candidates) {
-    try {
-      const host = new URL(u).hostname
-      if (!/news\.google\.com$/i.test(host)) return u
-    } catch {}
-  }
-  // occasionally Google includes a `url=` param
-  if (it.link && it.link.includes('url=')) {
-    try {
-      const u = new URL(it.link)
-      const urlParam = u.searchParams.get('url')
-      if (urlParam) return urlParam
-    } catch {}
-  }
-  return undefined
-}
-
-/* =========================
-   Source normalization
-========================= */
+// ---------- Normalize sources.json ----------
 function normalizeSource(s: SourceRaw): SourceDef | null {
   const feed = s.feed ?? s.rss ?? ''
   if (!feed) return null
@@ -235,20 +248,11 @@ function normalizeSource(s: SourceRaw): SourceDef | null {
   const slug =
     (s.slug && slugify(s.slug)) ||
     `${slugify(s.name || homepage)}-${shortHash(feed)}`
-  return {
-    name: s.name,
-    homepage,
-    feed,
-    weight: s.weight ?? 1,
-    slug,
-  }
+  return { name: s.name, homepage, feed, weight: s.weight ?? 1, slug }
 }
 
-/* =========================
-   Schema
-========================= */
+// ---------- Idempotent schema guard ----------
 async function ensureSchema() {
-  // sources
   await query(`
     create table if not exists sources (
       id            bigserial primary key,
@@ -264,25 +268,23 @@ async function ensureSchema() {
   )
   await query(`
     update sources
-       set slug = regexp_replace(
-         lower(coalesce(name, homepage_url, feed_url)),
-         '[^a-z0-9]+','-','g'
-       )
+       set slug = regexp_replace(lower(coalesce(name, homepage_url, feed_url)),'[^a-z0-9]+','-','g')
      where slug is null;
   `)
   await query(`create index if not exists idx_sources_slug on sources(slug);`)
 
-  // articles (+ author + dek)
   await query(`
     create table if not exists articles (
-      id            bigserial primary key,
-      source_id     bigint references sources(id) on delete cascade,
-      title         text not null,
-      canonical_url text not null unique,
-      published_at  timestamptz,
-      fetched_at    timestamptz not null default now(),
-      dek           text,
-      author        text
+      id                 bigserial primary key,
+      source_id          bigint references sources(id) on delete cascade,
+      title              text not null,
+      canonical_url      text not null unique,
+      published_at       timestamptz,
+      fetched_at         timestamptz not null default now(),
+      dek                text,
+      author             text,
+      publisher_name     text,
+      publisher_homepage text
     );
   `)
   await query(
@@ -291,12 +293,16 @@ async function ensureSchema() {
   await query(
     `alter table if exists articles add column if not exists author text;`
   )
-  await query(`
-    create index if not exists idx_articles_published_at
-      on articles(published_at desc);
-  `)
+  await query(
+    `alter table if exists articles add column if not exists publisher_name text;`
+  )
+  await query(
+    `alter table if exists articles add column if not exists publisher_homepage text;`
+  )
+  await query(
+    `create index if not exists idx_articles_published_at on articles(published_at desc);`
+  )
 
-  // clusters + link
   await query(`
     create table if not exists clusters (
       id         bigserial primary key,
@@ -316,9 +322,7 @@ async function ensureSchema() {
   `)
 }
 
-/* =========================
-   DB helpers
-========================= */
+// ---------- DB helpers ----------
 async function upsertSources(defs: SourceDef[]) {
   if (!defs.length) return
   const params: any[] = []
@@ -342,6 +346,7 @@ async function upsertSources(defs: SourceDef[]) {
     params
   )
 }
+
 async function sourceMap(): Promise<Record<string, { id: number }>> {
   const { rows } = await query<{ id: number; feed_url: string }>(
     `select id, feed_url from sources`
@@ -350,72 +355,68 @@ async function sourceMap(): Promise<Record<string, { id: number }>> {
   for (const r of rows) map[r.feed_url] = { id: r.id }
   return map
 }
+
+function parseDateMaybe(s?: string) {
+  if (!s) return null
+  const d = dayjs(s)
+  return d.isValid() ? d.toDate() : null
+}
+
 async function insertArticle(
   sourceId: number,
   title: string,
   url: string,
   publishedAt?: string,
-  dek?: string,
-  author?: string
+  dek?: string | null,
+  author?: string | null,
+  // defaulted param must NOT be optional
+  pub: { name?: string; homepage?: string } = {}
 ) {
   const row = await query<{ id: number }>(
     `
-    insert into articles (source_id, title, canonical_url, published_at, dek, author)
-    values ($1, $2, $3, $4, $5, $6)
-    on conflict (canonical_url) do update
-      set dek    = coalesce(articles.dek, excluded.dek),
-          author = coalesce(articles.author, excluded.author)
+    insert into articles
+      (source_id, title, canonical_url, published_at, dek, author, publisher_name, publisher_homepage)
+    values ($1,$2,$3,$4,$5,$6,$7,$8)
+    on conflict (canonical_url) do update set
+      dek                 = coalesce(articles.dek, excluded.dek),
+      author              = coalesce(articles.author, excluded.author),
+      publisher_name      = coalesce(articles.publisher_name, excluded.publisher_name),
+      publisher_homepage  = coalesce(articles.publisher_homepage, excluded.publisher_homepage)
     returning id
   `,
     [
       sourceId,
       title,
       url,
-      publishedAt ? dayjs(publishedAt).toDate() : null,
-      dek || null,
-      author || null,
+      parseDateMaybe(publishedAt),
+      dek ?? null,
+      author ?? null,
+      pub.name ?? null,
+      pub.homepage ?? null,
     ]
   )
   return row.rows[0]?.id
 }
+
 async function ensureClusterForArticle(articleId: number, title: string) {
   const key = clusterKey(title)
   if (!key) return
   const cluster = await query<{ id: number }>(
-    `
-    insert into clusters (key)
-    values ($1)
-    on conflict (key) do update set key = excluded.key
-    returning id
-  `,
+    `insert into clusters (key) values ($1)
+     on conflict (key) do update set key = excluded.key
+     returning id`,
     [key]
   )
   const clusterId = cluster.rows[0].id
   await query(
-    `
-    insert into article_clusters (article_id, cluster_id)
-    values ($1, $2)
-    on conflict do nothing
-  `,
+    `insert into article_clusters (article_id, cluster_id)
+     values ($1,$2) on conflict do nothing`,
     [articleId, clusterId]
   )
 }
 
-/* =========================
-   Ingest a single feed
-========================= */
+// ---------- Ingest one feed ----------
 async function ingestFromFeed(feedUrl: string, sourceId: number, limit = 20) {
-  const parser = new Parser<RssItem>({
-    headers: {
-      'User-Agent':
-        'ClimateRiverBot/0.1 (+https://climate-news-gules.vercel.app)',
-    },
-    requestOptions: { timeout: 15000 },
-    customFields: {
-      item: [['content:encoded', 'contentEncoded']],
-    },
-  })
-
   let feed
   try {
     feed = await parser.parseURL(feedUrl)
@@ -426,50 +427,50 @@ async function ingestFromFeed(feedUrl: string, sourceId: number, limit = 20) {
 
   const items = (feed.items || []) as RssItem[]
   const slice = items.slice(0, limit)
-  const googleFeed = isGoogleNewsFeed(feedUrl)
 
+  const fromGoogle = isGoogleNewsFeed(feedUrl)
   let inserted = 0
-  for (const it of slice) {
-    const rawTitle = (it.title || '').trim()
-    const rawLink = (it.link || '').trim()
-    if (!rawTitle || !rawLink) continue
 
-    // Prefer original publisher URL for Google News items
-    let chosenLink = rawLink
-    try {
-      const linkHost = new URL(rawLink).hostname
-      if (googleFeed || /news\.google\.com$/i.test(linkHost)) {
-        const candidate = bestLinkFromGoogleItem(it)
-        if (candidate) chosenLink = candidate
+  for (const it of slice) {
+    let title = (it.title || '').trim()
+    let link = (it.link || '').trim()
+    if (!title || !link) continue
+
+    // Unwrap Google wrapper → real publisher URL when available
+    if (fromGoogle) link = unGoogleLink(link)
+
+    const dek = bestDek(it)
+    const author = (it.creator || it.author || null) as string | null
+
+    let pub: { name?: string; homepage?: string } = {}
+    if (fromGoogle) {
+      pub = extractPublisherFromGoogleItem(it)
+      if (pub.name) {
+        // Clean trailing " - Publisher" now that we store publisher separately
+        title = cleanGoogleNewsTitle(title)
       }
-    } catch {
-      // ignore URL parse failures
     }
 
-    const url = canonical(chosenLink)
-    const dek = makeDek(it)
-    const author = getAuthor(it)
-
+    const url = canonical(link)
     const articleId = await insertArticle(
       sourceId,
-      rawTitle,
+      title,
       url,
       it.isoDate || it.pubDate,
       dek,
-      author
+      author,
+      pub
     )
     if (articleId) {
       inserted++
-      await ensureClusterForArticle(articleId, rawTitle)
+      await ensureClusterForArticle(articleId, title)
     }
   }
 
   return { scanned: slice.length, inserted }
 }
 
-/* =========================
-   Main entry
-========================= */
+// ---------- Main (export) ----------
 export async function run(opts: { limit?: number; closePool?: boolean } = {}) {
   const start = Date.now()
   await ensureSchema()
@@ -518,9 +519,7 @@ export async function run(opts: { limit?: number; closePool?: boolean } = {}) {
   return { total, results }
 }
 
-/* =========================
-   CLI
-========================= */
+// ---------- CLI ----------
 if (import.meta.url === `file://${process.argv[1]}`) {
   run({ closePool: true }).catch((err) => {
     console.error(err)

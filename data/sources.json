@@ -103,5 +103,15 @@
     "slug": "physorg-environment",
     "name": "Phys.org — Earth/Environment",
     "rss": "https://phys.org/rss-feed/earth-news/"
+  },
+  {
+    "slug": "bloomberg-climate",
+    "name": "Bloomberg — Climate",
+    "rss": "https://www.bloomberg.com/feeds/climate.rss"
+  },
+  {
+    "slug": "jacobin",
+    "name": "Jacobin",
+    "rss": "https://jacobin.com/feed/"
   }
 ]
