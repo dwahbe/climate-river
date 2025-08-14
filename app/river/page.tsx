@@ -4,6 +4,7 @@ import * as DB from '@/lib/db'
 import LocalTime from '@/components/LocalTime'
 
 type SubLink = {
+  article_id: number
   title: string
   url: string
   source: string | null
@@ -13,6 +14,7 @@ type SubLink = {
 
 type Row = {
   cluster_id: number
+  lead_article_id: number
   lead_title: string
   lead_url: string
   lead_dek: string | null
@@ -39,35 +41,36 @@ function hostFrom(url: string) {
 
 export default async function RiverPage() {
   const { rows } = await DB.query<Row>(`
-    with lead as (
-      select
+    WITH lead AS (
+      SELECT
         cs.cluster_id,
         cs.size,
         cs.score,
-        a.id as lead_article_id,
-        coalesce(a.rewritten_title, a.title) as lead_title,
-        a.canonical_url  as lead_url,
-        a.dek            as lead_dek,
-        a.author         as lead_author,
+        a.id AS lead_article_id,
+        COALESCE(a.rewritten_title, a.title) AS lead_title,
+        a.canonical_url  AS lead_url,
+        a.dek            AS lead_dek,
+        a.author         AS lead_author,
         a.published_at,
         -- Prefer per-article publisher (e.g., Google News true outlet), else source default
-        coalesce(a.publisher_name, s.name)             as lead_source,
-        coalesce(a.publisher_homepage, s.homepage_url) as lead_homepage
-      from cluster_scores cs
-      join articles a on a.id = cs.lead_article_id
-      left join sources s on s.id = a.source_id
-      order by cs.score desc
-      limit 20
+        COALESCE(a.publisher_name, s.name)              AS lead_source,
+        COALESCE(a.publisher_homepage, s.homepage_url)  AS lead_homepage
+      FROM cluster_scores cs
+      JOIN articles a ON a.id = cs.lead_article_id
+      LEFT JOIN sources s ON s.id = a.source_id
+      ORDER BY cs.score DESC
+      LIMIT 20
     ),
-    srcs as (
-      select ac.cluster_id, count(distinct s.id) as sources_count
-      from article_clusters ac
-      join articles a on a.id = ac.article_id
-      join sources s on s.id = a.source_id
-      group by ac.cluster_id
+    srcs AS (
+      SELECT ac.cluster_id, COUNT(DISTINCT s.id) AS sources_count
+      FROM article_clusters ac
+      JOIN articles a ON a.id = ac.article_id
+      JOIN sources s ON s.id = a.source_id
+      GROUP BY ac.cluster_id
     )
-    select
+    SELECT
       l.cluster_id,
+      l.lead_article_id,
       l.lead_title,
       l.lead_url,
       l.lead_dek,
@@ -77,38 +80,39 @@ export default async function RiverPage() {
       l.published_at,
       l.size,
       l.score,
-      coalesce(s.sources_count, 1) as sources_count,
+      COALESCE(s.sources_count, 1) AS sources_count,
 
       (
-        select count(*)
-        from article_clusters ac
-        join articles a2 on a2.id = ac.article_id
-        where ac.cluster_id = l.cluster_id
-          and a2.id <> l.lead_article_id
-      )::int as subs_total,
+        SELECT COUNT(*)
+        FROM article_clusters ac
+        JOIN articles a2 ON a2.id = ac.article_id
+        WHERE ac.cluster_id = l.cluster_id
+          AND a2.id <> l.lead_article_id
+      )::int AS subs_total,
 
       (
-        select coalesce(json_agg(row_to_json(x) order by x.published_at desc), '[]'::json)
-        from (
-          select
-            a2.title         as title,
-            a2.canonical_url as url,
+        SELECT COALESCE(json_agg(row_to_json(x) ORDER BY x.published_at DESC), '[]'::json)
+        FROM (
+          SELECT
+            a2.id            AS article_id,
+            a2.title         AS title,
+            a2.canonical_url AS url,
             -- Left join so we don't drop rows if a source record is missing
-            coalesce(a2.publisher_name, s2.name) as source,
-            a2.author       as author,
+            COALESCE(a2.publisher_name, s2.name) AS source,
+            a2.author       AS author,
             a2.published_at
-          from article_clusters ac2
-          join articles a2 on a2.id = ac2.article_id
-          left join sources s2 on s2.id = a2.source_id
-          where ac2.cluster_id = l.cluster_id
-            and a2.id <> l.lead_article_id
-          order by a2.published_at desc
-          limit 8
+          FROM article_clusters ac2
+          JOIN articles a2 ON a2.id = ac2.article_id
+          LEFT JOIN sources s2 ON s2.id = a2.source_id
+          WHERE ac2.cluster_id = l.cluster_id
+            AND a2.id <> l.lead_article_id
+          ORDER BY a2.published_at DESC
+          LIMIT 8
         ) x
-      ) as subs
-    from lead l
-    left join srcs s on s.cluster_id = l.cluster_id
-    order by l.score desc
+      ) AS subs
+    FROM lead l
+    LEFT JOIN srcs s ON s.cluster_id = l.cluster_id
+    ORDER BY l.score DESC
   `)
 
   return (
@@ -120,6 +124,9 @@ export default async function RiverPage() {
         const isCluster = r.size > 1
 
         const publisher = r.lead_source || hostFrom(r.lead_url)
+        const leadClickHref = `/api/click?aid=${r.lead_article_id}&url=${encodeURIComponent(
+          r.lead_url
+        )}`
 
         return (
           <article key={r.cluster_id} className="py-3 border-b border-zinc-300">
@@ -150,7 +157,7 @@ export default async function RiverPage() {
             {/* Headline */}
             <h3 className="text-[18px] sm:text-[19px] md:text-[20px] font-semibold leading-snug tracking-tight">
               <a
-                href={r.lead_url}
+                href={leadClickHref}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="headline-link text-zinc-950 hover:text-zinc-900 transition-colors"
@@ -185,6 +192,7 @@ export default async function RiverPage() {
                   <Link
                     href={`/river/${r.cluster_id}`}
                     className="text-zinc-600 hover:text-zinc-800"
+                    prefetch={false}
                   >
                     Open cluster →
                   </Link>
@@ -196,26 +204,32 @@ export default async function RiverPage() {
             {isCluster && secondaries.length > 0 && (
               <div className="mt-1.5 text-[13px] leading-6 text-zinc-700">
                 <span className="font-semibold text-zinc-900">More:</span>{' '}
-                {secondaries.map((s, i) => (
-                  <span key={s.url}>
-                    <a
-                      href={s.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-zinc-900 hover:underline decoration-zinc-300"
-                      title={s.title}
-                    >
-                      {s.source ?? hostFrom(s.url)}
-                    </a>
-                    {i < secondaries.length - 1 ? ', ' : ''}
-                  </span>
-                ))}
+                {secondaries.map((s, i) => {
+                  const href = `/api/click?aid=${s.article_id}&url=${encodeURIComponent(
+                    s.url
+                  )}`
+                  return (
+                    <span key={s.article_id}>
+                      <a
+                        href={href}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-zinc-900 hover:underline decoration-zinc-300"
+                        title={s.title}
+                      >
+                        {s.source ?? hostFrom(s.url)}
+                      </a>
+                      {i < secondaries.length - 1 ? ', ' : ''}
+                    </span>
+                  )
+                })}
                 {moreCount > 0 && (
                   <>
                     {shown > 0 ? ', ' : null}
                     <Link
                       href={`/river/${r.cluster_id}`}
                       className="text-zinc-700 hover:text-zinc-900"
+                      prefetch={false}
                     >
                       and {moreCount} more
                     </Link>
