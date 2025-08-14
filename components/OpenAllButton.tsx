@@ -1,6 +1,10 @@
 'use client'
+type Props = {
+  urls: string[]
+  className?: string
+}
 
-export default function OpenAllButton({ urls }: { urls: string[] }) {
+export default function OpenAllButton({ urls, className }: Props) {
   // Safety: de-dupe & cap to avoid popup blockers
   const unique = Array.from(new Set(urls)).slice(0, 12)
 

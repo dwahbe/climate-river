@@ -1,28 +1,36 @@
 // app/river/[id]/page.tsx
 import Link from 'next/link'
-import { notFound } from 'next/navigation'
 import * as DB from '@/lib/db'
-import OpenAllButton from '@/components/OpenAllButton' // make sure this file exists
+import LocalTime from '@/components/LocalTime'
+import OpenAllButton from '@/components/OpenAllButton'
+import { unstable_noStore as noStore } from 'next/cache'
+import Card from '@/components/ui/Card'
 
 export const dynamic = 'force-dynamic'
+export const runtime = 'nodejs'
 
-type Article = {
-  id: number
+type Sub = {
+  article_id: number
   title: string
-  rewritten_title: string | null
-  canonical_url: string
+  url: string
+  source: string | null
+  author: string | null
   published_at: string
-  source_name: string | null
-  source_homepage: string | null
-  dek: string | null
 }
 
-type Cluster = {
+type ClusterRow = {
   cluster_id: number
   size: number
-  score: number
-  lead: Article
-  others: Article[]
+  sources_count: number
+  lead_article_id: number
+  lead_title: string
+  lead_url: string
+  lead_dek: string | null
+  lead_source: string | null
+  lead_homepage: string | null
+  lead_author: string | null
+  published_at: string
+  subs: Sub[]
 }
 
 function hostFrom(url: string) {
@@ -33,173 +41,198 @@ function hostFrom(url: string) {
   }
 }
 
-async function getCluster(clusterId: number): Promise<Cluster | null> {
-  const { rows } = await DB.query<{
-    cluster_id: number
-    size: number
-    score: number
-    is_lead: boolean
-    id: number
-    title: string
-    rewritten_title: string | null
-    canonical_url: string
-    published_at: string
-    source_name: string | null
-    source_homepage: string | null
-    dek: string | null
-  }>(
-    `
-    with ranked as (
-      select
-        cs.cluster_id,
-        cs.size,
-        cs.score,
-        (a.id = cs.lead_article_id) as is_lead,
-        a.id,
-        a.title,
-        a.rewritten_title,
-        a.canonical_url,
-        a.published_at,
-        s.name as source_name,
-        s.homepage_url as source_homepage,
-        a.dek
-      from cluster_scores cs
-      join article_clusters ac on ac.cluster_id = cs.cluster_id
-      join articles a on a.id = ac.article_id
-      left join sources s on s.id = a.source_id
-      where cs.cluster_id = $1
-    )
-    select * from ranked
-    order by is_lead desc, published_at desc
-    `,
-    [clusterId]
-  )
-
-  if (rows.length === 0) return null
-
-  const leadRow = rows.find((r) => r.is_lead) ?? rows[0]
-  const others = rows.filter((r) => r.id !== leadRow.id)
-
-  const toArticle = (r: (typeof rows)[number]): Article => ({
-    id: r.id,
-    title: r.title,
-    rewritten_title: r.rewritten_title,
-    canonical_url: r.canonical_url,
-    published_at: r.published_at,
-    source_name: r.source_name,
-    source_homepage: r.source_homepage,
-    dek: r.dek,
-  })
-
-  return {
-    cluster_id: leadRow.cluster_id,
-    size: leadRow.size,
-    score: leadRow.score,
-    lead: toArticle(leadRow),
-    others: others.map(toArticle),
-  }
-}
-
 export default async function ClusterPage({
   params,
 }: {
   params: { id: string }
 }) {
-  const idNum = Number(params.id)
-  if (!Number.isFinite(idNum)) notFound()
+  noStore()
+  const cid = Number(params.id)
 
-  const data = await getCluster(idNum)
-  if (!data) notFound()
+  const { rows } = await DB.query<ClusterRow>(
+    `
+    WITH lead AS (
+      SELECT
+        cs.cluster_id,
+        cs.size,
+        a.id AS lead_article_id,
+        COALESCE(a.rewritten_title, a.title) AS lead_title,
+        a.canonical_url  AS lead_url,
+        a.dek            AS lead_dek,
+        a.author         AS lead_author,
+        a.published_at,
+        COALESCE(a.publisher_name, s.name)              AS lead_source,
+        COALESCE(a.publisher_homepage, s.homepage_url)  AS lead_homepage
+      FROM cluster_scores cs
+      JOIN articles a ON a.id = cs.lead_article_id
+      LEFT JOIN sources s ON s.id = a.source_id
+      WHERE cs.cluster_id = $1::bigint
+      LIMIT 1
+    )
+    SELECT
+      l.cluster_id,
+      l.size,
+      (SELECT COUNT(DISTINCT s.id)
+         FROM article_clusters ac
+         JOIN articles a2 ON a2.id = ac.article_id
+         LEFT JOIN sources s ON s.id = a2.source_id
+        WHERE ac.cluster_id = l.cluster_id)::int AS sources_count,
+      l.lead_article_id,
+      l.lead_title,
+      l.lead_url,
+      l.lead_dek,
+      l.lead_source,
+      l.lead_homepage,
+      l.lead_author,
+      l.published_at,
 
-  const { lead, others, size } = data
-  const leadPublisher =
-    lead.source_name || hostFrom(lead.canonical_url) || 'Source'
+      (
+        WITH x AS (
+          SELECT
+            a2.id            AS article_id,
+            a2.title,
+            a2.canonical_url AS url,
+            COALESCE(a2.publisher_name, s2.name) AS source,
+            a2.author,
+            a2.published_at,
+            COALESCE(
+              a2.publisher_host,
+              lower(regexp_replace(COALESCE(a2.publisher_homepage, a2.canonical_url),
+                    '^https?://(www\\.)?([^/]+).*$', '\\\\2'))
+            ) AS host_norm,
+            lower(
+              regexp_replace(
+                regexp_replace(
+                  regexp_replace(
+                    COALESCE(a2.rewritten_title, a2.title),
+                    '\\\\s[-—]\\\\s[^-—]+$',
+                    '',
+                    'g'
+                  ),
+                  '[[:punct:]]',
+                  ' ',
+                  'g'
+                ),
+                '\\\\s+',
+                ' ',
+                'g'
+              )
+            ) AS title_norm
+          FROM article_clusters ac2
+          JOIN articles a2 ON a2.id = ac2.article_id
+          LEFT JOIN sources s2 ON s2.id = a2.source_id
+          WHERE ac2.cluster_id = l.cluster_id
+            AND a2.id <> l.lead_article_id
+        )
+        SELECT COALESCE(json_agg(row_to_json(y) ORDER BY y.published_at DESC), '[]'::json)
+        FROM (
+          -- keep one per outlet, prefer real outlet to Google, then newest
+          SELECT DISTINCT ON (host_norm)
+            article_id, title, url, source, author, published_at
+          FROM x
+          ORDER BY
+            host_norm,
+            (url NOT LIKE 'https://news.google.com%') DESC,
+            published_at DESC
+        ) y
+      ) AS subs
+    FROM lead l
+    `,
+    [cid]
+  )
 
-  return (
-    <section className="mx-auto max-w-3xl md:max-w-4xl lg:max-w-5xl px-4 sm:px-6 py-6">
-      {/* Back + header */}
-      <div className="mb-5 flex items-center justify-between">
-        <Link
-          href="/river"
-          className="text-sm text-zinc-600 hover:text-zinc-900"
-        >
+  const r = rows[0]
+  if (!r) {
+    return (
+      <div className="mx-auto max-w-3xl px-4 sm:px-6 py-10 text-zinc-600">
+        <Link href="/river" className="hover:underline">
           ← Back to river
         </Link>
-        <div className="text-xs text-zinc-500">
-          {size} {size === 1 ? 'article' : 'articles'}
-        </div>
+        <p className="mt-6">Cluster not found.</p>
+      </div>
+    )
+  }
+
+  const leadClickHref = `/api/click?aid=${r.lead_article_id}&url=${encodeURIComponent(
+    r.lead_url
+  )}`
+  const openAllUrls = [r.lead_url, ...r.subs.map((s) => s.url)]
+
+  return (
+    <div className="mx-auto max-w-3xl px-4 sm:px-6 py-5">
+      {/* Page chrome */}
+      <div className="flex items-center justify-between text-[12px] sm:text-sm text-zinc-600">
+        <Link href="/river" className="hover:underline">
+          ← Back to river
+        </Link>
+        <span>
+          {r.size} {r.size === 1 ? 'article' : 'articles'}
+        </span>
       </div>
 
       {/* Lead card */}
-      <article className="rounded-xl border border-zinc-200 bg-white p-5 shadow-sm">
-        <div className="mb-1 text-[11px] sm:text-xs font-medium tracking-wide text-zinc-500">
-          {lead.source_homepage ? (
-            <a
-              href={lead.source_homepage}
-              target="_blank"
-              rel="noreferrer"
-              className="hover:text-zinc-700 no-underline"
-            >
-              {leadPublisher}
-            </a>
-          ) : (
-            leadPublisher
-          )}
+      <Card className="mt-4">
+        <div className="text-[11px] sm:text-xs font-medium tracking-wide text-zinc-500 mb-1.5">
+          {r.lead_source ?? hostFrom(r.lead_url)}
         </div>
 
-        <h1 className="text-xl sm:text-2xl font-semibold tracking-tight leading-snug">
+        <h1 className="text-xl sm:text-[22px] font-semibold tracking-tight leading-snug">
           <a
-            href={lead.canonical_url}
+            href={leadClickHref}
             target="_blank"
-            rel="noreferrer"
-            className="no-underline hover:underline decoration-zinc-300"
+            rel="noopener noreferrer"
+            className="text-zinc-950 hover:text-zinc-900 focus-visible:focus-ring rounded transition"
           >
-            {lead.rewritten_title || lead.title}
+            {r.lead_title}
           </a>
         </h1>
 
-        {lead.dek && (
-          <p className="mt-2 text-zinc-700 text-[0.95rem]">{lead.dek}</p>
+        {r.lead_dek && (
+          <p className="mt-2 text-[15px] sm:text-base text-zinc-600">
+            {r.lead_dek}
+          </p>
         )}
 
-        <div className="mt-3 flex flex-wrap items-center gap-2">
+        <div className="mt-3 flex items-center gap-3 text-[12px] sm:text-sm text-zinc-500">
+          <LocalTime iso={r.published_at} />
+          <span className="ml-auto" />
           <OpenAllButton
-            urls={[lead.canonical_url, ...others.map((o) => o.canonical_url)]}
+            urls={openAllUrls}
+            className="text-zinc-700 hover:text-zinc-900"
           />
         </div>
-      </article>
+      </Card>
 
-      {/* Others */}
-      {others.length > 0 && (
-        <div className="mt-6 rounded-xl border border-zinc-200 bg-white p-4">
-          <div className="mb-3 text-sm font-medium text-zinc-700">
+      {/* More coverage */}
+      {r.subs.length > 0 && (
+        <Card className="mt-5">
+          <div className="mb-2 text-[13px] font-medium text-zinc-500">
             More coverage
           </div>
-          <ul className="space-y-3">
-            {others.map((a) => {
-              const pub = a.source_name || hostFrom(a.canonical_url)
+          <ul className="divide-y divide-zinc-200/70">
+            {r.subs.map((s) => {
+              const href = `/api/click?aid=${s.article_id}&url=${encodeURIComponent(
+                s.url
+              )}`
               return (
-                <li
-                  key={a.id}
-                  className="border-b last:border-0 border-zinc-100 pb-3"
-                >
-                  <div className="text-[11px] sm:text-xs font-medium tracking-wide text-zinc-500 mb-0.5">
-                    {pub}
+                <li key={s.article_id} className="py-3">
+                  <div className="mb-1 text-[11px] sm:text-xs text-zinc-500">
+                    {s.source ?? hostFrom(s.url)}
                   </div>
                   <a
-                    href={a.canonical_url}
+                    href={href}
                     target="_blank"
-                    rel="noreferrer"
-                    className="text-[15px] sm:text-[16px] font-medium text-zinc-900 no-underline hover:underline decoration-zinc-300"
+                    rel="noopener noreferrer"
+                    className="text-[15px] sm:text-base text-zinc-900 hover:underline decoration-zinc-300"
                   >
-                    {a.rewritten_title || a.title}
+                    {s.title}
                   </a>
                 </li>
               )
             })}
           </ul>
-        </div>
+        </Card>
       )}
-    </section>
+    </div>
   )
 }

@@ -2,10 +2,11 @@
 import './global.css'
 import Link from 'next/link'
 import * as DB from '@/lib/db'
-import { Analytics } from '@vercel/analytics/next'
+import { Analytics } from '@vercel/analytics/react' // ✅ correct entrypoint
 
 export const metadata = { title: 'Climate River' }
 export const dynamic = 'force-dynamic'
+export const runtime = 'nodejs' // ✅ ensure Node for DB access
 
 export default async function RootLayout({
   children,
@@ -36,7 +37,7 @@ export default async function RootLayout({
               </span>
             </Link>
 
-            {/* Center: plain last-updated text (no box) */}
+            {/* Center: last-updated text */}
             <div className="absolute left-1/2 -translate-x-1/2 hidden sm:block text-xs sm:text-sm text-zinc-500">
               Last updated {lastFormatted}
             </div>
@@ -71,7 +72,7 @@ export default async function RootLayout({
           </div>
         </nav>
 
-        {/* Page container (links styled via .content in global.css) */}
+        {/* Page container */}
         <main className="mx-auto max-w-5xl px-4 sm:px-6 py-6 content">
           {children}
         </main>

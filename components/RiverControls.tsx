@@ -1,66 +1,62 @@
 // components/RiverControls.tsx
 'use client'
 
-import Link from 'next/link'
-import { usePathname, useSearchParams } from 'next/navigation'
+import { usePathname, useRouter, useSearchParams } from 'next/navigation'
+import clsx from 'clsx'
 
-function cx(...p: Array<string | false | null | undefined>) {
-  return p.filter(Boolean).join(' ')
+function Tab({
+  active,
+  children,
+  onClick,
+}: {
+  active: boolean
+  children: React.ReactNode
+  onClick: () => void
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={clsx(
+        'relative min-w-16 px-3 py-2 text-sm font-medium',
+        'text-zinc-600 hover:text-zinc-900 transition-colors',
+        active && 'text-zinc-900'
+      )}
+    >
+      <span>{children}</span>
+      <span
+        className={clsx(
+          'absolute left-3 right-3 -bottom-[1px] h-[2px] rounded-full',
+          active ? 'bg-zinc-900' : 'bg-transparent'
+        )}
+      />
+    </button>
+  )
 }
 
 export default function RiverControls() {
+  const router = useRouter()
   const pathname = usePathname()
   const search = useSearchParams()
   const view = search.get('view') === 'latest' ? 'latest' : 'top'
 
-  const Tab = ({
-    id,
-    label,
-    href,
-  }: {
-    id: 'top' | 'latest'
-    label: string
-    href: string
-  }) => {
-    const active = view === id
-    return (
-      <Link
-        href={href}
-        prefetch={false}
-        replace
-        scroll={false}
-        role="tab"
-        aria-selected={active}
-        aria-current={active ? 'page' : undefined}
-        className={cx(
-          // touch target + spacing
-          'px-2.5 sm:px-3 py-1.5 sm:py-2 rounded',
-          // type
-          'text-sm sm:text-[0.95rem] tracking-tight',
-          // tone
-          active
-            ? 'text-zinc-900 font-medium'
-            : 'text-zinc-500 hover:text-zinc-900',
-          // a11y
-          'focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-900/10'
-        )}
-      >
-        {label}
-      </Link>
-    )
+  const setView = (v: 'top' | 'latest') => {
+    const q = new URLSearchParams(search.toString())
+    if (v === 'top') q.delete('view')
+    else q.set('view', 'latest')
+    router.push(`${pathname}?${q.toString()}`)
   }
 
-  const topHref = pathname
-  const latestHref = `${pathname}?view=latest`
-
   return (
-    <nav
-      aria-label="View"
-      role="tablist"
-      className="mx-auto flex items-center justify-center gap-5 sm:gap-8"
-    >
-      <Tab id="top" label="Top" href={topHref} />
-      <Tab id="latest" label="Latest" href={latestHref} />
-    </nav>
+    <div className="mx-auto max-w-3xl">
+      <div className="flex items-center justify-center gap-6">
+        <Tab active={view === 'top'} onClick={() => setView('top')}>
+          Top
+        </Tab>
+        <Tab active={view === 'latest'} onClick={() => setView('latest')}>
+          Latest
+        </Tab>
+      </div>
+      <div className="mt-2 h-px bg-zinc-200/60 rounded-full" />
+    </div>
   )
 }

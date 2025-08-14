@@ -57,3 +57,23 @@
 * {
   box-sizing: border-box;
 }
+
+/* Quiet links, underline only on hover */
+.content a {
+  text-decoration: none;
+  text-underline-offset: 2px;
+}
+.content a:hover {
+  text-decoration: underline;
+}
+
+/* Reusable focus ring helper (used via focus-visible:focus-ring) */
+.focus-ring {
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.25);
+}
+
+/* Subtle body text color baseline (optional) */
+body {
+  color: #0a0a0a;
+}
