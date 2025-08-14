@@ -4,7 +4,132 @@ import dayjs from 'dayjs'
 import { query, endPool } from '@/lib/db'
 import sources from '@/data/sources.json'
 
-// ---------- Types ----------
+/* -------------------------------------------------------------------------- */
+/*  RSS parser (single instance)                                              */
+/*  - adds <source> capture for Google News                                   */
+/*  - maps content:encoded → contentEncoded                                   */
+/*  - sets a UA + timeout                                                     */
+/* -------------------------------------------------------------------------- */
+
+type RssItem = {
+  title?: string
+  link?: string
+  isoDate?: string
+  pubDate?: string
+  contentSnippet?: string
+  description?: string
+  summary?: string
+  content?: string
+  contentEncoded?: string
+  // Google News <source> node (rss-parser keeps it as object/array)
+  source?: any
+}
+
+const parser = new Parser<RssItem>({
+  headers: {
+    'User-Agent':
+      'ClimateRiverBot/0.1 (+https://climate-news-gules.vercel.app)',
+  },
+  requestOptions: { timeout: 20000 },
+  customFields: {
+    item: [
+      ['content:encoded', 'contentEncoded'],
+      ['source', 'source', { keepArray: true }],
+      'content',
+      'contentSnippet',
+      'summary',
+    ],
+  },
+})
+
+/* -------------------------------------------------------------------------- */
+/*  Google News helpers                                                       */
+/* -------------------------------------------------------------------------- */
+
+function isGoogleNewsFeed(feedUrl: string) {
+  try {
+    return new URL(feedUrl).hostname.includes('news.google.com')
+  } catch {
+    return false
+  }
+}
+
+/** Try to pull the original article URL out of a Google News redirect link. */
+function originalUrlFromGoogleLink(link?: string): string | null {
+  if (!link) return null
+  try {
+    const u = new URL(link)
+    if (!u.hostname.includes('news.google.com')) return null
+    // Some variants use ?url=..., occasionally ?q=...
+    const orig = u.searchParams.get('url') || u.searchParams.get('q') || null
+    return orig
+  } catch {
+    return null
+  }
+}
+
+/** Extract publisher name/homepage from Google News <source> or title suffix. */
+function extractPublisherFromGoogleItem(item: RssItem): {
+  name?: string
+  homepage?: string
+} {
+  // Prefer the <source> element: <source url="https://example.com">Publisher</source>
+  const src = (item as any)?.source
+  if (Array.isArray(src) && src[0]) {
+    const node = src[0] as any
+    const name = (node && (node._ || node['#'])) || undefined
+    const homepage =
+      (node && node.$ && (node.$.url as string | undefined)) || undefined
+    if (name || homepage) return { name, homepage }
+  }
+
+  // Fallback: titles like "… - Reuters" or "… — The Verge"
+  if (typeof item?.title === 'string') {
+    const m = item.title.match(/\s[-—]\s([^]+)$/)
+    if (m) {
+      const name = m[1].trim()
+      const homepage = /\.[a-z]{2,}$/.test(name) ? `https://${name}` : undefined
+      return { name, homepage }
+    }
+  }
+  return {}
+}
+
+/* -------------------------------------------------------------------------- */
+/*  Text helpers                                                              */
+/* -------------------------------------------------------------------------- */
+
+function stripHtml(s: string) {
+  return s
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+function pick(...vals: Array<string | undefined | null>) {
+  for (const v of vals) if (v && v.trim()) return v
+  return ''
+}
+function toOneLiner(raw: string, max = 200) {
+  const txt = stripHtml(raw)
+  const m = txt.match(/(.{40,}?[\.!\?])\s/) // first sentence-ish if long enough
+  const cut = m?.[1] ?? txt
+  return cut.length > max ? cut.slice(0, max - 1).trimEnd() + '…' : cut
+}
+function makeDek(it: RssItem) {
+  const raw = pick(
+    it.contentSnippet,
+    it.description,
+    it.summary,
+    it.content,
+    it.contentEncoded
+  )
+  return raw ? toOneLiner(raw) : ''
+}
+
+/* -------------------------------------------------------------------------- */
+/*  Types & small utils                                                       */
+/* -------------------------------------------------------------------------- */
+
 type SourceRaw = {
   slug?: string
   name: string
@@ -22,19 +147,6 @@ type SourceDef = {
   slug: string
 }
 
-type RssItem = {
-  title?: string
-  link?: string
-  isoDate?: string
-  pubDate?: string
-  contentSnippet?: string
-  description?: string
-  summary?: string
-  content?: string
-  contentEncoded?: string // via customFields mapping for content:encoded
-}
-
-// ---------- Small helpers ----------
 function slugify(input: string) {
   return (input || '')
     .toLowerCase()
@@ -100,33 +212,6 @@ function clusterKey(title: string) {
   return kept.slice(0, 8).join('-')
 }
 
-function stripHtml(s: string) {
-  return s
-    .replace(/<[^>]*>/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-}
-function pick(...vals: Array<string | undefined | null>) {
-  for (const v of vals) if (v && v.trim()) return v
-  return ''
-}
-function toOneLiner(raw: string, max = 200) {
-  const txt = stripHtml(raw)
-  const m = txt.match(/(.{40,}?[\.!\?])\s/) // first sentence-ish if long enough
-  const cut = m?.[1] ?? txt
-  return cut.length > max ? cut.slice(0, max - 1).trimEnd() + '…' : cut
-}
-function makeDek(it: RssItem) {
-  const raw = pick(
-    it.contentSnippet,
-    it.description,
-    it.summary,
-    it.content,
-    it.contentEncoded
-  )
-  return raw ? toOneLiner(raw) : ''
-}
-
 /** bounded concurrency map */
 async function mapLimit<T, R>(
   items: T[],
@@ -155,7 +240,10 @@ async function mapLimit<T, R>(
   })
 }
 
-// ---------- Normalize sources.json ----------
+/* -------------------------------------------------------------------------- */
+/*  Normalize sources.json → SourceDef                                        */
+/* -------------------------------------------------------------------------- */
+
 function normalizeSource(s: SourceRaw): SourceDef | null {
   const feed = s.feed ?? s.rss ?? ''
   if (!feed) return null
@@ -180,7 +268,10 @@ function normalizeSource(s: SourceRaw): SourceDef | null {
   }
 }
 
-// ---------- Idempotent schema guard ----------
+/* -------------------------------------------------------------------------- */
+/*  Schema guards                                                             */
+/* -------------------------------------------------------------------------- */
+
 async function ensureSchema() {
   // sources
   await query(`
@@ -247,7 +338,10 @@ async function ensureSchema() {
   `)
 }
 
-// ---------- DB helpers ----------
+/* -------------------------------------------------------------------------- */
+/*  DB helpers                                                                */
+/* -------------------------------------------------------------------------- */
+
 async function upsertSources(defs: SourceDef[]) {
   if (!defs.length) return
   const params: any[] = []
@@ -279,6 +373,32 @@ async function sourceMap(): Promise<Record<string, { id: number }>> {
   const map: Record<string, { id: number }> = {}
   for (const r of rows) map[r.feed_url] = { id: r.id }
   return map
+}
+
+/** Upsert a "virtual" publisher source (for Google News items). */
+async function ensurePublisherSourceId(name?: string, homepage?: string) {
+  let domain: string | null = null
+  if (homepage) {
+    try {
+      domain = new URL(homepage).hostname.replace(/^www\./, '')
+    } catch {
+      /* ignore */
+    }
+  }
+  const slug = domain ? slugify(domain) : `pub-${slugify(name || 'unknown')}`
+  const feedUrl = homepage ?? `https://news.google.com/publication/${slug}`
+
+  const row = await query<{ id: number }>(
+    `
+      insert into sources (name, homepage_url, feed_url, weight, slug)
+      values ($1, $2, $3, 1, $4)
+      on conflict (feed_url)
+      do update set name = excluded.name, homepage_url = excluded.homepage_url, slug = excluded.slug
+      returning id
+    `,
+    [name || domain || slug, homepage || null, feedUrl, slug]
+  )
+  return row.rows[0].id
 }
 
 async function insertArticle(
@@ -330,19 +450,11 @@ async function ensureClusterForArticle(articleId: number, title: string) {
   )
 }
 
-// ---------- Ingest ----------
-async function ingestFromFeed(feedUrl: string, sourceId: number, limit = 20) {
-  const parser = new Parser<RssItem>({
-    headers: {
-      'User-Agent':
-        'ClimateRiverBot/0.1 (+https://climate-news-gules.vercel.app)',
-    },
-    requestOptions: { timeout: 15000 },
-    customFields: {
-      item: [['content:encoded', 'contentEncoded']],
-    },
-  })
+/* -------------------------------------------------------------------------- */
+/*  Ingest one feed                                                           */
+/* -------------------------------------------------------------------------- */
 
+async function ingestFromFeed(feedUrl: string, sourceId: number, limit = 20) {
   let feed
   try {
     feed = await parser.parseURL(feedUrl)
@@ -353,32 +465,55 @@ async function ingestFromFeed(feedUrl: string, sourceId: number, limit = 20) {
 
   const items = (feed.items || []) as RssItem[]
   const slice = items.slice(0, limit)
+  const fromGoogle = isGoogleNewsFeed(feedUrl)
 
   let inserted = 0
   for (const it of slice) {
-    const title = (it.title || '').trim()
-    const link = (it.link || '').trim()
-    if (!title || !link) continue
+    const rawTitle = (it.title || '').trim()
+    const rawLink = (it.link || '').trim()
+    if (!rawTitle || !rawLink) continue
 
-    const url = canonical(link)
+    // Prefer original article URL for Google News items
+    const maybeOrig = originalUrlFromGoogleLink(rawLink)
+    const chosenLink = canonical(maybeOrig || rawLink)
+
+    // Pick a publisher source for Google News, otherwise keep the feed's source
+    let effSourceId = sourceId
+    if (fromGoogle) {
+      const pub = extractPublisherFromGoogleItem(it)
+      // If no homepage provided, try inferring from the original URL
+      let homepage = pub.homepage
+      if (!homepage && maybeOrig) {
+        try {
+          homepage = new URL(maybeOrig).origin
+        } catch {
+          /* ignore */
+        }
+      }
+      effSourceId = await ensurePublisherSourceId(pub.name, homepage)
+    }
+
     const dek = makeDek(it)
     const articleId = await insertArticle(
-      sourceId,
-      title,
-      url,
+      effSourceId,
+      rawTitle,
+      chosenLink,
       it.isoDate || it.pubDate,
       dek
     )
     if (articleId) {
       inserted++
-      await ensureClusterForArticle(articleId, title)
+      await ensureClusterForArticle(articleId, rawTitle)
     }
   }
 
   return { scanned: slice.length, inserted }
 }
 
-// ---------- Main (exported) ----------
+/* -------------------------------------------------------------------------- */
+/*  Main entry                                                                */
+/* -------------------------------------------------------------------------- */
+
 export async function run(opts: { limit?: number; closePool?: boolean } = {}) {
   const start = Date.now()
   await ensureSchema()
@@ -427,7 +562,10 @@ export async function run(opts: { limit?: number; closePool?: boolean } = {}) {
   return { total, results }
 }
 
-// ---------- CLI entrypoint ----------
+/* -------------------------------------------------------------------------- */
+/*  CLI                                                                       */
+/* -------------------------------------------------------------------------- */
+
 if (import.meta.url === `file://${process.argv[1]}`) {
   run({ closePool: true }).catch((err) => {
     console.error(err)
