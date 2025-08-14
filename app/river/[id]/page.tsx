@@ -67,6 +67,9 @@ export default async function ClusterPage({
       JOIN articles a ON a.id = cs.lead_article_id
       LEFT JOIN sources s ON s.id = a.source_id
       WHERE cs.cluster_id = $1::bigint
+        AND a.canonical_url NOT LIKE 'https://news.google.com%'
+        AND a.canonical_url NOT LIKE 'https://news.yahoo.com%'
+        AND a.canonical_url NOT LIKE 'https://www.msn.com%'
       LIMIT 1
     )
     SELECT
@@ -126,13 +129,16 @@ export default async function ClusterPage({
         )
         SELECT COALESCE(json_agg(row_to_json(y) ORDER BY y.published_at DESC), '[]'::json)
         FROM (
-          -- keep one per outlet, prefer real outlet to Google, then newest
+          -- keep one per outlet (host_norm), exclude aggregators completely
           SELECT DISTINCT ON (host_norm)
             article_id, title, url, source, author, published_at
           FROM x
+          WHERE url NOT LIKE 'https://news.google.com%'
+            AND url NOT LIKE 'https://news.yahoo.com%'
+            AND url NOT LIKE 'https://www.msn.com%'
+            AND host_norm NOT IN ('news.google.com', 'news.yahoo.com', 'msn.com')
           ORDER BY
             host_norm,
-            (url NOT LIKE 'https://news.google.com%') DESC,
             published_at DESC
         ) y
       ) AS subs

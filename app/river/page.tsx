@@ -87,8 +87,11 @@ export default async function RiverPage({
       FROM cluster_scores cs
       JOIN articles a ON a.id = cs.lead_article_id
       LEFT JOIN sources s ON s.id = a.source_id
-      WHERE $1::boolean
-         OR a.published_at >= now() - make_interval(hours => $2::int)
+      WHERE ($1::boolean
+         OR a.published_at >= now() - make_interval(hours => $2::int))
+        AND a.canonical_url NOT LIKE 'https://news.google.com%'
+        AND a.canonical_url NOT LIKE 'https://news.yahoo.com%'
+        AND a.canonical_url NOT LIKE 'https://www.msn.com%'
     )
     SELECT
       l.cluster_id,
@@ -170,13 +173,16 @@ export default async function RiverPage({
         )
         SELECT COALESCE(json_agg(row_to_json(y) ORDER BY y.published_at DESC), '[]'::json)
         FROM (
-          -- keep one per outlet (host_norm), prefer real outlet over Google, then newest
+          -- keep one per outlet (host_norm), exclude aggregators completely
           SELECT DISTINCT ON (host_norm)
             article_id, title, url, source, author, published_at
           FROM x
+          WHERE url NOT LIKE 'https://news.google.com%'
+            AND url NOT LIKE 'https://news.yahoo.com%'
+            AND url NOT LIKE 'https://www.msn.com%'
+            AND host_norm NOT IN ('news.google.com', 'news.yahoo.com', 'msn.com')
           ORDER BY
             host_norm,
-            (url NOT LIKE 'https://news.google.com%') DESC,
             published_at DESC
           LIMIT 8
         ) y
