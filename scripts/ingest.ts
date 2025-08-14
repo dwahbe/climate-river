@@ -1,4 +1,5 @@
 // scripts/ingest.ts
+import './_env'
 import Parser from 'rss-parser'
 import dayjs from 'dayjs'
 import { query, endPool } from '@/lib/db'

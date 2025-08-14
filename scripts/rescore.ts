@@ -1,13 +1,14 @@
 // scripts/rescore.ts
+import './_env'
 import { query, endPool } from '@/lib/db'
 
-// Half-lives (tune)
 const HOUR = 3600
-const HL_ARTICLE_H = 24 // article freshness half-life (hours)
-const HL_CLUSTER_H = 30 // cluster freshness half-life (hours)
+// Cold-start friendly half-lives (slower decay so Top != Latest even with low traffic)
+const HL_ARTICLE_H = 36
+const HL_CLUSTER_H = 42
 
 export async function run(opts: { closePool?: boolean } = {}) {
-  // Ensure table exists (idempotent)
+  // ensure table
   await query(`
     CREATE TABLE IF NOT EXISTS cluster_scores (
       cluster_id       bigint PRIMARY KEY REFERENCES clusters(id) ON DELETE CASCADE,
@@ -17,26 +18,20 @@ export async function run(opts: { closePool?: boolean } = {}) {
     );
   `)
 
-  // Compute and upsert scores in one SQL
   await query(
     `
     WITH art AS (
       SELECT
         ac.cluster_id,
-        a.id                         AS article_id,
+        a.id                          AS article_id,
         a.published_at,
         a.dek,
         a.author,
         a.canonical_url,
-        COALESCE(s.weight, 3)        AS src_weight,
-        -- clicks in last 48h
-        COALESCE((
-          SELECT COUNT(*) FROM article_events e
-          WHERE e.article_id = a.id AND e.created_at >= now() - interval '48 hours'
-        ), 0)                         AS clicks48,
-        -- penalties
-        (a.canonical_url LIKE 'https://news.google.com%')::int AS is_gn,
-        (a.canonical_url ~ '(prnewswire|businesswire)\\.com')::int AS is_wire
+        COALESCE(s.weight, 3)         AS src_weight,
+        -- penalties (ints, not booleans)
+        (a.canonical_url LIKE 'https://news.google.com%')::int                             AS is_gn,
+        (a.canonical_url ~ '(prnewswire|businesswire)\\.com')::int                          AS is_wire
       FROM article_clusters ac
       JOIN articles a ON a.id = ac.article_id
       LEFT JOIN sources s ON s.id = a.source_id
@@ -45,73 +40,74 @@ export async function run(opts: { closePool?: boolean } = {}) {
       SELECT
         article_id,
         cluster_id,
-
         -- freshness: exp( ln(0.5) * age / HL )
         EXP( LN(0.5) * EXTRACT(EPOCH FROM (now() - COALESCE(published_at, now()))) / ($1 * ${HOUR}) ) AS fresh,
-
-        -- base quality from source + author + dek
-        (COALESCE(src_weight, 3))                            -- source quality
-        + CASE WHEN NULLIF(TRIM(COALESCE(author,'')), '') IS NOT NULL THEN 0.25 ELSE 0 END
-        + CASE WHEN LENGTH(COALESCE(dek,'')) >= 120 THEN 0.10 ELSE 0 END
-        - (is_gn * 0.40)  -- demote aggregator
-        - (is_wire * 0.50)  -- demote press releases
-        AS base_quality,
-
-        -- attention from clicks (diminishing returns)
-        LN(1 + clicks48) AS attn
+        -- editorial quality (cold-start): source + author + dek - penalties
+        (COALESCE(src_weight,3)) +
+        CASE WHEN NULLIF(TRIM(COALESCE(author,'')), '') IS NOT NULL THEN 0.25 ELSE 0 END +
+        CASE WHEN LENGTH(COALESCE(dek,'')) >= 120 THEN 0.10 ELSE 0 END
+        - (is_gn * 0.50)  -- demote aggregator
+        - (is_wire * 0.60) -- demote press releases
+        AS editorial_q
       FROM art
     ),
     art_final AS (
       SELECT
         article_id,
         cluster_id,
-        GREATEST(0.0,
-          (0.65 * base_quality) +  -- editorial quality
-          (0.35 * attn)            -- real attention
-        ) * fresh AS article_score
+        -- article_score still considers freshness, but lightly
+        (0.80 * editorial_q) + (0.20 * fresh) AS article_score
       FROM art_scored
     ),
     clust AS (
       SELECT
         a.cluster_id,
-        COUNT(*)                                         AS size,
-        MAX(a.published_at)                              AS latest_pub,
-        SUM(a.src_weight)                                AS sum_w,
-        AVG(a.src_weight)                                AS avg_w,
-        -- velocity = new articles in last 6h
-        SUM( (now() - a.published_at) <= interval '6 hours' )::int AS v6
+        COUNT(*)                                                         AS size,
+        COUNT(DISTINCT s2.id)                                            AS distinct_sources,
+        MAX(a.published_at)                                              AS latest_pub,
+        SUM(COALESCE(a.src_weight,0))                                    AS sum_w,
+        AVG(COALESCE(a.src_weight,0))                                    AS avg_w,
+        -- velocity = how many articles in last 6h (CAST the boolean BEFORE SUM)
+        SUM( ((now() - a.published_at) <= interval '6 hours')::int )     AS v6
       FROM art a
+      LEFT JOIN article_clusters ac2 ON ac2.article_id = a.article_id
+      LEFT JOIN articles a2 ON a2.id = ac2.article_id
+      LEFT JOIN sources s2 ON s2.id = a2.source_id
       GROUP BY a.cluster_id
     ),
     clust_scored AS (
       SELECT
         c.cluster_id,
         c.size,
-        -- coverage + velocity (diminishing returns)
-        (LN(1 + c.sum_w) + 0.6 * LN(1 + c.v6))          AS attention,
-        -- cluster freshness
+        c.distinct_sources,
+        c.latest_pub,
+        c.sum_w,
+        c.avg_w,
+        c.v6,
+        -- coverage: more outlets + more total weighted coverage (use LN on 1+x for safety)
+        ( LN(1 + COALESCE(c.sum_w,0)) + 0.8*LN(1 + COALESCE(c.distinct_sources,0)) + 0.4*LN(1 + COALESCE(c.size,0)) ) AS coverage,
+        -- cluster freshness (lighter)
         EXP( LN(0.5) * EXTRACT(EPOCH FROM (now() - c.latest_pub)) / ($2 * ${HOUR}) ) AS fresh,
-        c.avg_w                                         AS publisher_quality,
-        -- lead article = max article_score
-        (SELECT article_id FROM art_final af
-         WHERE af.cluster_id = c.cluster_id
-         ORDER BY af.article_score DESC NULLS LAST
-         LIMIT 1)                                       AS lead_article_id,
-        -- pooled article strength
-        (SELECT COALESCE(SUM(article_score),0) FROM art_final af
-         WHERE af.cluster_id = c.cluster_id)            AS pool_strength
+        -- lead article by article_score
+        (SELECT af.article_id
+           FROM art_final af
+          WHERE af.cluster_id = c.cluster_id
+          ORDER BY af.article_score DESC NULLS LAST
+          LIMIT 1) AS lead_article_id,
+        -- pooled strength for a soft boost
+        (SELECT COALESCE(SUM(af.article_score),0)
+           FROM art_final af
+          WHERE af.cluster_id = c.cluster_id) AS pool_strength
       FROM clust c
     ),
     final AS (
       SELECT
         cluster_id,
-        size,
+        -- blend: emphasize coverage & outlet quality; freshness is supportive
+        (0.55 * coverage) + (0.20 * avg_w) + (0.15 * LN(1 + v6)) + (0.10 * fresh)
+          + 0.04 * LN(1 + pool_strength) AS score,
         lead_article_id,
-        -- final blend (tune weights)
-        (0.45 * fresh) +
-        (0.30 * attention) +
-        (0.20 * publisher_quality) +
-        (0.05 * LN(1 + pool_strength))                  AS score
+        (SELECT size FROM clust c2 WHERE c2.cluster_id = clust_scored.cluster_id) AS size
       FROM clust_scored
     )
     INSERT INTO cluster_scores (cluster_id, size, score, lead_article_id)
