@@ -17,7 +17,7 @@ export default function AboutPage() {
           target="_blank"
           rel="noreferrer"
         >
-          View the code on GitHub
+          Open source on GitHub
         </a>
         .
       </p>
