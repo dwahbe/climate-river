@@ -4,7 +4,7 @@ export const dynamic = 'force-dynamic'
 
 import { NextResponse } from 'next/server'
 import { headers } from 'next/headers'
-import { endPool } from '@/lib/db'
+// import { endPool } from '@/lib/db' // Not needed anymore
 
 function authorized(req: Request) {
   const h = headers()
@@ -60,7 +60,8 @@ export async function GET(req: Request) {
       closePool: false,
     })
 
-    await endPool()
+    // Don't close the pool - let it be managed by the runtime
+    // await endPool()
 
     return NextResponse.json({
       ok: true,
@@ -71,7 +72,8 @@ export async function GET(req: Request) {
       },
     })
   } catch (err: any) {
-    await endPool().catch(() => {})
+    // Don't close the pool - let it be managed by the runtime
+    // await endPool().catch(() => {})
     return NextResponse.json(
       { ok: false, error: err?.message || String(err) },
       { status: 500 }

@@ -4,7 +4,7 @@ export const dynamic = 'force-dynamic'
 
 import { NextResponse } from 'next/server'
 import { headers } from 'next/headers'
-import { endPool } from '@/lib/db'
+// import { endPool } from '@/lib/db' // Not needed anymore
 
 /**
  * Allow:
@@ -112,7 +112,8 @@ export async function GET(req: Request) {
       webDiscoverResult = { error: webDiscoverError.message, skipped: 'error' }
     }
 
-    await endPool()
+    // Don't close the pool - let it be managed by the runtime
+    // await endPool()
 
     return NextResponse.json({
       ok: true,
@@ -127,7 +128,8 @@ export async function GET(req: Request) {
     })
   } catch (err: any) {
     console.error('Daily cron job failed:', err)
-    await endPool().catch(() => {})
+    // Don't close the pool - let it be managed by the runtime
+    // await endPool().catch(() => {})
     return NextResponse.json(
       {
         ok: false,
