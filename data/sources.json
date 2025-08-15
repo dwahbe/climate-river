@@ -9,7 +9,7 @@
     "slug": "guardian-climate-crisis",
     "name": "The Guardian",
     "rss": "https://www.theguardian.com/environment/climate-crisis/rss",
-    "weight": 4.0
+    "weight": 4.5
   },
   {
     "slug": "inside-climate-news",
@@ -68,13 +68,13 @@
   {
     "slug": "reuters-environment",
     "name": "Reuters",
-    "rss": "https://www.reuters.com/world/environment/rss",
+    "rss": "https://feeds.reuters.com/reuters/environment",
     "weight": 4.0
   },
   {
-    "slug": "washpost-climate-environment",
-    "name": "Washington Post",
-    "rss": "https://feeds.washingtonpost.com/rss/rss_climate-environment",
+    "slug": "ap-climate-news",
+    "name": "Associated Press",
+    "rss": "https://feeds.apnews.com/ap/climate",
     "weight": 4.0
   },
   {
@@ -96,16 +96,16 @@
     "weight": 3.5
   },
   {
-    "slug": "noaa-climate-gov",
-    "name": "NOAA Climate.gov",
-    "rss": "https://www.climate.gov/feeds/all.rss",
+    "slug": "epa-climate-news",
+    "name": "EPA Climate News",
+    "rss": "https://www.epa.gov/newsroom/climate-change",
     "weight": 4.0
   },
   {
-    "slug": "nature-climate-change",
-    "name": "Nature",
-    "rss": "https://www.nature.com/subjects/climate-change.rss",
-    "weight": 5.0
+    "slug": "science-daily-environment",
+    "name": "Science Daily Environment",
+    "rss": "https://www.sciencedaily.com/rss/earth_climate/climate.xml",
+    "weight": 4.0
   },
   {
     "slug": "economist-climate-change",
@@ -126,15 +126,27 @@
     "weight": 4.0
   },
   {
+    "slug": "axios-climate",
+    "name": "Axios Climate",
+    "rss": "https://api.axios.com/feed/generate-climate",
+    "weight": 3.5
+  },
+  {
     "slug": "bloomberg-climate",
     "name": "Bloomberg",
-    "rss": "https://www.bloomberg.com/feeds/climate.rss",
+    "rss": "https://feeds.bloomberg.com/green/news.rss",
     "weight": 4.0
   },
   {
     "slug": "jacobin",
     "name": "Jacobin",
     "rss": "https://jacobin.com/feed/",
+    "weight": 4.0
+  },
+  {
+    "slug": "wsj",
+    "name": "Wall Street Journal",
+    "rss": "http://blogs.wsj.com/washwire/feed/",
     "weight": 4.0
   }
 ]

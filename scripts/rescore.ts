@@ -3,9 +3,9 @@ import './_env'
 import { query, endPool } from '@/lib/db'
 
 const HOUR = 3600
-// Cold-start friendly half-lives (slower decay so Top != Latest even with low traffic)
-const HL_ARTICLE_H = 36
-const HL_CLUSTER_H = 42
+// Faster decay for more dynamic content (articles become "stale" quicker)
+const HL_ARTICLE_H = 12 // 12 hours instead of 36
+const HL_CLUSTER_H = 18 // 18 hours instead of 42
 
 export async function run(opts: { closePool?: boolean } = {}) {
   // ensure table
@@ -40,8 +40,8 @@ export async function run(opts: { closePool?: boolean } = {}) {
       SELECT
         article_id,
         cluster_id,
-        -- freshness: exp( ln(0.5) * age / HL )
-        EXP( LN(0.5) * EXTRACT(EPOCH FROM (now() - COALESCE(published_at, now()))) / ($1 * ${HOUR}) ) AS fresh,
+        -- freshness: exp( ln(0.5) * age / HL ) with bounds to prevent overflow
+        GREATEST(0.0001, EXP( LN(0.5) * LEAST(EXTRACT(EPOCH FROM (now() - COALESCE(published_at, now()))) / ($1 * ${HOUR}), 10) )) AS fresh,
         -- editorial quality (cold-start): source + author + dek - penalties
         (COALESCE(src_weight,3)) +
         CASE WHEN NULLIF(TRIM(COALESCE(author,'')), '') IS NOT NULL THEN 0.25 ELSE 0 END +
@@ -55,8 +55,8 @@ export async function run(opts: { closePool?: boolean } = {}) {
       SELECT
         article_id,
         cluster_id,
-        -- article_score still considers freshness, but lightly
-        (0.80 * editorial_q) + (0.20 * fresh) AS article_score
+        -- article_score: give much more weight to freshness
+        (0.50 * editorial_q) + (0.50 * fresh) AS article_score
       FROM art_scored
     ),
     clust AS (
@@ -86,8 +86,8 @@ export async function run(opts: { closePool?: boolean } = {}) {
         c.v6,
         -- coverage: more outlets + more total weighted coverage (use LN on 1+x for safety)
         ( LN(1 + COALESCE(c.sum_w,0)) + 0.8*LN(1 + COALESCE(c.distinct_sources,0)) + 0.4*LN(1 + COALESCE(c.size,0)) ) AS coverage,
-        -- cluster freshness (lighter)
-        EXP( LN(0.5) * EXTRACT(EPOCH FROM (now() - c.latest_pub)) / ($2 * ${HOUR}) ) AS fresh,
+        -- cluster freshness with bounds to prevent overflow
+        GREATEST(0.0001, EXP( LN(0.5) * LEAST(EXTRACT(EPOCH FROM (now() - c.latest_pub)) / ($2 * ${HOUR}), 10) )) AS fresh,
         -- lead article by article_score
         (SELECT af.article_id
            FROM art_final af
@@ -103,9 +103,9 @@ export async function run(opts: { closePool?: boolean } = {}) {
     final AS (
       SELECT
         cluster_id,
-        -- blend: emphasize coverage & outlet quality; freshness is supportive
-        (0.55 * coverage) + (0.20 * avg_w) + (0.15 * LN(1 + v6)) + (0.10 * fresh)
-          + 0.04 * LN(1 + pool_strength) AS score,
+        -- blend: balance coverage, quality, and freshness more evenly
+        (0.35 * coverage) + (0.15 * avg_w) + (0.20 * LN(1 + v6)) + (0.25 * fresh)
+          + 0.05 * LN(1 + pool_strength) AS score,
         lead_article_id,
         (SELECT size FROM clust c2 WHERE c2.cluster_id = clust_scored.cluster_id) AS size
       FROM clust_scored
