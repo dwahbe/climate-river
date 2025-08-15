@@ -4,7 +4,14 @@ import Link from 'next/link'
 import * as DB from '@/lib/db'
 import { Analytics } from '@vercel/analytics/react'
 
-export const metadata = { title: 'Climate River' }
+export const metadata = {
+  title: 'Climate River',
+  icons: {
+    icon: '/icon.svg',
+    shortcut: '/icon.svg',
+    apple: '/apple-icon.png',
+  },
+}
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
 
