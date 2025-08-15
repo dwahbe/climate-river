@@ -87,6 +87,13 @@ export async function GET(req: Request) {
       closePool: false,
     })
 
+    // 5) AI-enhanced web discovery (find stories beyond RSS feeds)
+    const webDiscoverResult = await safeRun(import('@/scripts/discover-web'), {
+      limitPerQuery: 3,
+      maxQueries: 4,
+      closePool: false,
+    })
+
     await endPool()
 
     return NextResponse.json({
@@ -97,6 +104,7 @@ export async function GET(req: Request) {
         ingest: ingestResult,
         rescore: rescoreResult,
         rewrite: rewriteResult,
+        webDiscover: webDiscoverResult,
       },
     })
   } catch (err: any) {

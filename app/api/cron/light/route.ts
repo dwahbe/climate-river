@@ -1,4 +1,4 @@
-// app/api/cron/delta/route.ts
+// app/api/cron/light/route.ts
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
@@ -6,12 +6,6 @@ import { NextResponse } from 'next/server'
 import { headers } from 'next/headers'
 import { endPool } from '@/lib/db'
 
-/**
- * Allow:
- *  - Vercel Cron (x-vercel-cron header, or user-agent contains vercel-cron)
- *  - ADMIN_TOKEN via Bearer token or ?token=... query param
- *  - Optional ?cron=1 for manual testing
- */
 function authorized(req: Request) {
   const h = headers()
   const url = new URL(req.url)
@@ -30,10 +24,6 @@ function authorized(req: Request) {
   return isCron || (!!expected && (qToken === expected || bearer === expected))
 }
 
-/**
- * Safely call a script's `run` (or `default`) regardless of its TypeScript signature.
- * Extra options are harmless if the function ignores them.
- */
 async function safeRun(modPromise: Promise<any>, opts?: any) {
   const mod: any = await modPromise
   const fn: any = mod?.run ?? mod?.default
@@ -51,33 +41,22 @@ export async function GET(req: Request) {
 
   const t0 = Date.now()
   const url = new URL(req.url)
-  // limit controls how many items each step *tries* to process
+
+  // Light processing limits
   const limit = Math.max(
     1,
-    Math.min(50, Number(url.searchParams.get('limit') || 25))
+    Math.min(50, Number(url.searchParams.get('limit') || 30))
   )
 
   try {
-    // 1) Discover new feeds/domains (lightweight enrich step)
-    const discoverResult = await safeRun(import('@/scripts/discover'), {
-      limit,
-      closePool: false,
-    })
-
-    // 2) Ingest from all sources (seed + discovered)
+    // Light RSS ingest only - no AI discovery to control costs
     const ingestResult = await safeRun(import('@/scripts/ingest'), {
       limit,
       closePool: false,
     })
 
-    // 3) Rescore clusters
+    // Quick rescore after new articles
     const rescoreResult = await safeRun(import('@/scripts/rescore'), {
-      closePool: false,
-    })
-
-    // 4) Rewrite recent headlines (using the currently configured model)
-    const rewriteResult = await safeRun(import('@/scripts/rewrite'), {
-      limit: 40,
       closePool: false,
     })
 
@@ -87,14 +66,11 @@ export async function GET(req: Request) {
       ok: true,
       took_ms: Date.now() - t0,
       result: {
-        discover: discoverResult,
         ingest: ingestResult,
         rescore: rescoreResult,
-        rewrite: rewriteResult,
       },
     })
   } catch (err: any) {
-    // Try to cleanly close the pool even on error.
     await endPool().catch(() => {})
     return NextResponse.json(
       { ok: false, error: err?.message || String(err) },
@@ -103,5 +79,4 @@ export async function GET(req: Request) {
   }
 }
 
-// Support POST as well (handy for manual triggering)
 export const POST = GET

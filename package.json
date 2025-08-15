@@ -10,6 +10,7 @@
     "ingest": "tsx --env-file=.env.local scripts/ingest.ts",
     "rescore": "tsx --env-file=.env.local scripts/rescore.ts",
     "schema": "tsx --env-file=.env.local scripts/schema.ts",
+    "discover-web": "tsx --env-file=.env.local scripts/discover-web.ts",
     "format": "prettier --write .",
     "rewrite": "tsx --env-file=.env.local scripts/rewrite.ts"
   },

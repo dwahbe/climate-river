@@ -1,7 +1,7 @@
 {
   "framework": "nextjs",
   "crons": [
-    { "path": "/api/cron/delta?limit=25", "schedule": "0 1 * * *" },
+    { "path": "/api/cron/light", "schedule": "0 6,9,12,15,18 * * *" },
     { "path": "/api/cron/daily", "schedule": "0 2 * * *" }
   ]
 }
