@@ -9,7 +9,10 @@ export default function OpenAllButton({ urls, className }: Props) {
   const unique = Array.from(new Set(urls)).slice(0, 12)
 
   const openAll = () => {
-    for (const u of unique) window.open(u, '_blank', 'noopener,noreferrer')
+    // Open first URL in current tab
+    if (unique.length > 0) {
+      window.location.href = unique[0]
+    }
   }
 
   return (
@@ -17,7 +20,7 @@ export default function OpenAllButton({ urls, className }: Props) {
       onClick={openAll}
       className="btn-ghost inline-flex items-center gap-2"
     >
-      Open all sources
+      Open first source
       <svg
         className="h-4 w-4"
         viewBox="0 0 20 20"

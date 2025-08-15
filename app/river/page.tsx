@@ -3,6 +3,7 @@ import Link from 'next/link'
 import * as DB from '@/lib/db'
 import LocalTime from '@/components/LocalTime'
 import RiverControls from '@/components/RiverControls'
+import PublisherLink from '@/components/PublisherLink'
 import { unstable_noStore as noStore } from 'next/cache'
 
 export const dynamic = 'force-dynamic'
@@ -142,7 +143,7 @@ export default async function RiverPage({
                     '\\1'
                   )
                 ),
-                '^(www|m|mobile|amp|amp-cdn|edition|news|beta)\\\\.',
+                '^(www|m|mobile|amp|amp-cdn|edition|news|beta)\\.',
                 ''
               )
             ) AS host_norm,
@@ -152,7 +153,7 @@ export default async function RiverPage({
                 regexp_replace(
                   regexp_replace(
                     COALESCE(a2.rewritten_title, a2.title),
-                    '\\\\s[-—]\\\\s[^-—]+$',
+                    '\\s[-—]\\s[^-—]+$',
                     '',
                     'g'
                   ),
@@ -160,7 +161,7 @@ export default async function RiverPage({
                   ' ',
                   'g'
                 ),
-                '\\\\s+',
+                '\\s+',
                 ' ',
                 'g'
               )
@@ -249,14 +250,12 @@ export default async function RiverPage({
                       <span className="px-1 text-zinc-400">•</span>
                     )}
                     {r.lead_homepage ? (
-                      <a
+                      <PublisherLink
                         href={r.lead_homepage}
-                        target="_blank"
-                        rel="noopener noreferrer"
                         className="hover:underline"
                       >
                         {publisher}
-                      </a>
+                      </PublisherLink>
                     ) : (
                       publisher
                     )}
@@ -266,8 +265,6 @@ export default async function RiverPage({
                 <h3 className="text-[18px] sm:text-[19px] md:text-[20px] font-semibold leading-snug tracking-tight">
                   <a
                     href={leadClickHref}
-                    target="_blank"
-                    rel="noopener noreferrer"
                     className="no-underline hover:underline text-zinc-950 hover:text-zinc-900 focus-visible:underline rounded transition"
                   >
                     {r.lead_title}
@@ -304,8 +301,6 @@ export default async function RiverPage({
                         <span key={s.article_id}>
                           <a
                             href={href}
-                            target="_blank"
-                            rel="noopener noreferrer"
                             className="no-underline hover:underline text-zinc-700 hover:text-zinc-900 transition-colors"
                             title={s.title}
                           >

@@ -2,7 +2,6 @@
 import Link from 'next/link'
 import * as DB from '@/lib/db'
 import LocalTime from '@/components/LocalTime'
-import OpenAllButton from '@/components/OpenAllButton'
 import { unstable_noStore as noStore } from 'next/cache'
 
 export const dynamic = 'force-dynamic'
@@ -107,7 +106,7 @@ export default async function ClusterPage({
                     '\\1'
                   )
                 ),
-                '^(www|m|mobile|amp|amp-cdn|edition|news|beta)\\\\.',
+                '^(www|m|mobile|amp|amp-cdn|edition|news|beta)\\.',
                 ''
               )
             ) AS host_norm,
@@ -188,7 +187,6 @@ export default async function ClusterPage({
   const leadClickHref = `/api/click?aid=${r.lead_article_id}&url=${encodeURIComponent(
     r.lead_url
   )}`
-  const openAllUrls = [r.lead_url, ...r.subs.map((s) => s.url)]
 
   return (
     <div className="mx-auto max-w-3xl px-4 sm:px-6 py-5">
@@ -211,8 +209,6 @@ export default async function ClusterPage({
         <h1 className="text-2xl font-semibold leading-tight mb-3">
           <a
             href={leadClickHref}
-            target="_blank"
-            rel="noopener noreferrer"
             className="text-zinc-900 hover:underline decoration-zinc-300"
           >
             {r.lead_title}
@@ -223,12 +219,8 @@ export default async function ClusterPage({
           <p className="text-zinc-600 leading-relaxed mb-3">{r.lead_dek}</p>
         )}
 
-        <div className="flex items-center justify-between text-xs text-zinc-500">
+        <div className="text-xs text-zinc-500">
           <LocalTime iso={r.published_at} />
-          <OpenAllButton
-            urls={openAllUrls}
-            className="text-zinc-600 hover:text-zinc-900 text-sm"
-          />
         </div>
       </article>
 
@@ -250,8 +242,6 @@ export default async function ClusterPage({
                   </div>
                   <a
                     href={href}
-                    target="_blank"
-                    rel="noopener noreferrer"
                     className="text-zinc-900 hover:underline decoration-zinc-300 leading-snug"
                   >
                     {s.title}
