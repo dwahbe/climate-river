@@ -28,7 +28,8 @@ export default async function RootLayout({
                     Climate River
                   </span>
                 </Link>
-                <div className="hidden sm:flex items-center gap-3 text-sm">
+                {/* Desktop navigation */}
+                <div className="hidden sm:flex items-baseline gap-3 text-sm">
                   <Link
                     href="/"
                     className="text-zinc-600 hover:text-zinc-900 no-underline"
@@ -39,6 +40,16 @@ export default async function RootLayout({
                   <Link
                     href="/about"
                     className="text-zinc-600 hover:text-zinc-900 no-underline"
+                  >
+                    About
+                  </Link>
+                </div>
+
+                {/* Mobile navigation */}
+                <div className="flex sm:hidden items-center">
+                  <Link
+                    href="/about"
+                    className="text-zinc-600 hover:text-zinc-900 no-underline text-sm"
                   >
                     About
                   </Link>
