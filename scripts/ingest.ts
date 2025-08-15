@@ -401,13 +401,33 @@ async function insertArticle(
 async function ensureClusterForArticle(articleId: number, title: string) {
   const key = clusterKey(title)
   if (!key) return
-  const cluster = await query<{ id: number }>(
-    `insert into clusters (key) values ($1)
-     on conflict (key) do update set key = excluded.key
-     returning id`,
+
+  // First check if this article is already in a cluster
+  const existingCluster = await query<{ cluster_id: number }>(
+    `SELECT ac.cluster_id 
+     FROM article_clusters ac 
+     JOIN clusters c ON ac.cluster_id = c.id 
+     WHERE c.key = $1`,
     [key]
   )
-  const clusterId = cluster.rows[0].id
+
+  let clusterId: number
+
+  if (existingCluster.rows.length > 0) {
+    // Use existing cluster
+    clusterId = existingCluster.rows[0].cluster_id
+  } else {
+    // Create new cluster
+    const cluster = await query<{ id: number }>(
+      `insert into clusters (key) values ($1)
+       on conflict (key) do update set key = excluded.key
+       returning id`,
+      [key]
+    )
+    clusterId = cluster.rows[0].id
+  }
+
+  // Add article to cluster (will fail silently if already exists)
   await query(
     `insert into article_clusters (article_id, cluster_id)
      values ($1,$2) on conflict do nothing`,
