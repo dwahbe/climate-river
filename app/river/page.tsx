@@ -139,7 +139,7 @@ export default async function RiverPage({
                   regexp_replace(
                     COALESCE(a2.publisher_homepage, a2.canonical_url),
                     '^https?://([^/]+).*$',
-                    '\\\\1'
+                    '\\1'
                   )
                 ),
                 '^(www|m|mobile|amp|amp-cdn|edition|news|beta)\\\\.',
@@ -171,7 +171,7 @@ export default async function RiverPage({
           WHERE ac2.cluster_id = l.cluster_id
             AND a2.id <> l.lead_article_id
         )
-        SELECT COALESCE(json_agg(row_to_json(y) ORDER BY y.published_at DESC), '[]'::json)
+        SELECT COALESCE(json_agg(row_to_json(y)), '[]'::json)
         FROM (
           -- keep one per outlet (host_norm), exclude aggregators completely
           SELECT DISTINCT ON (host_norm)

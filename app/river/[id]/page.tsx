@@ -4,7 +4,6 @@ import * as DB from '@/lib/db'
 import LocalTime from '@/components/LocalTime'
 import OpenAllButton from '@/components/OpenAllButton'
 import { unstable_noStore as noStore } from 'next/cache'
-import Card from '@/components/ui/Card'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
@@ -100,8 +99,17 @@ export default async function ClusterPage({
             a2.published_at,
             COALESCE(
               a2.publisher_host,
-              lower(regexp_replace(COALESCE(a2.publisher_homepage, a2.canonical_url),
-                    '^https?://(www\\.)?([^/]+).*$', '\\\\2'))
+              regexp_replace(
+                lower(
+                  regexp_replace(
+                    COALESCE(a2.publisher_homepage, a2.canonical_url),
+                    '^https?://([^/]+).*$',
+                    '\\1'
+                  )
+                ),
+                '^(www|m|mobile|amp|amp-cdn|edition|news|beta)\\\\.',
+                ''
+              )
             ) AS host_norm,
             lower(
               regexp_replace(
@@ -127,7 +135,7 @@ export default async function ClusterPage({
           WHERE ac2.cluster_id = l.cluster_id
             AND a2.id <> l.lead_article_id
         )
-        SELECT COALESCE(json_agg(row_to_json(y) ORDER BY y.published_at DESC), '[]'::json)
+        SELECT COALESCE(json_agg(row_to_json(y)), '[]'::json)
         FROM (
           -- keep one per outlet (host_norm), exclude aggregators completely
           SELECT DISTINCT ON (host_norm)
@@ -176,68 +184,65 @@ export default async function ClusterPage({
         </span>
       </div>
 
-      {/* Lead card */}
-      <Card className="mt-4">
-        <div className="text-[11px] sm:text-xs font-medium tracking-wide text-zinc-500 mb-1.5">
+      {/* Lead article */}
+      <article className="mt-6">
+        <div className="text-xs text-zinc-500 mb-2">
           {r.lead_source ?? hostFrom(r.lead_url)}
         </div>
 
-        <h1 className="text-xl sm:text-[22px] font-semibold tracking-tight leading-snug">
+        <h1 className="text-2xl font-semibold leading-tight mb-3">
           <a
             href={leadClickHref}
             target="_blank"
             rel="noopener noreferrer"
-            className="text-zinc-950 hover:text-zinc-900 focus-visible:focus-ring rounded transition"
+            className="text-zinc-900 hover:underline decoration-zinc-300"
           >
             {r.lead_title}
           </a>
         </h1>
 
         {r.lead_dek && (
-          <p className="mt-2 text-[15px] sm:text-base text-zinc-600">
-            {r.lead_dek}
-          </p>
+          <p className="text-zinc-600 leading-relaxed mb-3">{r.lead_dek}</p>
         )}
 
-        <div className="mt-3 flex items-center gap-3 text-[12px] sm:text-sm text-zinc-500">
+        <div className="flex items-center justify-between text-xs text-zinc-500">
           <LocalTime iso={r.published_at} />
-          <span className="ml-auto" />
           <OpenAllButton
             urls={openAllUrls}
-            className="text-zinc-700 hover:text-zinc-900"
+            className="text-zinc-600 hover:text-zinc-900 text-sm"
           />
         </div>
-      </Card>
+      </article>
 
       {/* More coverage */}
       {r.subs.length > 0 && (
-        <Card className="mt-5">
-          <div className="mb-2 text-[13px] font-medium text-zinc-500">
+        <section className="mt-8">
+          <h2 className="text-sm font-medium text-zinc-500 mb-4">
             More coverage
-          </div>
-          <ul className="divide-y divide-zinc-200/70">
+          </h2>
+          <div className="space-y-4">
             {r.subs.map((s) => {
               const href = `/api/click?aid=${s.article_id}&url=${encodeURIComponent(
                 s.url
               )}`
               return (
-                <li key={s.article_id} className="py-3">
-                  <div className="mb-1 text-[11px] sm:text-xs text-zinc-500">
+                <div key={s.article_id}>
+                  <div className="text-xs text-zinc-500 mb-1">
                     {s.source ?? hostFrom(s.url)}
                   </div>
                   <a
                     href={href}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="text-[15px] sm:text-base text-zinc-900 hover:underline decoration-zinc-300"
+                    className="text-zinc-900 hover:underline decoration-zinc-300 leading-snug"
                   >
                     {s.title}
                   </a>
-                </li>
+                </div>
               )
             })}
-          </ul>
-        </Card>
+          </div>
+        </section>
       )}
     </div>
   )

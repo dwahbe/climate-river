@@ -123,7 +123,7 @@
     "slug": "physorg-environment",
     "name": "Phys.org",
     "rss": "https://phys.org/rss-feed/earth-news/",
-    "weight": 4.0
+    "weight": 3.0
   },
   {
     "slug": "axios-climate",
