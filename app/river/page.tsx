@@ -55,7 +55,7 @@ export default async function RiverPage({
       ? searchParams?.view[0]
       : searchParams?.view) === 'latest'
 
-  const topWindowHours = 72
+  const topWindowHours = 48 // Sweet spot: recent but not too restrictive
   const limit = 28
 
   // Get last updated timestamp

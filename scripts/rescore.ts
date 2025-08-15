@@ -8,7 +8,10 @@ const HL_ARTICLE_H = 8 // 8 hours instead of 12 - much faster decay
 const HL_CLUSTER_H = 12 // 12 hours instead of 18 - faster cluster decay
 
 export async function run(opts: { closePool?: boolean } = {}) {
+  console.log('🔄 Starting rescore process...')
+
   // ensure table
+  console.log('📋 Ensuring cluster_scores table exists...')
   await query(`
     CREATE TABLE IF NOT EXISTS cluster_scores (
       cluster_id       bigint PRIMARY KEY REFERENCES clusters(id) ON DELETE CASCADE,
@@ -17,6 +20,12 @@ export async function run(opts: { closePool?: boolean } = {}) {
       lead_article_id  bigint REFERENCES articles(id)
     );
   `)
+  console.log('✅ Table ensured')
+
+  console.log('🔄 Starting main rescore query...')
+  console.log(
+    `⏰ Using half-lives: Articles=${HL_ARTICLE_H}h, Clusters=${HL_CLUSTER_H}h`
+  )
 
   await query(
     `
@@ -119,6 +128,9 @@ export async function run(opts: { closePool?: boolean } = {}) {
     `,
     [HL_ARTICLE_H, HL_CLUSTER_H]
   )
+
+  console.log('✅ Main rescore query completed')
+  console.log('🎯 Rescore process finished successfully!')
 
   if (opts.closePool) await endPool()
   return { ok: true }
