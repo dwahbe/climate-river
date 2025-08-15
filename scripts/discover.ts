@@ -260,7 +260,7 @@ async function ingestQuery(q: string, limitPerQuery = 25) {
     headers: {
       // polite but browsery UA; helps some endpoints
       'User-Agent':
-        'Mozilla/5.0 (compatible; ClimateRiverBot/0.1; +https://climate-news-gules.vercel.app)',
+        'Mozilla/5.0 (compatible; ClimateRiverBot/0.1; +https://climateriver.org)',
       Accept: 'application/rss+xml, application/xml;q=0.9, */*;q=0.8',
     },
     requestOptions: { timeout: 20000 },

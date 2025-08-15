@@ -24,8 +24,7 @@ type RssItem = {
 
 const parser = new Parser<RssItem>({
   headers: {
-    'User-Agent':
-      'ClimateRiverBot/0.1 (+https://climate-news-gules.vercel.app)',
+    'User-Agent': 'ClimateRiverBot/0.1 (+https://climateriver.org)',
   },
   requestOptions: { timeout: 20000 },
   customFields: {
