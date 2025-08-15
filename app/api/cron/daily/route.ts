@@ -89,16 +89,27 @@ export async function GET(req: Request) {
 
     // 5) AI-enhanced web discovery (find stories beyond RSS feeds)
     // Only run at 2AM to control costs - check if this is the full daily job
-    const currentHour = new Date().getHours()
-    let webDiscoverResult = { skipped: 'light_cron_mode' }
+    let webDiscoverResult: any = { skipped: 'time_check_failed' }
 
-    // Only run AI discovery during the 2AM full job (not the light business hour jobs)
-    if (currentHour >= 0 && currentHour <= 6) {
-      webDiscoverResult = await safeRun(import('@/scripts/discover-web'), {
-        limitPerQuery: 2, // Reduced from 3
-        maxQueries: 3, // Reduced from 4
-        closePool: false,
-      })
+    try {
+      const currentHour = new Date().getHours()
+      console.log(`Current hour: ${currentHour}`)
+
+      // Only run AI discovery during the 2AM full job (not the light business hour jobs)
+      if (currentHour >= 0 && currentHour <= 6) {
+        console.log('Running AI web discovery...')
+        webDiscoverResult = await safeRun(import('@/scripts/discover-web'), {
+          limitPerQuery: 2, // Reduced from 3
+          maxQueries: 3, // Reduced from 4
+          closePool: false,
+        })
+        console.log('AI web discovery completed')
+      } else {
+        console.log(`Skipping AI discovery - current hour: ${currentHour}`)
+      }
+    } catch (webDiscoverError: any) {
+      console.error('AI web discovery failed:', webDiscoverError)
+      webDiscoverResult = { error: webDiscoverError.message, skipped: 'error' }
     }
 
     await endPool()
@@ -115,9 +126,14 @@ export async function GET(req: Request) {
       },
     })
   } catch (err: any) {
+    console.error('Daily cron job failed:', err)
     await endPool().catch(() => {})
     return NextResponse.json(
-      { ok: false, error: err?.message || String(err) },
+      {
+        ok: false,
+        error: err?.message || String(err),
+        stack: process.env.NODE_ENV === 'development' ? err?.stack : undefined,
+      },
       { status: 500 }
     )
   }
