@@ -562,8 +562,9 @@ export async function run(
   } = {}
 ) {
   const startTime = Date.now()
-  const limitPerQuery = opts.limitPerQuery || 3 // Limit results per query
-  const maxQueries = opts.maxQueries || 6 // Limit total queries to control costs
+  const limitPerQuery = opts.limitPerQuery || 2 // Reduced from 3
+  const maxQueries = opts.maxQueries || 3 // Reduced from 6
+  const maxTotalArticles = 20 // Hard limit to prevent cost explosion
 
   console.log(`Starting web discovery with ${maxQueries} queries...`)
 
@@ -582,6 +583,14 @@ export async function run(
     let inserted = 0
 
     for (const result of results.slice(0, limitPerQuery)) {
+      // Hard stop if we've hit our total article limit
+      if (totalInserted >= maxTotalArticles) {
+        console.log(
+          `🛑 Hit max article limit (${maxTotalArticles}), stopping discovery`
+        )
+        break
+      }
+
       const duplicate = await isDuplicate(result.title, result.url)
 
       if (!duplicate) {
@@ -596,6 +605,14 @@ export async function run(
       } else {
         console.log(`- Skipped duplicate: ${result.title.substring(0, 60)}...`)
       }
+    }
+
+    // Stop outer loop if we hit the limit
+    if (totalInserted >= maxTotalArticles) {
+      console.log(
+        `🛑 Reached total article limit (${maxTotalArticles}), ending discovery`
+      )
+      break
     }
 
     console.log(`Query "${query}": ${inserted} new articles`)

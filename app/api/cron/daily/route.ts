@@ -60,7 +60,7 @@ export async function GET(req: Request) {
   )
   const rewriteLimit = Math.max(
     1,
-    Math.min(400, Number(url.searchParams.get('rewrite') || 120))
+    Math.min(100, Number(url.searchParams.get('rewrite') || 30)) // Reduced from 120 to 30
   )
 
   try {
@@ -88,11 +88,19 @@ export async function GET(req: Request) {
     })
 
     // 5) AI-enhanced web discovery (find stories beyond RSS feeds)
-    const webDiscoverResult = await safeRun(import('@/scripts/discover-web'), {
-      limitPerQuery: 3,
-      maxQueries: 4,
-      closePool: false,
-    })
+    // Only run at 2AM to control costs - check if this is the full daily job
+    const url = new URL(req.url)
+    const currentHour = new Date().getHours()
+    let webDiscoverResult = { skipped: 'light_cron_mode' }
+
+    // Only run AI discovery during the 2AM full job (not the light business hour jobs)
+    if (currentHour >= 0 && currentHour <= 6) {
+      webDiscoverResult = await safeRun(import('@/scripts/discover-web'), {
+        limitPerQuery: 2, // Reduced from 3
+        maxQueries: 3, // Reduced from 4
+        closePool: false,
+      })
+    }
 
     await endPool()
 
