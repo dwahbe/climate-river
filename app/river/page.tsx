@@ -173,7 +173,7 @@ export default async function RiverPage({
         )
         SELECT COALESCE(json_agg(row_to_json(y)), '[]'::json)
         FROM (
-          -- keep one per outlet (host_norm), exclude aggregators completely
+          -- keep one per outlet (host_norm), exclude aggregators and lead article's domain
           SELECT DISTINCT ON (host_norm)
             article_id, title, url, source, author, published_at
           FROM x
@@ -181,6 +181,24 @@ export default async function RiverPage({
             AND url NOT LIKE 'https://news.yahoo.com%'
             AND url NOT LIKE 'https://www.msn.com%'
             AND host_norm NOT IN ('news.google.com', 'news.yahoo.com', 'msn.com')
+            AND host_norm <> (
+              SELECT COALESCE(
+                lead_a.publisher_host,
+                regexp_replace(
+                  lower(
+                    regexp_replace(
+                      COALESCE(lead_a.publisher_homepage, lead_a.canonical_url),
+                      '^https?://([^/]+).*$',
+                      '\\1'
+                    )
+                  ),
+                  '^(www|m|mobile|amp|amp-cdn|edition|news|beta)\\.',
+                  ''
+                )
+              )
+              FROM articles lead_a 
+              WHERE lead_a.id = l.lead_article_id
+            )
           ORDER BY
             host_norm,
             published_at DESC
