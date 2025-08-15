@@ -89,7 +89,6 @@ export async function GET(req: Request) {
 
     // 5) AI-enhanced web discovery (find stories beyond RSS feeds)
     // Only run at 2AM to control costs - check if this is the full daily job
-    const url = new URL(req.url)
     const currentHour = new Date().getHours()
     let webDiscoverResult = { skipped: 'light_cron_mode' }
 
