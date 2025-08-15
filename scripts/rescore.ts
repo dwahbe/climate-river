@@ -3,9 +3,9 @@ import './_env'
 import { query, endPool } from '@/lib/db'
 
 const HOUR = 3600
-// Faster decay for more dynamic content (articles become "stale" quicker)
-const HL_ARTICLE_H = 12 // 12 hours instead of 36
-const HL_CLUSTER_H = 18 // 18 hours instead of 42
+// Even faster decay for more dynamic content (articles become "stale" much quicker)
+const HL_ARTICLE_H = 8 // 8 hours instead of 12 - much faster decay
+const HL_CLUSTER_H = 12 // 12 hours instead of 18 - faster cluster decay
 
 export async function run(opts: { closePool?: boolean } = {}) {
   // ensure table
@@ -55,8 +55,8 @@ export async function run(opts: { closePool?: boolean } = {}) {
       SELECT
         article_id,
         cluster_id,
-        -- article_score: give much more weight to freshness
-        (0.50 * editorial_q) + (0.50 * fresh) AS article_score
+        -- article_score: give MUCH more weight to freshness
+        (0.40 * editorial_q) + (0.60 * fresh) AS article_score
       FROM art_scored
     ),
     clust AS (
@@ -67,8 +67,8 @@ export async function run(opts: { closePool?: boolean } = {}) {
         MAX(a.published_at)                                              AS latest_pub,
         SUM(COALESCE(a.src_weight,0))                                    AS sum_w,
         AVG(COALESCE(a.src_weight,0))                                    AS avg_w,
-        -- velocity = how many articles in last 6h (CAST the boolean BEFORE SUM)
-        SUM( ((now() - a.published_at) <= interval '6 hours')::int )     AS v6
+        -- velocity = how many articles in last 4h (shorter window for more recent focus)
+        SUM( ((now() - a.published_at) <= interval '4 hours')::int )     AS v6
       FROM art a
       LEFT JOIN article_clusters ac2 ON ac2.article_id = a.article_id
       LEFT JOIN articles a2 ON a2.id = ac2.article_id
@@ -103,8 +103,8 @@ export async function run(opts: { closePool?: boolean } = {}) {
     final AS (
       SELECT
         cluster_id,
-        -- blend: balance coverage, quality, and freshness more evenly
-        (0.35 * coverage) + (0.15 * avg_w) + (0.20 * LN(1 + v6)) + (0.25 * fresh)
+        -- blend: heavily favor freshness and velocity for dynamic content
+        (0.25 * coverage) + (0.10 * avg_w) + (0.25 * LN(1 + v6)) + (0.35 * fresh)
           + 0.05 * LN(1 + pool_strength) AS score,
         lead_article_id,
         (SELECT size FROM clust c2 WHERE c2.cluster_id = clust_scored.cluster_id) AS size
