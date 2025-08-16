@@ -9,7 +9,7 @@ async function testExactFrontend() {
   console.log('🔍 Testing exact frontend database connection...')
 
   // Use the exact same parameters as the frontend
-  const searchParams = {}
+  const searchParams: { view?: string } = {}
   const isLatest = searchParams?.view === 'latest'
   const topWindowHours = 48
   const limit = 28
