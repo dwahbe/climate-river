@@ -402,7 +402,21 @@ async function ensureClusterForArticle(articleId: number, title: string) {
   const key = clusterKey(title)
   if (!key) return
 
-  // First check if this article is already in a cluster
+  // CRITICAL FIX: Check if this article is already in ANY cluster
+  const articleAlreadyClustered = await query<{ cluster_id: number }>(
+    `SELECT cluster_id FROM article_clusters WHERE article_id = $1`,
+    [articleId]
+  )
+
+  if (articleAlreadyClustered.rows.length > 0) {
+    // Article already has a cluster - don't add it to another one
+    console.log(
+      `Article ${articleId} already in cluster ${articleAlreadyClustered.rows[0].cluster_id}, skipping`
+    )
+    return
+  }
+
+  // Now check for existing clusters with this key
   const existingCluster = await query<{ cluster_id: number }>(
     `SELECT ac.cluster_id 
      FROM article_clusters ac 
@@ -427,7 +441,7 @@ async function ensureClusterForArticle(articleId: number, title: string) {
     clusterId = cluster.rows[0].id
   }
 
-  // Add article to cluster (will fail silently if already exists)
+  // Add article to cluster
   await query(
     `insert into article_clusters (article_id, cluster_id)
      values ($1,$2) on conflict do nothing`,
@@ -541,8 +555,13 @@ export async function run(opts: { limit?: number; closePool?: boolean } = {}) {
 
 // ---------- CLI ----------
 if (import.meta.url === `file://${process.argv[1]}`) {
-  run({ closePool: true }).catch((err) => {
-    console.error(err)
-    endPool().finally(() => process.exit(1))
-  })
+  run({ closePool: true })
+    .then(() => {
+      console.log('✅ Ingest completed successfully')
+      process.exit(0)
+    })
+    .catch((err) => {
+      console.error('❌ Ingest failed:', err)
+      endPool().finally(() => process.exit(1))
+    })
 }
