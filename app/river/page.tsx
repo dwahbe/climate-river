@@ -182,23 +182,26 @@ export default async function RiverPage({
             AND url NOT LIKE 'https://news.yahoo.com%'
             AND url NOT LIKE 'https://www.msn.com%'
             AND host_norm NOT IN ('news.google.com', 'news.yahoo.com', 'msn.com')
-            AND host_norm <> (
-              SELECT COALESCE(
-                lead_a.publisher_host,
-                regexp_replace(
-                  lower(
-                    regexp_replace(
-                      COALESCE(lead_a.publisher_homepage, lead_a.canonical_url),
-                      '^https?://([^/]+).*$',
-                      '\\1'
-                    )
-                  ),
-                  '^(www|m|mobile|amp|amp-cdn|edition|news|beta)\\.',
-                  ''
+            AND (
+              l.size > 1 OR -- Allow same outlet for semantic clusters (size > 1)
+              host_norm <> (
+                SELECT COALESCE(
+                  lead_a.publisher_host,
+                  regexp_replace(
+                    lower(
+                      regexp_replace(
+                        COALESCE(lead_a.publisher_homepage, lead_a.canonical_url),
+                        '^https?://([^/]+).*$',
+                        '\\1'
+                      )
+                    ),
+                    '^(www|m|mobile|amp|amp-cdn|edition|news|beta)\\.',
+                    ''
+                  )
                 )
+                FROM articles lead_a 
+                WHERE lead_a.id = l.lead_article_id
               )
-              FROM articles lead_a 
-              WHERE lead_a.id = l.lead_article_id
             )
           ORDER BY
             host_norm,

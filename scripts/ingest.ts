@@ -4,6 +4,12 @@ import Parser from 'rss-parser'
 import dayjs from 'dayjs'
 import { query, endPool } from '@/lib/db'
 import sources from '@/data/sources.json'
+import OpenAI from 'openai'
+
+// Initialize OpenAI client for embeddings
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+})
 
 // ---------- Parser configured once (captures <source>, rich content) ----------
 type RssItem = {
@@ -50,6 +56,30 @@ function isGoogleNewsFeed(feedUrl: string) {
     return new URL(feedUrl).hostname.includes('news.google.com')
   } catch {
     return false
+  }
+}
+
+// Generate embedding for article content
+async function generateEmbedding(
+  title: string,
+  description?: string
+): Promise<number[]> {
+  try {
+    // Combine title and description for better semantic understanding
+    const text = description ? `${title}\n\n${description}` : title
+
+    // Truncate to prevent token limit issues (rough estimate: 1 token ≈ 4 chars)
+    const truncatedText = text.substring(0, 8000)
+
+    const response = await openai.embeddings.create({
+      model: 'text-embedding-3-small', // More cost-effective than text-embedding-ada-002
+      input: truncatedText,
+    })
+
+    return response.data[0].embedding
+  } catch (error) {
+    console.error('Error generating embedding:', error)
+    return []
   }
 }
 
@@ -372,16 +402,20 @@ async function insertArticle(
   // defaulted param must NOT be optional
   pub: { name?: string; homepage?: string } = {}
 ) {
+  // Generate embedding for the article
+  const embedding = await generateEmbedding(title, dek ?? undefined)
+
   const row = await query<{ id: number }>(
     `
     insert into articles
-      (source_id, title, canonical_url, published_at, dek, author, publisher_name, publisher_homepage)
-    values ($1,$2,$3,$4,$5,$6,$7,$8)
+      (source_id, title, canonical_url, published_at, dek, author, publisher_name, publisher_homepage, embedding)
+    values ($1,$2,$3,$4,$5,$6,$7,$8,$9)
     on conflict (canonical_url) do update set
       dek                 = coalesce(articles.dek, excluded.dek),
       author              = coalesce(articles.author, excluded.author),
       publisher_name      = coalesce(articles.publisher_name, excluded.publisher_name),
-      publisher_homepage  = coalesce(articles.publisher_homepage, excluded.publisher_homepage)
+      publisher_homepage  = coalesce(articles.publisher_homepage, excluded.publisher_homepage),
+      embedding           = coalesce(articles.embedding, excluded.embedding)
     returning id
   `,
     [
@@ -393,6 +427,7 @@ async function insertArticle(
       author ?? null,
       pub.name ?? null,
       pub.homepage ?? null,
+      embedding.length > 0 ? JSON.stringify(embedding) : null,
     ]
   )
   return row.rows[0]?.id
@@ -416,8 +451,8 @@ async function ensureClusterForArticle(articleId: number, title: string) {
     return
   }
 
-  // Now check for existing clusters with this key
-  const existingCluster = await query<{ cluster_id: number }>(
+  // Check for exact key match first
+  const exactCluster = await query<{ cluster_id: number }>(
     `SELECT ac.cluster_id 
      FROM article_clusters ac 
      JOIN clusters c ON ac.cluster_id = c.id 
@@ -425,27 +460,231 @@ async function ensureClusterForArticle(articleId: number, title: string) {
     [key]
   )
 
-  let clusterId: number
-
-  if (existingCluster.rows.length > 0) {
-    // Use existing cluster
-    clusterId = existingCluster.rows[0].cluster_id
-  } else {
-    // Create new cluster
-    const cluster = await query<{ id: number }>(
-      `insert into clusters (key) values ($1)
-       on conflict (key) do update set key = excluded.key
-       returning id`,
-      [key]
+  if (exactCluster.rows.length > 0) {
+    // Use existing exact match cluster
+    await query(
+      `insert into article_clusters (article_id, cluster_id)
+       values ($1,$2) on conflict do nothing`,
+      [articleId, exactCluster.rows[0].cluster_id]
     )
-    clusterId = cluster.rows[0].id
+    return
   }
+
+  // If no exact match, check for similar clusters using weighted similarity
+  const keyWords = key.split('-')
+  if (keyWords.length >= 3) {
+    // Define common/generic words that shouldn't drive clustering
+    const genericWords = new Set([
+      'climate',
+      'energy',
+      'environmental',
+      'green',
+      'carbon',
+      'emissions',
+      'global',
+      'warming',
+      'change',
+      'crisis',
+      'policy',
+      'new',
+      'latest',
+      'report',
+      'study',
+      'research',
+      'data',
+      'government',
+      'plan',
+      'program',
+      'project',
+      'company',
+      'companies',
+      'industry',
+      'market',
+      'business',
+      'world',
+      'year',
+      'years',
+      'million',
+      'billion',
+      'percent',
+      'says',
+      'will',
+      'could',
+      'may',
+      'might',
+      'now',
+      'after',
+      'before',
+      'during',
+    ])
+
+    const similarClusters = await query<{ cluster_id: number; key: string }>(
+      `SELECT ac.cluster_id, c.key
+       FROM article_clusters ac 
+       JOIN clusters c ON ac.cluster_id = c.id 
+       WHERE c.created_at >= now() - interval '7 days'
+       GROUP BY ac.cluster_id, c.key`,
+      []
+    )
+
+    for (const cluster of similarClusters.rows) {
+      const clusterWords = cluster.key.split('-')
+      const sharedWords = keyWords.filter((word) => clusterWords.includes(word))
+
+      // Calculate weighted similarity score
+      let similarityScore = 0
+      let specificMatches = 0
+
+      for (const word of sharedWords) {
+        if (genericWords.has(word)) {
+          similarityScore += 0.5 // Low weight for generic words
+        } else {
+          similarityScore += 2.0 // High weight for specific words
+          specificMatches++
+        }
+      }
+
+      // Require: At least 2 specific (non-generic) words + total score >= 4.0
+      // This prevents clustering on generic terms like "climate crisis policy"
+      if (specificMatches >= 2 && similarityScore >= 4.0) {
+        console.log(
+          `Article ${articleId} matched cluster ${cluster.cluster_id} with score ${similarityScore.toFixed(1)} (${specificMatches} specific): ${sharedWords.join(', ')}`
+        )
+        await query(
+          `insert into article_clusters (article_id, cluster_id)
+           values ($1,$2) on conflict do nothing`,
+          [articleId, cluster.cluster_id]
+        )
+        return
+      }
+    }
+  }
+
+  // No similar cluster found, create new cluster
+  const cluster = await query<{ id: number }>(
+    `insert into clusters (key) values ($1)
+     on conflict (key) do update set key = excluded.key
+     returning id`,
+    [key]
+  )
 
   // Add article to cluster
   await query(
     `insert into article_clusters (article_id, cluster_id)
      values ($1,$2) on conflict do nothing`,
-    [articleId, clusterId]
+    [articleId, cluster.rows[0].id]
+  )
+}
+
+// New semantic clustering function using vector embeddings
+async function ensureSemanticClusterForArticle(
+  articleId: number,
+  title: string
+) {
+  // Check if this article is already in ANY cluster
+  const articleAlreadyClustered = await query<{ cluster_id: number }>(
+    `SELECT cluster_id FROM article_clusters WHERE article_id = $1`,
+    [articleId]
+  )
+
+  if (articleAlreadyClustered.rows.length > 0) {
+    console.log(
+      `Article ${articleId} already in cluster ${articleAlreadyClustered.rows[0].cluster_id}, skipping`
+    )
+    return
+  }
+
+  // Get the article's embedding
+  const articleResult = await query<{ embedding: string }>(
+    `SELECT embedding FROM articles WHERE id = $1 AND embedding IS NOT NULL`,
+    [articleId]
+  )
+
+  if (articleResult.rows.length === 0) {
+    console.log(`Article ${articleId} has no embedding, skipping clustering`)
+    return
+  }
+
+  const articleEmbedding = articleResult.rows[0].embedding
+
+  // Find similar articles using cosine similarity
+  const similarArticles = await query<{
+    article_id: number
+    cluster_id: number | null
+    similarity: number
+    title: string
+  }>(
+    `SELECT 
+       a.id as article_id,
+       ac.cluster_id,
+       1 - (a.embedding <=> $1::vector) as similarity,
+       a.title
+     FROM articles a
+     LEFT JOIN article_clusters ac ON a.id = ac.article_id
+                          WHERE a.id != $2
+                       AND a.embedding IS NOT NULL
+                       AND a.fetched_at >= now() - interval '7 days'
+                       AND 1 - (a.embedding <=> $1::vector) > 0.65
+     ORDER BY a.embedding <=> $1::vector
+     LIMIT 10`,
+    [articleEmbedding, articleId]
+  )
+
+  // Look for existing clusters among similar articles
+  for (const similar of similarArticles.rows) {
+    if (similar.cluster_id) {
+      console.log(
+        `Article ${articleId} matched existing cluster ${similar.cluster_id} via similar article ${similar.article_id} (similarity: ${similar.similarity.toFixed(3)}) - "${similar.title}"`
+      )
+
+      // Add this article to the existing cluster
+      await query(
+        `INSERT INTO article_clusters (article_id, cluster_id)
+         VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+        [articleId, similar.cluster_id]
+      )
+      return
+    }
+  }
+
+  // If we have similar articles but no existing cluster, create a new one
+  if (similarArticles.rows.length > 0) {
+    const key = clusterKey(title) || `semantic-${Date.now()}`
+
+    const cluster = await query<{ id: number }>(
+      `INSERT INTO clusters (key) VALUES ($1)
+       ON CONFLICT (key) DO UPDATE SET key = excluded.key
+       RETURNING id`,
+      [key]
+    )
+
+    const clusterId = cluster.rows[0].id
+
+    // Add the current article to the new cluster
+    await query(
+      `INSERT INTO article_clusters (article_id, cluster_id)
+       VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+      [articleId, clusterId]
+    )
+
+    // Add all similar articles to the new cluster
+    for (const similar of similarArticles.rows) {
+      await query(
+        `INSERT INTO article_clusters (article_id, cluster_id)
+         VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+        [similar.article_id, clusterId]
+      )
+    }
+
+    console.log(
+      `Created new semantic cluster ${clusterId} with ${similarArticles.rows.length + 1} articles`
+    )
+    return
+  }
+
+  // No similar articles found - article remains unclustered
+  console.log(
+    `Article ${articleId} - no similar articles found, remains unclustered`
   )
 }
 
@@ -497,7 +736,8 @@ async function ingestFromFeed(feedUrl: string, sourceId: number, limit = 20) {
     )
     if (articleId) {
       inserted++
-      await ensureClusterForArticle(articleId, title)
+      // Use semantic clustering instead of keyword-based clustering
+      await ensureSemanticClusterForArticle(articleId, title)
     }
   }
 
