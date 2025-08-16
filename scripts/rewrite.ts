@@ -8,7 +8,7 @@ type Row = {
   canonical_url: string
 }
 
-const MAX_CHARS = 140
+const MAX_CHARS = 160
 
 // Endpoints
 const BASE = process.env.OPENAI_BASE_URL?.trim() || 'https://api.openai.com/v1'
@@ -31,15 +31,19 @@ function preferResponses() {
 
 function buildPrompt(input: { title: string; dek?: string | null }) {
   const lines = [
-    'Rewrite this into a clear, informative news summary headline that provides comprehensive context.',
+    'Rewrite this into a comprehensive, informative news headline that reads like a detailed summary.',
     `Requirements:
 - Use present tense and active voice.
-- Include: WHO (key figures/companies), WHAT (action/policy), WHERE (location), WHEN (timeline), WHY (impact/implication).
-- Prioritize: policy changes, financial figures, geographic scope, stakeholder impacts.
-- Include specific numbers, percentages, or timeframes when available.
+- Include: WHO (specific companies/officials/courts), WHAT (exact action/decision), WHERE (location/jurisdiction), WHEN (timeline), WHY (reasoning/context).
+- For legal stories: Include court level, specific legal action, parties involved, and legal reasoning.
+- For business stories: Include company names, financial figures, market impacts, and business reasoning.
+- For policy stories: Include agency names, specific policies, affected parties, and implementation details.
+- Structure: [Action] → [Target/Subject] → [Context/Background] → [Reasoning/Impact]
+- Include specific details: exact titles, legal terms, dollar amounts, percentages, timeframes.
+- Aim for ${MAX_CHARS} characters - comprehensive but focused.
 - No hype, puns, rhetorical questions, or marketing language.
 - Do not invent facts not in the provided text.
-- Aim for ${MAX_CHARS} characters but prioritize clarity over length.`,
+- Make every word count - be precise and informative.`,
     `Original title: ${input.title}`,
   ]
   if (input.dek) lines.push(`Article summary: ${input.dek}`)
@@ -62,7 +66,7 @@ function passesChecks(original: string, draft: string) {
   const t = sanitizeHeadline(draft)
 
   // More flexible length requirements for better headlines
-  if (t.length < 15 || t.length > Math.min(MAX_CHARS + 10, 160)) return false
+  if (t.length < 15 || t.length > Math.min(MAX_CHARS + 20, 180)) return false
 
   const norm = (s: string) =>
     s
