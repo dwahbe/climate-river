@@ -293,7 +293,7 @@ export default async function RiverPage({
                       className="no-underline hover:underline text-zinc-600 hover:text-zinc-800 transition-colors font-medium"
                       prefetch={false}
                     >
-                      Read more:
+                      Related articles:
                     </Link>
                     <span> </span>
                     {secondaries.map((s, i) => {
