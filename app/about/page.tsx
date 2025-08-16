@@ -28,7 +28,7 @@ export default function AboutPage() {
           rel="noreferrer"
           className="underline decoration-zinc-300 hover:decoration-zinc-500"
         >
-          Open source on GitHub
+          Code available on GitHub
         </a>
         .
       </p>
