@@ -23,7 +23,7 @@ export default function AboutPage() {
       <p className="mt-3 text-zinc-700">
         Built with Next.js, Tailwind, and Postgres.{' '}
         <a
-          href="https://github.com/dwahbe/climate-river-mvp"
+          href="https://github.com/dwahbe/climate-river"
           target="_blank"
           rel="noreferrer"
           className="underline decoration-zinc-300 hover:decoration-zinc-500"

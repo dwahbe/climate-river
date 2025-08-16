@@ -66,7 +66,7 @@ export default async function RootLayout({
               {/* Right: GitHub icon */}
               <div>
                 <a
-                  href="https://github.com/dwahbe/climate-river-mvp"
+                  href="https://github.com/dwahbe/climate-river"
                   target="_blank"
                   rel="noreferrer"
                   aria-label="GitHub repository"
