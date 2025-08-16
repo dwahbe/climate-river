@@ -23,7 +23,7 @@ export default async function RootLayout({
   return (
     <html lang="en" className="h-full">
       <body className="min-h-full bg-zinc-50 text-zinc-900 antialiased">
-        <nav className="sticky top-0 z-30 bg-white/80 backdrop-blur border-b border-zinc-100">
+        <nav className="bg-white border-b border-zinc-100">
           <div className="mx-auto max-w-5xl px-4 sm:px-6">
             {/* Two columns: left / right — all vertically centered */}
             <div className="flex items-center justify-between py-3 sm:py-4">

@@ -219,7 +219,7 @@ export default async function RiverPage({
 
   return (
     <>
-      <header className="sticky top-0 z-10 bg-transparent">
+      <header className="z-10 bg-transparent">
         <div className="mx-auto max-w-3xl px-4 sm:px-6 py-2 sm:py-2.5">
           <RiverControls lastUpdated={lastFormatted} />
         </div>
