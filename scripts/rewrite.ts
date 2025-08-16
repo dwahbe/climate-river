@@ -8,7 +8,7 @@ type Row = {
   canonical_url: string
 }
 
-const MAX_CHARS = 110
+const MAX_CHARS = 140
 
 // Endpoints
 const BASE = process.env.OPENAI_BASE_URL?.trim() || 'https://api.openai.com/v1'
@@ -31,16 +31,18 @@ function preferResponses() {
 
 function buildPrompt(input: { title: string; dek?: string | null }) {
   const lines = [
-    'Rewrite a neutral, factual, one-line news headline.',
+    'Rewrite this into a clear, informative news summary headline that provides comprehensive context.',
     `Requirements:
-- Use present tense.
-- Include actor/subject, action, place/time if relevant, and one concrete number/stat if present.
+- Use present tense and active voice.
+- Include: WHO (key figures/companies), WHAT (action/policy), WHERE (location), WHEN (timeline), WHY (impact/implication).
+- Prioritize: policy changes, financial figures, geographic scope, stakeholder impacts.
+- Include specific numbers, percentages, or timeframes when available.
 - No hype, puns, rhetorical questions, or marketing language.
 - Do not invent facts not in the provided text.
-- <= ${MAX_CHARS} characters.`,
+- Aim for ${MAX_CHARS} characters but prioritize clarity over length.`,
     `Original title: ${input.title}`,
   ]
-  if (input.dek) lines.push(`Dek/summary: ${input.dek}`)
+  if (input.dek) lines.push(`Article summary: ${input.dek}`)
   lines.push('Output ONLY the rewritten headline (no quotes, no prefix).')
   return lines.join('\n')
 }
@@ -58,13 +60,24 @@ function sanitizeHeadline(s: string) {
 function passesChecks(original: string, draft: string) {
   if (!draft) return false
   const t = sanitizeHeadline(draft)
-  if (t.length < 10 || t.length > Math.min(MAX_CHARS + 5, 140)) return false
+
+  // More flexible length requirements for better headlines
+  if (t.length < 15 || t.length > Math.min(MAX_CHARS + 10, 160)) return false
+
   const norm = (s: string) =>
     s
       .toLowerCase()
       .replace(/[\W_]+/g, ' ')
       .trim()
+
+  // Ensure it's different from original and has meaningful content
   if (!norm(t) || norm(t) === norm(original)) return false
+
+  // Check if it has improved information density
+  const originalWords = original.split(/\s+/).length
+  const draftWords = t.split(/\s+/).length
+  if (draftWords < originalWords * 0.8) return false // Don't make it too short
+
   return true
 }
 
@@ -169,7 +182,7 @@ async function generateWithOpenAI(
       // Responses API uses max_output_tokens
       return post(
         RESPONSES_URL,
-        { model, input: prompt, temperature: 0.2, max_output_tokens: 80 },
+        { model, input: prompt, temperature: 0.2, max_output_tokens: 120 },
         abortMs
       )
     }
@@ -180,7 +193,7 @@ async function generateWithOpenAI(
         model,
         messages: [{ role: 'user', content: prompt }],
         temperature: 0.2,
-        max_tokens: 80,
+        max_tokens: 120,
       },
       abortMs
     )
