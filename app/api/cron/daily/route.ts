@@ -32,10 +32,18 @@ function authorized(req: Request) {
 
 /** Safely invoke a script module's `run` (or its default). */
 async function safeRun(modPromise: Promise<any>, opts?: any) {
-  const mod: any = await modPromise
-  const fn: any = mod?.run ?? mod?.default
-  if (typeof fn !== 'function') return { ok: false, error: 'no_run_export' }
-  return await fn(opts)
+  try {
+    const mod: any = await modPromise
+    const fn: any = mod?.run ?? mod?.default
+    if (typeof fn !== 'function') {
+      console.error('❌ Script has no run/default function export')
+      return { ok: false, error: 'no_run_export' }
+    }
+    return await fn(opts)
+  } catch (error: any) {
+    console.error('❌ Script execution failed:', error)
+    return { ok: false, error: error.message || String(error) }
+  }
 }
 
 export async function GET(req: Request) {
@@ -64,28 +72,38 @@ export async function GET(req: Request) {
   )
 
   try {
+    console.log('🎯 Daily cron job starting...')
+    
     // 1) Broader feed discovery (a bit higher than delta)
+    console.log('📡 Running discover...')
     const discoverResult = await safeRun(import('@/scripts/discover'), {
       limit: discoverLimit,
       closePool: false,
     })
+    console.log('✅ Discover completed:', discoverResult)
 
     // 2) Ingest across ALL sources (seed + discovered) with higher cap
+    console.log('📥 Running ingest...')
     const ingestResult = await safeRun(import('@/scripts/ingest'), {
       limit,
       closePool: false,
     })
+    console.log('✅ Ingest completed:', ingestResult)
 
     // 3) Rescore clusters after new data
+    console.log('🔢 Running rescore...')
     const rescoreResult = await safeRun(import('@/scripts/rescore'), {
       closePool: false,
     })
+    console.log('✅ Rescore completed:', rescoreResult)
 
     // 4) Rewrite more recent headlines daily (uses configured model, e.g. gpt-4o-mini)
+    console.log('✏️ Running rewrite...')
     const rewriteResult = await safeRun(import('@/scripts/rewrite'), {
       limit: rewriteLimit,
       closePool: false,
     })
+    console.log('✅ Rewrite completed:', rewriteResult)
 
     // 5) AI-enhanced web discovery (find stories beyond RSS feeds)
     // Only run at 2AM to control costs - check if this is the full daily job
@@ -108,9 +126,11 @@ export async function GET(req: Request) {
         console.log(`Skipping AI discovery - current hour: ${currentHour}`)
       }
     } catch (webDiscoverError: any) {
-      console.error('AI web discovery failed:', webDiscoverError)
+      console.error('❌ AI web discovery failed:', webDiscoverError)
       webDiscoverResult = { error: webDiscoverError.message, skipped: 'error' }
     }
+
+    console.log('🎯 Daily cron job completed successfully!')
 
     // Don't close the pool - let it be managed by the runtime
     // await endPool()
