@@ -73,7 +73,7 @@ export async function GET(req: Request) {
 
   try {
     console.log('🎯 Daily cron job starting...')
-    
+
     // 1) Broader feed discovery (a bit higher than delta)
     console.log('📡 Running discover...')
     const discoverResult = await safeRun(import('@/scripts/discover'), {
