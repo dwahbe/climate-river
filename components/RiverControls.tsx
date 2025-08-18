@@ -37,8 +37,9 @@ export default function RiverControls({
       )}
 
       <div className="overflow-x-auto scrollbar-hide">
-        <div className=" border-b border-zinc-200">
-          <div className="flex items-end gap-4 sm:gap-6 min-w-max">
+        {/* no border here */}
+        <div className="">
+          <div className="flex w-max whitespace-nowrap items-end gap-4 sm:gap-6 border-b border-zinc-200">
             <Tab href={hrefTop} active={isTop}>
               Top
             </Tab>
@@ -53,7 +54,6 @@ export default function RiverControls({
             {CATEGORIES.map((category) => {
               const href = `${pathname}?view=${category.slug}`
               const isActive = selectedCategory === category.slug
-
               return (
                 <CategoryTab
                   key={category.slug}
