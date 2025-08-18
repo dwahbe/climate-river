@@ -42,7 +42,10 @@ async function checkCategories() {
       `\n❓ Recent uncategorized articles (last 7 days): ${recentUncategorized.rows[0].count}`
     )
   } catch (error) {
-    console.error('❌ Error:', error.message)
+    console.error(
+      '❌ Error:',
+      error instanceof Error ? error.message : String(error)
+    )
   }
 
   process.exit(0)
