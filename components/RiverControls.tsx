@@ -132,7 +132,7 @@ function Tab({
       <span
         aria-hidden
         className={clsx(
-          'pointer-events-none absolute left-0 right-0 bottom-[-1px] h-[2px]',
+          'pointer-events-none absolute left-0 right-0 bottom-0 h-[3px] z-10 transform translate-y-[1px]',
           active ? 'bg-zinc-900' : 'bg-transparent'
         )}
       />
@@ -176,7 +176,7 @@ function CategoryTab({
       <span
         aria-hidden
         className={clsx(
-          'pointer-events-none absolute left-0 right-0 bottom-[-1px] h-[2px]',
+          'pointer-events-none absolute left-0 right-0 bottom-0 h-[3px] z-10 transform translate-y-[1px]',
           active ? 'opacity-100' : 'opacity-0'
         )}
         style={{ backgroundColor: active ? color : 'transparent' }}
