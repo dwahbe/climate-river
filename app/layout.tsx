@@ -64,8 +64,8 @@ export default async function RootLayout({
                 </div>
               </div>
 
-              {/* Right: Last updated */}
-              <div className="text-xs text-zinc-500">
+              {/* Right: Last updated - Desktop only */}
+              <div className="hidden sm:block text-xs text-zinc-500">
                 Last updated{' '}
                 {new Date().toLocaleDateString('en-US', {
                   month: 'short',
@@ -82,6 +82,26 @@ export default async function RootLayout({
             </div>
           </div>
         </nav>
+
+        {/* Mobile: Last updated below navbar */}
+        <div className="sm:hidden bg-white border-b border-zinc-100">
+          <div className="mx-auto max-w-5xl px-4">
+            <div className="py-2 text-center text-xs text-zinc-500">
+              Last updated{' '}
+              {new Date().toLocaleDateString('en-US', {
+                month: 'short',
+                day: 'numeric',
+                year: 'numeric',
+              })}{' '}
+              at{' '}
+              {new Date().toLocaleTimeString('en-US', {
+                hour: 'numeric',
+                minute: '2-digit',
+                hour12: true,
+              })}
+            </div>
+          </div>
+        </div>
 
         <main className="mx-auto max-w-5xl px-4 sm:px-6 py-6 content">
           {children}
