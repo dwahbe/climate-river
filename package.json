@@ -13,6 +13,7 @@
     "discover-web": "tsx --env-file=.env.local scripts/discover-web.ts",
     "backfill-embeddings": "tsx --env-file=.env.local scripts/backfill-embeddings.ts",
     "backfill-embeddings-parallel": "tsx --env-file=.env.local scripts/backfill-embeddings-parallel.ts",
+    "backfill-categories": "tsx --env-file=.env.local scripts/backfill-categories.ts",
     "debug-clustering": "tsx --env-file=.env.local scripts/debug-clustering.ts",
     "force-recluster": "tsx --env-file=.env.local scripts/force-recluster.ts",
     "debug-frontend-clustering": "tsx --env-file=.env.local scripts/debug-frontend-clustering.ts",

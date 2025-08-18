@@ -4,6 +4,7 @@ import Parser from 'rss-parser'
 import dayjs from 'dayjs'
 import { query, endPool } from '@/lib/db'
 import sources from '@/data/sources.json'
+import { categorizeAndStoreArticle } from '@/lib/categorizer'
 import OpenAI from 'openai'
 
 // Initialize OpenAI client for embeddings
@@ -576,6 +577,48 @@ async function ensureClusterForArticle(articleId: number, title: string) {
   )
 }
 
+// Update cluster scores when new articles are added
+async function updateClusterScore(clusterId: number) {
+  try {
+    // Simplified cluster scoring - just update lead article and size
+    await query(
+      `
+      INSERT INTO cluster_scores (cluster_id, lead_article_id, size, score)
+      SELECT 
+        $1 as cluster_id,
+        (SELECT a.id 
+         FROM articles a
+         JOIN article_clusters ac ON ac.article_id = a.id
+         WHERE ac.cluster_id = $1
+         ORDER BY a.published_at DESC, a.id DESC
+         LIMIT 1) as lead_article_id,
+        (SELECT COUNT(*) 
+         FROM article_clusters 
+         WHERE cluster_id = $1) as size,
+        EXTRACT(EPOCH FROM NOW()) as score  -- Simple timestamp score
+      ON CONFLICT (cluster_id) DO UPDATE SET
+        lead_article_id = (SELECT a.id 
+                          FROM articles a
+                          JOIN article_clusters ac ON ac.article_id = a.id
+                          WHERE ac.cluster_id = $1
+                          ORDER BY a.published_at DESC, a.id DESC
+                          LIMIT 1),
+        size = (SELECT COUNT(*) 
+                FROM article_clusters 
+                WHERE cluster_id = $1),
+        updated_at = NOW()
+    `,
+      [clusterId]
+    )
+  } catch (error) {
+    console.error(
+      `Failed to update cluster score for cluster ${clusterId}:`,
+      error
+    )
+    // Don't fail the whole process if scoring fails
+  }
+}
+
 // New semantic clustering function using vector embeddings
 async function ensureSemanticClusterForArticle(
   articleId: number,
@@ -631,20 +674,51 @@ async function ensureSemanticClusterForArticle(
   )
 
   // Look for existing clusters among similar articles
+  // Find all unique clusters and their best similarity scores
+  const clusterCandidates = new Map<
+    number,
+    {
+      similarity: number
+      article_id: number
+      title: string
+    }
+  >()
+
   for (const similar of similarArticles.rows) {
     if (similar.cluster_id) {
-      console.log(
-        `Article ${articleId} matched existing cluster ${similar.cluster_id} via similar article ${similar.article_id} (similarity: ${similar.similarity.toFixed(3)}) - "${similar.title}"`
-      )
-
-      // Add this article to the existing cluster
-      await query(
-        `INSERT INTO article_clusters (article_id, cluster_id)
-         VALUES ($1, $2) ON CONFLICT DO NOTHING`,
-        [articleId, similar.cluster_id]
-      )
-      return
+      const existing = clusterCandidates.get(similar.cluster_id)
+      if (!existing || similar.similarity > existing.similarity) {
+        clusterCandidates.set(similar.cluster_id, {
+          similarity: similar.similarity,
+          article_id: similar.article_id,
+          title: similar.title,
+        })
+      }
     }
+  }
+
+  // If we found cluster candidates, join the one with highest similarity
+  if (clusterCandidates.size > 0) {
+    const bestCluster = Array.from(clusterCandidates.entries()).sort(
+      ([, a], [, b]) => b.similarity - a.similarity
+    )[0]
+
+    const [clusterId, bestMatch] = bestCluster
+
+    console.log(
+      `Article ${articleId} matched existing cluster ${clusterId} via similar article ${bestMatch.article_id} (similarity: ${bestMatch.similarity.toFixed(3)}) - "${bestMatch.title}"`
+    )
+
+    // Add this article to the best matching cluster
+    await query(
+      `INSERT INTO article_clusters (article_id, cluster_id)
+       VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+      [articleId, clusterId]
+    )
+
+    // Update cluster_scores to potentially select a better lead article
+    await updateClusterScore(clusterId)
+    return
   }
 
   // If we have similar articles but no existing cluster, create a new one
@@ -679,6 +753,9 @@ async function ensureSemanticClusterForArticle(
     console.log(
       `Created new semantic cluster ${clusterId} with ${similarArticles.rows.length + 1} articles`
     )
+
+    // Initialize cluster_scores for the new cluster
+    await updateClusterScore(clusterId)
     return
   }
 
@@ -738,6 +815,15 @@ async function ingestFromFeed(feedUrl: string, sourceId: number, limit = 20) {
       inserted++
       // Use semantic clustering instead of keyword-based clustering
       await ensureSemanticClusterForArticle(articleId, title)
+
+      // Categorize the article using hybrid approach
+      try {
+        await categorizeAndStoreArticle(articleId, title, dek || undefined)
+        console.log(`  📝 Categorized article: ${title.slice(0, 50)}...`)
+      } catch (error) {
+        console.error(`  ❌ Failed to categorize article ${articleId}:`, error)
+        // Don't fail the whole ingestion if categorization fails
+      }
     }
   }
 

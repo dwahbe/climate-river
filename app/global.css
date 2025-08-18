@@ -51,6 +51,29 @@
            text-zinc-600 hover:text-zinc-900 hover:bg-zinc-50
            focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-300;
   }
+
+  /* Hide scrollbar for horizontal scroll components */
+  .scrollbar-hide {
+    -ms-overflow-style: none; /* IE and Edge */
+    scrollbar-width: none; /* Firefox */
+  }
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none; /* Chrome, Safari, and Opera */
+  }
+
+  /* Mobile-optimized horizontal scrolling - only on touch devices */
+  @media (hover: none) and (pointer: coarse) {
+    .mobile-scroll {
+      -webkit-overflow-scrolling: touch; /* iOS momentum scrolling */
+      overscroll-behavior-x: contain; /* Prevent page scroll when reaching scroll bounds */
+      touch-action: pan-x; /* Only allow horizontal panning */
+    }
+  }
+
+  /* All devices get smooth scrolling */
+  .mobile-scroll {
+    scroll-behavior: smooth;
+  }
 }
 
 /* Optional tiny reset */

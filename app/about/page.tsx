@@ -6,10 +6,10 @@ export default function AboutPage() {
     <div className="mx-auto max-w-3xl px-4 sm:px-6 py-8 content">
       <h1 className="text-2xl font-semibold tracking-tight">About</h1>
       <p className="mt-3 text-zinc-700">
-        Climate River is a clean, fast news aggregator focused on climate and
-        environmental stories. Articles are automatically clustered by story,
-        ranked by source credibility and freshness, and deduplicated to cut
-        through the noise. Inspired by{' '}
+        Despite being a defining crisis of our time, the climate crisis often
+        gets buried in the feed. Climate River brings it back to the top by
+        aggregating articles from leading outlets, organizing by story, and
+        ranking for trust and timeliness. Inspired by{' '}
         <a
           href="https://techmeme.com"
           target="_blank"
@@ -20,6 +20,11 @@ export default function AboutPage() {
         </a>
         .
       </p>
+      <p className="mt-3 text-zinc-700">
+        If you have feedback or suggestions, please email me at
+        contact@climateriver.org
+      </p>
+      <hr className="my-4 border-zinc-200" />
       <p className="mt-3 text-zinc-700">
         Built with Next.js, Tailwind, and Postgres.{' '}
         <a
@@ -32,6 +37,7 @@ export default function AboutPage() {
         </a>
         .
       </p>
+
       <p className="mt-3 text-zinc-700">
         Created by{' '}
         <a

@@ -4,6 +4,7 @@ import * as DB from '@/lib/db'
 import LocalTime from '@/components/LocalTime'
 import RiverControls from '@/components/RiverControls'
 import PublisherLink from '@/components/PublisherLink'
+import { CATEGORIES, getCategoryBySlug, type CategorySlug } from '@/lib/tagger'
 import { unstable_noStore as noStore } from 'next/cache'
 
 export const dynamic = 'force-dynamic'
@@ -50,15 +51,22 @@ export default async function RiverPage({
 }) {
   noStore()
 
-  const isLatest =
-    (Array.isArray(searchParams?.view)
-      ? searchParams?.view[0]
-      : searchParams?.view) === 'latest'
+  const view = Array.isArray(searchParams?.view)
+    ? searchParams?.view[0]
+    : searchParams?.view
 
-  const topWindowHours = 48 // Sweet spot: recent but not too restrictive
+  const isLatest = view === 'latest'
+
+  // Check if it's a category view
+  const selectedCategory = CATEGORIES.find((c) => c.slug === view)?.slug
+  const isCategory = !!selectedCategory
+
+  const topWindowHours = 168 // Expanded to 1 week to ensure enough articles
   const topLimit = 10 // Top tab: 10 articles
   const latestLimit = 20 // Latest tab: 20 articles
-  const limit = isLatest ? latestLimit : topLimit
+  const categoryLimit = 15 // Category tabs: 15 articles
+
+  const limit = isCategory ? categoryLimit : isLatest ? latestLimit : topLimit
 
   // Get last updated timestamp
   const latest = await DB.query(`
@@ -90,11 +98,21 @@ export default async function RiverPage({
       FROM cluster_scores cs
       JOIN articles a ON a.id = cs.lead_article_id
       LEFT JOIN sources s ON s.id = a.source_id
+      -- Category filtering join
+      ${
+        isCategory
+          ? `
+      JOIN article_categories ac ON ac.article_id = a.id
+      JOIN categories cat ON cat.id = ac.category_id AND cat.slug = $4
+      `
+          : ''
+      }
       WHERE ($1::boolean
          OR a.published_at >= now() - make_interval(hours => $2::int))
         AND a.canonical_url NOT LIKE 'https://news.google.com%'
         AND a.canonical_url NOT LIKE 'https://news.yahoo.com%'
         AND a.canonical_url NOT LIKE 'https://www.msn.com%'
+        ${isCategory ? 'AND ac.confidence >= 0.3' : ''}
     )
     SELECT
       l.cluster_id,
@@ -214,19 +232,24 @@ export default async function RiverPage({
     FROM lead l
     ORDER BY
       CASE WHEN $1::boolean THEN l.published_at END DESC NULLS LAST, -- Latest
-      CASE WHEN NOT $1::boolean THEN l.score END DESC NULLS LAST,     -- Top
-      CASE WHEN NOT $1::boolean THEN (l.cluster_id % 13) END DESC,    -- stable jitter
+      CASE WHEN NOT $1::boolean THEN l.score END DESC NULLS LAST, -- Top & Category (by score)
+      CASE WHEN NOT $1::boolean THEN (l.cluster_id % 13) END DESC, -- stable jitter
       l.cluster_id DESC
     LIMIT $3::int
   `,
-    [isLatest, topWindowHours, limit]
+    isCategory
+      ? [isLatest, topWindowHours, limit, selectedCategory]
+      : [isLatest, topWindowHours, limit]
   )
 
   return (
     <>
       <header className="z-10 bg-transparent">
         <div className="mx-auto max-w-3xl px-4 sm:px-6 py-2 sm:py-2.5">
-          <RiverControls lastUpdated={lastFormatted} />
+          <RiverControls
+            currentView={view}
+            selectedCategory={selectedCategory}
+          />
         </div>
       </header>
 

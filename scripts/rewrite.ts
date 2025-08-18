@@ -43,7 +43,8 @@ function buildPrompt(input: { title: string; dek?: string | null }) {
 - Aim for ${MAX_CHARS} characters - comprehensive but focused.
 - No hype, puns, rhetorical questions, or marketing language.
 - Do not invent facts not in the provided text.
-- Make every word count - be precise and informative.`,
+- Make every word count - be precise and informative.
+- Do not end with a period - headlines should not have trailing punctuation.`,
     `Original title: ${input.title}`,
   ]
   if (input.dek) lines.push(`Article summary: ${input.dek}`)
@@ -53,11 +54,11 @@ function buildPrompt(input: { title: string; dek?: string | null }) {
 
 function sanitizeHeadline(s: string) {
   let t = (s || '')
-    .replace(/^[“"'\s]+|[”"'\s]+$/g, '') // strip quotes
+    .replace(/^[""'\s]+|[""'\s]+$/g, '') // strip quotes
     .replace(/\s+/g, ' ') // collapse spaces
     .trim()
-  // Avoid trailing decorative punctuation
-  t = t.replace(/[|•–—\-]+$/g, '').trim()
+  // Remove trailing periods and other decorative punctuation
+  t = t.replace(/[.|•–—\-]+$/g, '').trim()
   return t
 }
 
