@@ -47,7 +47,8 @@ export const CATEGORIES = [
   {
     slug: 'impacts',
     name: 'Impacts',
-    description: 'Climate effects, extreme weather, and environmental consequences',
+    description:
+      'Climate effects, extreme weather, and environmental consequences',
     color: '#EF4444', // red
     keywords: [
       'hurricane',

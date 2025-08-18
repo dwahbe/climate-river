@@ -111,7 +111,10 @@ async function main() {
   try {
     await backfillCategories()
   } catch (error) {
-    console.error('Script failed:', error instanceof Error ? error.message : String(error))
+    console.error(
+      'Script failed:',
+      error instanceof Error ? error.message : String(error)
+    )
     process.exit(1)
   } finally {
     // Clean up database connections

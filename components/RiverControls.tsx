@@ -38,7 +38,7 @@ export default function RiverControls({
 
       <div className="overflow-x-auto scrollbar-hide">
         <div className=" border-b border-zinc-200">
-          <div className="flex items-end gap-4 sm:gap-6 min-w-max justify-center">
+          <div className="flex items-end gap-4 sm:gap-6 min-w-max">
             <Tab href={hrefTop} active={isTop}>
               Top
             </Tab>
