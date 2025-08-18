@@ -77,6 +77,7 @@ export default async function RootLayout({
                   hour: 'numeric',
                   minute: '2-digit',
                   hour12: true,
+                  timeZoneName: 'short',
                 })}
               </div>
             </div>
@@ -98,6 +99,7 @@ export default async function RootLayout({
                 hour: 'numeric',
                 minute: '2-digit',
                 hour12: true,
+                timeZoneName: 'short',
               })}
             </div>
           </div>
