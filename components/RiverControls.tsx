@@ -3,47 +3,72 @@
 
 import Link from 'next/link'
 import { usePathname, useSearchParams } from 'next/navigation'
+import { CATEGORIES, type CategorySlug } from '@/lib/tagger'
 import clsx from 'clsx'
+
+interface RiverControlsProps {
+  lastUpdated?: string
+  currentView?: string
+  selectedCategory?: CategorySlug
+}
 
 export default function RiverControls({
   lastUpdated,
-}: {
-  lastUpdated?: string
-}) {
+  currentView,
+  selectedCategory,
+}: RiverControlsProps) {
   const pathname = usePathname() || '/river'
-  const search = useSearchParams()
-  const isLatest = search.get('view') === 'latest'
 
+  const isTop = !currentView || currentView === 'top'
+  const isLatest = currentView === 'latest'
+  const isCategory = !!selectedCategory
+
+  // Create hrefs for all tabs
   const hrefTop = pathname
   const hrefLatest = `${pathname}?view=latest`
 
   return (
     <div className="w-full">
-      <div className="flex items-center justify-between border-b border-zinc-200">
-        {/* Left: Tabs */}
-        <div className="flex items-end gap-4 sm:gap-6">
-          <Tab href={hrefTop} active={!isLatest}>
-            Top
-          </Tab>
-          <Tab href={hrefLatest} active={isLatest}>
-            Latest
-          </Tab>
-        </div>
-
-        {/* Right: Last updated - responsive */}
-        {lastUpdated && (
-          <div className="text-xs text-zinc-500 pb-1 hidden sm:block">
-            Last updated {lastUpdated}
-          </div>
-        )}
-      </div>
-
-      {/* Mobile-only last updated below tabs */}
+      {/* Last updated above tabs */}
       {lastUpdated && (
-        <div className="text-xs text-zinc-500 pt-2 sm:hidden">
+        <div className="text-xs text-zinc-500 pb-4 text-center">
           Last updated {lastUpdated}
         </div>
       )}
+
+      <div className="overflow-x-auto scrollbar-hide">
+        <div className=" border-b border-zinc-200">
+          <div className="flex items-end gap-4 sm:gap-6 min-w-max justify-center">
+            <Tab href={hrefTop} active={isTop}>
+              Top
+            </Tab>
+            <Tab href={hrefLatest} active={isLatest}>
+              Latest
+            </Tab>
+
+            {/* Divider */}
+            <div className="w-px h-4 bg-zinc-300 mx-2" />
+
+            {/* Category tabs */}
+            {CATEGORIES.map((category) => {
+              const href = `${pathname}?view=${category.slug}`
+              const isActive = selectedCategory === category.slug
+
+              return (
+                <CategoryTab
+                  key={category.slug}
+                  href={href}
+                  active={isActive}
+                  color={category.color}
+                  title={category.description}
+                >
+                  {category.name}
+                </CategoryTab>
+              )
+            })}
+          </div>
+        </div>
+      </div>
     </div>
   )
 }
@@ -82,6 +107,51 @@ function Tab({
           'pointer-events-none absolute left-0 right-0 bottom-[-1px] h-[2px]',
           active ? 'bg-zinc-900' : 'bg-transparent'
         )}
+      />
+    </Link>
+  )
+}
+
+function CategoryTab({
+  href,
+  active,
+  color,
+  title,
+  children,
+}: {
+  href: string
+  active?: boolean
+  color: string
+  title?: string
+  children: React.ReactNode
+}) {
+  return (
+    <Link
+      href={href}
+      prefetch={false}
+      title={title}
+      className={clsx(
+        'relative pb-1 px-1 text-sm sm:text-sm font-medium tracking-tight whitespace-nowrap',
+        'transition-colors text-zinc-500 hover:text-zinc-800',
+        active && 'text-zinc-900'
+      )}
+      style={{ textDecoration: 'none' }}
+      onMouseEnter={(e) => {
+        e.currentTarget.style.textDecoration = 'none'
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.textDecoration = 'none'
+      }}
+    >
+      {children}
+      {/* Active bar only (no secondary line to conflict with) */}
+      <span
+        aria-hidden
+        className={clsx(
+          'pointer-events-none absolute left-0 right-0 bottom-[-1px] h-[2px]',
+          active ? 'opacity-100' : 'opacity-0'
+        )}
+        style={{ backgroundColor: active ? color : 'transparent' }}
       />
     </Link>
   )

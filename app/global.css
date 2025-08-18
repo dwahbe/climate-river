@@ -51,6 +51,15 @@
            text-zinc-600 hover:text-zinc-900 hover:bg-zinc-50
            focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-300;
   }
+
+  /* Hide scrollbar for horizontal scroll components */
+  .scrollbar-hide {
+    -ms-overflow-style: none; /* IE and Edge */
+    scrollbar-width: none; /* Firefox */
+  }
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none; /* Chrome, Safari, and Opera */
+  }
 }
 
 /* Optional tiny reset */

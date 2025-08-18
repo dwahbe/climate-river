@@ -4,6 +4,7 @@ import Parser from 'rss-parser'
 import dayjs from 'dayjs'
 import { query, endPool } from '@/lib/db'
 import sources from '@/data/sources.json'
+import { categorizeAndStoreArticle } from '@/lib/categorizer'
 import OpenAI from 'openai'
 
 // Initialize OpenAI client for embeddings
@@ -738,6 +739,15 @@ async function ingestFromFeed(feedUrl: string, sourceId: number, limit = 20) {
       inserted++
       // Use semantic clustering instead of keyword-based clustering
       await ensureSemanticClusterForArticle(articleId, title)
+
+      // Categorize the article using hybrid approach
+      try {
+        await categorizeAndStoreArticle(articleId, title, dek || undefined)
+        console.log(`  📝 Categorized article: ${title.slice(0, 50)}...`)
+      } catch (error) {
+        console.error(`  ❌ Failed to categorize article ${articleId}:`, error)
+        // Don't fail the whole ingestion if categorization fails
+      }
     }
   }
 
