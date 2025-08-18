@@ -45,7 +45,7 @@ export default function RiverControls({
 
   return (
     <div className="w-full">
-      <div className="overflow-x-auto scrollbar-hide scroll-smooth">
+      <div className="overflow-x-auto scrollbar-hide mobile-scroll">
         {/* baseline lives on the scrolling content */}
         <div className="flex min-w-full w-max whitespace-nowrap items-end gap-4 sm:gap-6 border-b border-zinc-200">
           <span

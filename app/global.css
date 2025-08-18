@@ -60,6 +60,14 @@
   .scrollbar-hide::-webkit-scrollbar {
     display: none; /* Chrome, Safari, and Opera */
   }
+
+  /* Mobile-optimized horizontal scrolling */
+  .mobile-scroll {
+    -webkit-overflow-scrolling: touch; /* iOS momentum scrolling */
+    scroll-behavior: smooth; /* Smooth scrolling */
+    overscroll-behavior-x: contain; /* Prevent page scroll when reaching scroll bounds */
+    touch-action: pan-x; /* Only allow horizontal panning */
+  }
 }
 
 /* Optional tiny reset */
