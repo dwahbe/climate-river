@@ -61,12 +61,18 @@
     display: none; /* Chrome, Safari, and Opera */
   }
 
-  /* Mobile-optimized horizontal scrolling */
+  /* Mobile-optimized horizontal scrolling - only on touch devices */
+  @media (hover: none) and (pointer: coarse) {
+    .mobile-scroll {
+      -webkit-overflow-scrolling: touch; /* iOS momentum scrolling */
+      overscroll-behavior-x: contain; /* Prevent page scroll when reaching scroll bounds */
+      touch-action: pan-x; /* Only allow horizontal panning */
+    }
+  }
+
+  /* All devices get smooth scrolling */
   .mobile-scroll {
-    -webkit-overflow-scrolling: touch; /* iOS momentum scrolling */
-    scroll-behavior: smooth; /* Smooth scrolling */
-    overscroll-behavior-x: contain; /* Prevent page scroll when reaching scroll bounds */
-    touch-action: pan-x; /* Only allow horizontal panning */
+    scroll-behavior: smooth;
   }
 }
 
