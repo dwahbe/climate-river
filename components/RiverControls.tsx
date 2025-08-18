@@ -3,17 +3,16 @@
 
 import Link from 'next/link'
 import { usePathname, useSearchParams } from 'next/navigation'
+import { useEffect, useRef } from 'react'
 import { CATEGORIES, type CategorySlug } from '@/lib/tagger'
 import clsx from 'clsx'
 
 interface RiverControlsProps {
-  lastUpdated?: string
   currentView?: string
   selectedCategory?: CategorySlug
 }
 
 export default function RiverControls({
-  lastUpdated,
   currentView,
   selectedCategory,
 }: RiverControlsProps) {
@@ -27,36 +26,65 @@ export default function RiverControls({
   const hrefTop = pathname
   const hrefLatest = `${pathname}?view=latest`
 
+  const tabRefs = useRef<Record<string, HTMLSpanElement | null>>({})
+
+  const ensureTabVisible = (tabKey: string) => {
+    const tabElement = tabRefs.current[tabKey]
+    if (tabElement) {
+      tabElement.scrollIntoView({ inline: 'nearest', block: 'nearest' })
+    }
+  }
+
+  useEffect(() => {
+    let activeTabKey = 'top'
+    if (isLatest) activeTabKey = 'latest'
+    else if (selectedCategory) activeTabKey = selectedCategory
+
+    ensureTabVisible(activeTabKey)
+  }, [isLatest, selectedCategory])
+
   return (
     <div className="w-full">
-      {/* Last updated above tabs */}
-      {lastUpdated && (
-        <div className="text-xs text-zinc-500 pb-4 text-center">
-          Last updated {lastUpdated}
-        </div>
-      )}
-
-      <div className="overflow-x-auto scrollbar-hide">
-        {/* no border here */}
-        <div className="">
-          <div className="flex w-max whitespace-nowrap items-end gap-4 sm:gap-6 border-b border-zinc-200">
+      <div className="overflow-x-auto scrollbar-hide scroll-smooth">
+        {/* baseline lives on the scrolling content */}
+        <div className="flex min-w-full w-max whitespace-nowrap items-end gap-4 sm:gap-6 border-b border-zinc-200">
+          <span
+            ref={(el) => {
+              tabRefs.current['top'] = el
+            }}
+            onClick={() => ensureTabVisible('top')}
+          >
             <Tab href={hrefTop} active={isTop}>
               Top
             </Tab>
+          </span>
+          <span
+            ref={(el) => {
+              tabRefs.current['latest'] = el
+            }}
+            onClick={() => ensureTabVisible('latest')}
+          >
             <Tab href={hrefLatest} active={isLatest}>
               Latest
             </Tab>
+          </span>
 
-            {/* Divider */}
-            <div className="w-px h-4 bg-zinc-300 mx-2" />
+          {/* Divider */}
+          <div className="w-px h-4 bg-zinc-300 mx-2" />
 
-            {/* Category tabs */}
-            {CATEGORIES.map((category) => {
-              const href = `${pathname}?view=${category.slug}`
-              const isActive = selectedCategory === category.slug
-              return (
+          {/* Category tabs */}
+          {CATEGORIES.map((category) => {
+            const href = `${pathname}?view=${category.slug}`
+            const isActive = selectedCategory === category.slug
+            return (
+              <span
+                key={category.slug}
+                ref={(el) => {
+                  tabRefs.current[category.slug] = el
+                }}
+                onClick={() => ensureTabVisible(category.slug)}
+              >
                 <CategoryTab
-                  key={category.slug}
                   href={href}
                   active={isActive}
                   color={category.color}
@@ -64,9 +92,9 @@ export default function RiverControls({
                 >
                   {category.name}
                 </CategoryTab>
-              )
-            })}
-          </div>
+              </span>
+            )
+          })}
         </div>
       </div>
     </div>
