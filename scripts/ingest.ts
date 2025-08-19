@@ -403,6 +403,22 @@ async function insertArticle(
   // defaulted param must NOT be optional
   pub: { name?: string; homepage?: string } = {}
 ) {
+  // ENHANCED DEDUPLICATION: Check for existing articles with same/similar title
+  const titleCheck = await query<{ id: number; canonical_url: string }>(
+    `SELECT id, canonical_url FROM articles 
+     WHERE title = $1 
+       AND fetched_at >= now() - interval '7 days'
+     LIMIT 1`,
+    [title]
+  )
+
+  if (titleCheck.rows.length > 0) {
+    console.log(
+      `⚠️  Duplicate title detected: "${title.substring(0, 50)}..." - skipping (existing ID: ${titleCheck.rows[0].id})`
+    )
+    return titleCheck.rows[0].id // Return existing article ID
+  }
+
   // Generate embedding for the article
   const embedding = await generateEmbedding(title, dek ?? undefined)
 
