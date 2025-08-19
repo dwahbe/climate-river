@@ -4,6 +4,21 @@ import Link from 'next/link'
 import * as DB from '@/lib/db'
 import { Analytics } from '@vercel/analytics/react'
 
+// Get the last update time from the database
+async function getLastUpdatedTime(): Promise<Date> {
+  try {
+    const { rows } = await DB.query<{ fetched_at: string }>(
+      `SELECT fetched_at FROM articles 
+       ORDER BY fetched_at DESC 
+       LIMIT 1`
+    )
+    return rows.length > 0 ? new Date(rows[0].fetched_at) : new Date()
+  } catch (error) {
+    console.error('Failed to get last updated time:', error)
+    return new Date() // Fallback to current time
+  }
+}
+
 export const metadata = {
   title: 'Climate River',
   icons: {
@@ -20,6 +35,8 @@ export default async function RootLayout({
 }: {
   children: React.ReactNode
 }) {
+  // Get the actual last update time from the database
+  const lastUpdated = await getLastUpdatedTime()
   return (
     <html lang="en" className="h-full">
       <body className="min-h-full bg-zinc-50 text-zinc-900 antialiased">
@@ -67,13 +84,13 @@ export default async function RootLayout({
               {/* Right: Last updated - Desktop only */}
               <div className="hidden sm:block text-xs text-zinc-500">
                 Last updated{' '}
-                {new Date().toLocaleDateString('en-US', {
+                {lastUpdated.toLocaleDateString('en-US', {
                   month: 'short',
                   day: 'numeric',
                   year: 'numeric',
                 })}{' '}
                 at{' '}
-                {new Date().toLocaleTimeString('en-US', {
+                {lastUpdated.toLocaleTimeString('en-US', {
                   hour: 'numeric',
                   minute: '2-digit',
                   hour12: true,
@@ -89,13 +106,13 @@ export default async function RootLayout({
           <div className="mx-auto max-w-5xl px-4">
             <div className="py-2 text-center text-xs text-zinc-500">
               Last updated{' '}
-              {new Date().toLocaleDateString('en-US', {
+              {lastUpdated.toLocaleDateString('en-US', {
                 month: 'short',
                 day: 'numeric',
                 year: 'numeric',
               })}{' '}
               at{' '}
-              {new Date().toLocaleTimeString('en-US', {
+              {lastUpdated.toLocaleTimeString('en-US', {
                 hour: 'numeric',
                 minute: '2-digit',
                 hour12: true,
