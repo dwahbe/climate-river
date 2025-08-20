@@ -683,7 +683,7 @@ async function ensureSemanticClusterForArticle(
                           WHERE a.id != $2
                        AND a.embedding IS NOT NULL
                        AND a.fetched_at >= now() - interval '7 days'
-                       AND 1 - (a.embedding <=> $1::vector) > 0.65
+                       AND 1 - (a.embedding <=> $1::vector) > 0.6
      ORDER BY a.embedding <=> $1::vector
      LIMIT 10`,
     [articleEmbedding, articleId]
