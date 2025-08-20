@@ -37,6 +37,23 @@ export default async function RootLayout({
 }) {
   // Get the actual last update time from the database
   const lastUpdated = await getLastUpdatedTime()
+
+  // Format time in Eastern Time
+  const formattedTime =
+    lastUpdated.toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+      timeZone: 'America/New_York',
+    }) +
+    ' at ' +
+    lastUpdated.toLocaleTimeString('en-US', {
+      hour: 'numeric',
+      minute: '2-digit',
+      hour12: true,
+      timeZone: 'America/New_York',
+    }) +
+    ' ET'
   return (
     <html lang="en" className="h-full">
       <body className="min-h-full bg-zinc-50 text-zinc-900 antialiased">
@@ -83,19 +100,7 @@ export default async function RootLayout({
 
               {/* Right: Last updated - Desktop only */}
               <div className="hidden sm:block text-xs text-zinc-500">
-                Last updated{' '}
-                {lastUpdated.toLocaleDateString('en-US', {
-                  month: 'short',
-                  day: 'numeric',
-                  year: 'numeric',
-                })}{' '}
-                at{' '}
-                {lastUpdated.toLocaleTimeString('en-US', {
-                  hour: 'numeric',
-                  minute: '2-digit',
-                  hour12: true,
-                  timeZoneName: 'short',
-                })}
+                Last updated {formattedTime}
               </div>
             </div>
           </div>
@@ -105,19 +110,7 @@ export default async function RootLayout({
         <div className="sm:hidden bg-white border-b border-zinc-100">
           <div className="mx-auto max-w-5xl px-4">
             <div className="py-2 text-center text-xs text-zinc-500">
-              Last updated{' '}
-              {lastUpdated.toLocaleDateString('en-US', {
-                month: 'short',
-                day: 'numeric',
-                year: 'numeric',
-              })}{' '}
-              at{' '}
-              {lastUpdated.toLocaleTimeString('en-US', {
-                hour: 'numeric',
-                minute: '2-digit',
-                hour12: true,
-                timeZoneName: 'short',
-              })}
+              Last updated {formattedTime}
             </div>
           </div>
         </div>
