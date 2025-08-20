@@ -54,7 +54,11 @@ export default function RiverControls({
             }}
             onClick={() => ensureTabVisible('top')}
           >
-            <Tab href={hrefTop} active={isTop}>
+            <Tab
+              href={hrefTop}
+              active={isTop}
+              title="Top 10 climate stories ranked by our scoring algorithm"
+            >
               Top
             </Tab>
           </span>
@@ -64,7 +68,11 @@ export default function RiverControls({
             }}
             onClick={() => ensureTabVisible('latest')}
           >
-            <Tab href={hrefLatest} active={isLatest}>
+            <Tab
+              href={hrefLatest}
+              active={isLatest}
+              title="Most recent 20 climate articles in reverse chronological order"
+            >
               Latest
             </Tab>
           </span>
@@ -104,16 +112,19 @@ export default function RiverControls({
 function Tab({
   href,
   active,
+  title,
   children,
 }: {
   href: string
   active?: boolean
+  title?: string
   children: React.ReactNode
 }) {
   return (
     <Link
       href={href}
       prefetch={false}
+      title={title}
       className={clsx(
         'relative pb-1 px-1 text-sm sm:text-sm font-medium tracking-tight',
         'transition-colors text-zinc-500 hover:text-zinc-800',
