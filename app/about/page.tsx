@@ -6,10 +6,11 @@ export default function AboutPage() {
     <div className="mx-auto max-w-3xl px-4 sm:px-6 py-8 content">
       <h1 className="text-2xl font-semibold tracking-tight">About</h1>
       <p className="mt-3 text-zinc-700">
-        Despite being a defining crisis of our time, the climate crisis often
-        gets buried in the feed. Climate River brings it back to the top by
-        aggregating articles from leading outlets, organizing by story, and
-        ranking for trust and timeliness. Inspired by{' '}
+        Despite being one of the defining crises of our time, the climate crisis
+        is often overshadowed by political maneuvering and the outrage cycle.
+        Climate River brings focus to the latest climate news by aggregating
+        articles from leading outlets, organizing by story, and ranking for
+        trust and timeliness. Inspired by{' '}
         <a
           href="https://techmeme.com"
           target="_blank"
