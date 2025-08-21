@@ -1,0 +1,314 @@
+[
+  {
+    "id": 1,
+    "name": "Carbon Brief",
+    "slug": "carbon-brief",
+    "homepage_url": null,
+    "feed_url": null,
+    "created_at": "2025-08-08 22:25:26.179229+00"
+  },
+  {
+    "id": 2,
+    "name": "Grist",
+    "slug": "grist",
+    "homepage_url": null,
+    "feed_url": null,
+    "created_at": "2025-08-08 22:25:26.215417+00"
+  },
+  {
+    "id": 14,
+    "name": "Carbon Brief",
+    "slug": "carbon-brief",
+    "homepage_url": "https://www.carbonbrief.org",
+    "feed_url": "https://www.carbonbrief.org/feed/",
+    "created_at": "2025-08-10 23:36:25.781769+00"
+  },
+  {
+    "id": 15,
+    "name": "Grist",
+    "slug": "grist",
+    "homepage_url": "https://grist.org",
+    "feed_url": "https://grist.org/feed/",
+    "created_at": "2025-08-10 23:36:25.781769+00"
+  },
+  {
+    "id": 32,
+    "name": "BBC",
+    "slug": "bbc-science-environment",
+    "homepage_url": "https://feeds.bbci.co.uk",
+    "feed_url": "https://feeds.bbci.co.uk/news/science_and_environment/rss.xml",
+    "created_at": "2025-08-11 00:04:37.397687+00"
+  },
+  {
+    "id": 33,
+    "name": "The Guardian",
+    "slug": "guardian-climate-crisis",
+    "homepage_url": "https://www.theguardian.com",
+    "feed_url": "https://www.theguardian.com/environment/climate-crisis/rss",
+    "created_at": "2025-08-11 00:04:37.397687+00"
+  },
+  {
+    "id": 34,
+    "name": "Inside Climate News",
+    "slug": "inside-climate-news",
+    "homepage_url": "https://insideclimatenews.org",
+    "feed_url": "https://insideclimatenews.org/feed/",
+    "created_at": "2025-08-11 00:04:37.397687+00"
+  },
+  {
+    "id": 35,
+    "name": "Yale Climate Connections",
+    "slug": "yale-climate-connections",
+    "homepage_url": "https://yaleclimateconnections.org",
+    "feed_url": "https://yaleclimateconnections.org/feed/",
+    "created_at": "2025-08-11 00:04:37.397687+00"
+  },
+  {
+    "id": 36,
+    "name": "CleanTechnica",
+    "slug": "cleantechnica",
+    "homepage_url": "https://cleantechnica.com",
+    "feed_url": "https://cleantechnica.com/feed/",
+    "created_at": "2025-08-11 00:04:37.397687+00"
+  },
+  {
+    "id": 37,
+    "name": "Climate Home News",
+    "slug": "climate-home-news",
+    "homepage_url": "https://www.climatechangenews.com",
+    "feed_url": "https://www.climatechangenews.com/feed/",
+    "created_at": "2025-08-11 00:04:37.397687+00"
+  },
+  {
+    "id": 38,
+    "name": "NASA Climate",
+    "slug": "nasa-climate-news",
+    "homepage_url": "https://climate.nasa.gov",
+    "feed_url": "https://climate.nasa.gov/news/rss.xml",
+    "created_at": "2025-08-11 00:04:37.397687+00"
+  },
+  {
+    "id": 39,
+    "name": "ScienceDaily",
+    "slug": "sciencedaily-climate",
+    "homepage_url": "https://www.sciencedaily.com",
+    "feed_url": "https://www.sciencedaily.com/rss/earth_climate.xml",
+    "created_at": "2025-08-11 00:04:37.397687+00"
+  },
+  {
+    "id": 252,
+    "name": "New York Times",
+    "slug": "nyt-climate",
+    "homepage_url": "https://rss.nytimes.com",
+    "feed_url": "https://rss.nytimes.com/services/xml/rss/nyt/Climate.xml",
+    "created_at": "2025-08-13 00:17:48.120223+00"
+  },
+  {
+    "id": 253,
+    "name": "Reuters",
+    "slug": "reuters-environment",
+    "homepage_url": "https://feeds.reuters.com",
+    "feed_url": "https://feeds.reuters.com/reuters/environment",
+    "created_at": "2025-08-13 00:17:48.120223+00"
+  },
+  {
+    "id": 254,
+    "name": "Washington Post — Climate & Environment",
+    "slug": "washpost-climate-environment",
+    "homepage_url": "https://www.washingtonpost.com",
+    "feed_url": "https://www.washingtonpost.com/climate-environment/?outputType=rss",
+    "created_at": "2025-08-13 00:17:48.120223+00"
+  },
+  {
+    "id": 255,
+    "name": "Financial Times",
+    "slug": "ft-climate-capital",
+    "homepage_url": "https://www.ft.com",
+    "feed_url": "https://www.ft.com/climate-capital?format=rss",
+    "created_at": "2025-08-13 00:17:48.120223+00"
+  },
+  {
+    "id": 256,
+    "name": "NPR — Environment",
+    "slug": "npr-environment",
+    "homepage_url": "https://feeds.npr.org",
+    "feed_url": "https://feeds.npr.org/118497594/rss.xml",
+    "created_at": "2025-08-13 00:17:48.120223+00"
+  },
+  {
+    "id": 257,
+    "name": "The Conversation (US)",
+    "slug": "conversation-environment-us",
+    "homepage_url": "https://theconversation.com",
+    "feed_url": "https://theconversation.com/us/environment/articles.atom",
+    "created_at": "2025-08-13 00:17:48.120223+00"
+  },
+  {
+    "id": 258,
+    "name": "NOAA Climate.gov — All",
+    "slug": "noaa-climate-gov",
+    "homepage_url": "https://www.climate.gov",
+    "feed_url": "https://www.climate.gov/feeds/all/rss.xml",
+    "created_at": "2025-08-13 00:17:48.120223+00"
+  },
+  {
+    "id": 259,
+    "name": "Nature — Climate change",
+    "slug": "nature-climate-change",
+    "homepage_url": "https://www.nature.com",
+    "feed_url": "https://www.nature.com/subjects/climate-change/rss",
+    "created_at": "2025-08-13 00:17:48.120223+00"
+  },
+  {
+    "id": 260,
+    "name": "The Economist",
+    "slug": "economist-climate-change",
+    "homepage_url": "https://www.economist.com",
+    "feed_url": "https://www.economist.com/climate-change/rss.xml",
+    "created_at": "2025-08-13 00:17:48.120223+00"
+  },
+  {
+    "id": 261,
+    "name": "MIT Technology Review",
+    "slug": "mit-tech-review-climate",
+    "homepage_url": "https://www.technologyreview.com",
+    "feed_url": "https://www.technologyreview.com/topic/climate-change/feed/",
+    "created_at": "2025-08-13 00:17:48.120223+00"
+  },
+  {
+    "id": 262,
+    "name": "Phys.org",
+    "slug": "physorg-environment",
+    "homepage_url": "https://phys.org",
+    "feed_url": "https://phys.org/rss-feed/earth-news/",
+    "created_at": "2025-08-13 00:17:48.120223+00"
+  },
+  {
+    "id": 295,
+    "name": "Reuters",
+    "slug": "reuters-environment",
+    "homepage_url": "https://www.reuters.com",
+    "feed_url": "https://www.reuters.com/world/environment/rss",
+    "created_at": "2025-08-13 00:50:31.498895+00"
+  },
+  {
+    "id": 296,
+    "name": "Washington Post",
+    "slug": "washpost-climate-environment",
+    "homepage_url": "https://feeds.washingtonpost.com",
+    "feed_url": "https://feeds.washingtonpost.com/rss/rss_climate-environment",
+    "created_at": "2025-08-13 00:50:31.498895+00"
+  },
+  {
+    "id": 298,
+    "name": "NPR",
+    "slug": "npr-environment",
+    "homepage_url": "https://feeds.npr.org",
+    "feed_url": "https://feeds.npr.org/1007/rss.xml",
+    "created_at": "2025-08-13 00:50:31.498895+00"
+  },
+  {
+    "id": 300,
+    "name": "NOAA Climate.gov",
+    "slug": "noaa-climate-gov",
+    "homepage_url": "https://www.climate.gov",
+    "feed_url": "https://www.climate.gov/feeds/all.rss",
+    "created_at": "2025-08-13 00:50:31.498895+00"
+  },
+  {
+    "id": 301,
+    "name": "Nature",
+    "slug": "nature-climate-change",
+    "homepage_url": "https://www.nature.com",
+    "feed_url": "https://www.nature.com/subjects/climate-change.rss",
+    "created_at": "2025-08-13 00:50:31.498895+00"
+  },
+  {
+    "id": 368,
+    "name": "news.google.com",
+    "slug": "news-google-com",
+    "homepage_url": "https://news.google.com",
+    "feed_url": "discover://news.google.com",
+    "created_at": "2025-08-13 23:22:08.445935+00"
+  },
+  {
+    "id": 3057,
+    "name": "Bloomberg",
+    "slug": "bloomberg-climate",
+    "homepage_url": "https://www.bloomberg.com",
+    "feed_url": "https://www.bloomberg.com/feeds/climate.rss",
+    "created_at": "2025-08-14 05:19:53.061813+00"
+  },
+  {
+    "id": 3058,
+    "name": "Jacobin",
+    "slug": "jacobin",
+    "homepage_url": "https://jacobin.com",
+    "feed_url": "https://jacobin.com/feed/",
+    "created_at": "2025-08-14 05:19:53.061813+00"
+  },
+  {
+    "id": 5563,
+    "name": "Associated Press",
+    "slug": "ap-climate-news",
+    "homepage_url": "https://feeds.apnews.com",
+    "feed_url": "https://feeds.apnews.com/ap/climate",
+    "created_at": "2025-08-14 23:21:57.452752+00"
+  },
+  {
+    "id": 5567,
+    "name": "EPA Climate News",
+    "slug": "epa-climate-news",
+    "homepage_url": "https://www.epa.gov",
+    "feed_url": "https://www.epa.gov/newsroom/climate-change",
+    "created_at": "2025-08-14 23:21:57.452752+00"
+  },
+  {
+    "id": 5568,
+    "name": "Science Daily Environment",
+    "slug": "science-daily-environment",
+    "homepage_url": "https://www.sciencedaily.com",
+    "feed_url": "https://www.sciencedaily.com/rss/earth_climate/climate.xml",
+    "created_at": "2025-08-14 23:21:57.452752+00"
+  },
+  {
+    "id": 5569,
+    "name": "CNN Climate",
+    "slug": "cnn-climate",
+    "homepage_url": "http://rss.cnn.com",
+    "feed_url": "http://rss.cnn.com/rss/edition.rss",
+    "created_at": "2025-08-14 23:21:57.452752+00"
+  },
+  {
+    "id": 5572,
+    "name": "Axios Climate",
+    "slug": "axios-climate",
+    "homepage_url": "https://api.axios.com",
+    "feed_url": "https://api.axios.com/feed/generate-climate",
+    "created_at": "2025-08-14 23:21:57.452752+00"
+  },
+  {
+    "id": 5596,
+    "name": "Bloomberg",
+    "slug": "bloomberg-climate",
+    "homepage_url": "https://feeds.bloomberg.com",
+    "feed_url": "https://feeds.bloomberg.com/green/news.rss",
+    "created_at": "2025-08-14 23:35:18.654533+00"
+  },
+  {
+    "id": 6182,
+    "name": "Wall Street Journal",
+    "slug": "wsj",
+    "homepage_url": "http://blogs.wsj.com",
+    "feed_url": "http://blogs.wsj.com/washwire/feed/",
+    "created_at": "2025-08-15 00:17:55.454335+00"
+  },
+  {
+    "id": 7733,
+    "name": "Web Discovery",
+    "slug": "web-discovery",
+    "homepage_url": "https://climateriver.org",
+    "feed_url": "web-discovery://openai",
+    "created_at": "2025-08-15 02:19:13.794243+00"
+  }
+]
