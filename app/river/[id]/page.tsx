@@ -205,11 +205,11 @@ export default async function ClusterPage({
         </div>
       </article>
 
-      {/* More coverage */}
+      {/* Related articles */}
       {r.subs.length > 0 && (
         <section className="mt-8">
           <h2 className="text-sm font-medium text-zinc-500 mb-4">
-            More coverage
+            Related articles
           </h2>
           <div className="space-y-4">
             {r.subs.map((s) => {
