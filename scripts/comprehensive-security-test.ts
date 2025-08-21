@@ -86,7 +86,9 @@ async function comprehensiveSecurityTest() {
       await query('ROLLBACK')
       console.log(`✅ Write operations work (tested with rollback)`)
     } catch (writeError) {
-      console.error(`❌ CRITICAL: Write operations failed:`, writeError.message)
+      const errorMessage =
+        writeError instanceof Error ? writeError.message : String(writeError)
+      console.error(`❌ CRITICAL: Write operations failed:`, errorMessage)
       allTestsPassed = false
     }
 
@@ -117,7 +119,9 @@ async function comprehensiveSecurityTest() {
         const result = await query(check.query)
         console.log(`✅ ${check.name}: ${result.rows[0].count}`)
       } catch (error) {
-        console.error(`❌ ${check.name} failed:`, error.message)
+        const errorMessage =
+          error instanceof Error ? error.message : String(error)
+        console.error(`❌ ${check.name} failed:`, errorMessage)
         allTestsPassed = false
       }
     }
@@ -165,7 +169,9 @@ async function comprehensiveSecurityTest() {
           console.warn(`⚠️  ${test.name} is slow (${duration}ms)`)
         }
       } catch (error) {
-        console.error(`❌ ${test.name} failed:`, error.message)
+        const errorMessage =
+          error instanceof Error ? error.message : String(error)
+        console.error(`❌ ${test.name} failed:`, errorMessage)
         allTestsPassed = false
       }
     }
@@ -187,7 +193,8 @@ async function comprehensiveSecurityTest() {
       process.exit(1)
     }
   } catch (error) {
-    console.error('💥 CRITICAL TEST FAILURE:', error.message)
+    const errorMessage = error instanceof Error ? error.message : String(error)
+    console.error('💥 CRITICAL TEST FAILURE:', errorMessage)
     console.error('🚨 SYSTEM IS NOT STABLE - INVESTIGATE IMMEDIATELY')
     process.exit(1)
   }

@@ -53,7 +53,9 @@ async function testPreSecurityFix() {
           console.log(`❓ ${funcName}: NOT FOUND`)
         }
       } catch (error) {
-        console.log(`❌ ${funcName}: ERROR - ${error.message}`)
+        const errorMessage =
+          error instanceof Error ? error.message : String(error)
+        console.log(`❌ ${funcName}: ERROR - ${errorMessage}`)
         vulnerableFunctions++
       }
     }
@@ -95,7 +97,8 @@ async function testPreSecurityFix() {
       console.log('\n✅ ALL FUNCTIONS ARE SECURE!')
     }
   } catch (error) {
-    console.error('❌ Security assessment failed:', error.message)
+    const errorMessage = error instanceof Error ? error.message : String(error)
+    console.error('❌ Security assessment failed:', errorMessage)
     process.exit(1)
   }
 }
@@ -103,6 +106,7 @@ async function testPreSecurityFix() {
 testPreSecurityFix()
   .then(() => process.exit(0))
   .catch((error) => {
-    console.error('❌ Test failed:', error.message)
+    const errorMessage = error instanceof Error ? error.message : String(error)
+    console.error('❌ Test failed:', errorMessage)
     process.exit(1)
   })

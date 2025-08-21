@@ -72,7 +72,8 @@ async function testRLSPolicies() {
     console.log('   • Your app should function normally with RLS enabled')
     console.log('   • Data is now properly secured')
   } catch (error) {
-    console.error('❌ RLS TEST FAILED:', error.message)
+    const errorMessage = error instanceof Error ? error.message : String(error)
+    console.error('❌ RLS TEST FAILED:', errorMessage)
     console.error('   This indicates the RLS policies need adjustment')
     throw error
   }
