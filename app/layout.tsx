@@ -4,21 +4,6 @@ import Link from 'next/link'
 import * as DB from '@/lib/db'
 import { Analytics } from '@vercel/analytics/react'
 
-// Get the last update time from the database
-async function getLastUpdatedTime(): Promise<Date> {
-  try {
-    const { rows } = await DB.query<{ fetched_at: string }>(
-      `SELECT fetched_at FROM articles 
-       ORDER BY fetched_at DESC 
-       LIMIT 1`
-    )
-    return rows.length > 0 ? new Date(rows[0].fetched_at) : new Date()
-  } catch (error) {
-    console.error('Failed to get last updated time:', error)
-    return new Date() // Fallback to current time
-  }
-}
-
 export const metadata = {
   title: 'Climate River',
   icons: {
@@ -35,25 +20,13 @@ export default async function RootLayout({
 }: {
   children: React.ReactNode
 }) {
-  // Get the actual last update time from the database
-  const lastUpdated = await getLastUpdatedTime()
-
-  // Format time in Eastern Time
-  const formattedTime =
-    lastUpdated.toLocaleDateString('en-US', {
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric',
-      timeZone: 'America/New_York',
-    }) +
-    ' at ' +
-    lastUpdated.toLocaleTimeString('en-US', {
-      hour: 'numeric',
-      minute: '2-digit',
-      hour12: true,
-      timeZone: 'America/New_York',
-    }) +
-    ' ET'
+  // Get the last time articles were fetched by cron jobs
+  const latest = await DB.query(`
+    select coalesce(max(fetched_at), now()) as ts
+    from articles
+  `)
+  const lastTs = latest.rows[0]?.ts ?? new Date().toISOString()
+  const lastUpdatedDate = new Date(lastTs)
   return (
     <html lang="en" className="h-full">
       <body className="min-h-full bg-zinc-50 text-zinc-900 antialiased">
@@ -100,7 +73,21 @@ export default async function RootLayout({
 
               {/* Right: Last updated - Desktop only */}
               <div className="hidden sm:block text-xs text-zinc-500">
-                Last updated {formattedTime}
+                Last updated{' '}
+                {lastUpdatedDate.toLocaleDateString('en-US', {
+                  month: 'short',
+                  day: 'numeric',
+                  year: 'numeric',
+                  timeZone: 'America/New_York',
+                })}{' '}
+                at{' '}
+                {lastUpdatedDate.toLocaleTimeString('en-US', {
+                  hour: 'numeric',
+                  minute: '2-digit',
+                  hour12: false,
+                  timeZone: 'America/New_York',
+                })}{' '}
+                ET
               </div>
             </div>
           </div>
@@ -110,7 +97,21 @@ export default async function RootLayout({
         <div className="sm:hidden bg-white border-b border-zinc-100">
           <div className="mx-auto max-w-5xl px-4">
             <div className="py-2 text-center text-xs text-zinc-500">
-              Last updated {formattedTime}
+              Last updated{' '}
+              {lastUpdatedDate.toLocaleDateString('en-US', {
+                month: 'short',
+                day: 'numeric',
+                year: 'numeric',
+                timeZone: 'America/New_York',
+              })}{' '}
+              at{' '}
+              {lastUpdatedDate.toLocaleTimeString('en-US', {
+                hour: 'numeric',
+                minute: '2-digit',
+                hour12: false,
+                timeZone: 'America/New_York',
+              })}{' '}
+              ET
             </div>
           </div>
         </div>

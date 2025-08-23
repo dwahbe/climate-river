@@ -4,6 +4,7 @@ import * as DB from '@/lib/db'
 import LocalTime from '@/components/LocalTime'
 import RiverControls from '@/components/RiverControls'
 import PublisherLink from '@/components/PublisherLink'
+import SourceTooltip from '@/components/SourceTooltip'
 import { CATEGORIES, getCategoryBySlug, type CategorySlug } from '@/lib/tagger'
 import { unstable_noStore as noStore } from 'next/cache'
 
@@ -34,6 +35,15 @@ type Row = {
   sources_count: number
   subs: SubLink[]
   subs_total: number
+  all_articles_by_source: Record<
+    string,
+    Array<{
+      article_id: number
+      title: string
+      url: string
+      author: string | null
+    }>
+  >
 }
 
 function hostFrom(url: string) {
@@ -67,18 +77,6 @@ export default async function RiverPage({
   const categoryLimit = 15 // Category tabs: 15 articles
 
   const limit = isCategory ? categoryLimit : isLatest ? latestLimit : topLimit
-
-  // Get last updated timestamp
-  const latest = await DB.query(`
-    select coalesce(max(fetched_at), now()) as ts
-    from articles
-  `)
-  const lastTs = latest.rows[0]?.ts ?? new Date().toISOString()
-  const lastFormatted = new Intl.DateTimeFormat('en-US', {
-    dateStyle: 'medium',
-    timeStyle: 'short',
-    timeZone: 'America/Mexico_City',
-  }).format(new Date(lastTs))
 
   const { rows } = await DB.query<Row>(
     `
@@ -228,7 +226,35 @@ export default async function RiverPage({
             published_at DESC
           LIMIT 8
         ) y
-      ) AS subs
+      ) AS subs,
+
+      (
+        SELECT json_object_agg(
+          source_name,
+          articles
+        )
+        FROM (
+          SELECT 
+            COALESCE(a3.publisher_name, s3.name) as source_name,
+            json_agg(
+              json_build_object(
+                'article_id', a3.id,
+                'title', COALESCE(a3.rewritten_title, a3.title),
+                'url', a3.canonical_url,
+                'author', a3.author
+              ) ORDER BY a3.published_at DESC
+            ) as articles
+          FROM article_clusters ac3
+          JOIN articles a3 ON a3.id = ac3.article_id
+          LEFT JOIN sources s3 ON s3.id = a3.source_id
+          WHERE ac3.cluster_id = l.cluster_id
+            AND a3.canonical_url NOT LIKE 'https://news.google.com%'
+            AND a3.canonical_url NOT LIKE 'https://news.yahoo.com%'
+            AND a3.canonical_url NOT LIKE 'https://www.msn.com%'
+          GROUP BY COALESCE(a3.publisher_name, s3.name)
+          HAVING COUNT(*) > 0
+        ) source_groups
+      ) AS all_articles_by_source
     FROM lead l
     ORDER BY
       CASE WHEN $1::boolean THEN l.published_at END DESC NULLS LAST, -- Latest
@@ -277,16 +303,21 @@ export default async function RiverPage({
                     {r.lead_author && publisher && (
                       <span className="px-1 text-zinc-400">•</span>
                     )}
-                    {r.lead_homepage ? (
-                      <PublisherLink
-                        href={r.lead_homepage}
-                        className="hover:underline"
-                      >
-                        {publisher}
-                      </PublisherLink>
-                    ) : (
-                      publisher
-                    )}
+                    <SourceTooltip
+                      sourceName={publisher}
+                      articles={r.all_articles_by_source?.[publisher] || []}
+                    >
+                      {r.lead_homepage ? (
+                        <PublisherLink
+                          href={r.lead_homepage}
+                          className="hover:underline"
+                        >
+                          {publisher}
+                        </PublisherLink>
+                      ) : (
+                        <span>{publisher}</span>
+                      )}
+                    </SourceTooltip>
                   </div>
                 )}
 
@@ -325,15 +356,22 @@ export default async function RiverPage({
                       const href = `/api/click?aid=${s.article_id}&url=${encodeURIComponent(
                         s.url
                       )}`
+                      const sourceName = s.source ?? hostFrom(s.url)
                       return (
                         <span key={s.article_id}>
-                          <a
-                            href={href}
-                            className="no-underline hover:underline text-zinc-700 hover:text-zinc-900 transition-colors"
-                            title={s.title}
+                          <SourceTooltip
+                            sourceName={sourceName}
+                            articles={
+                              r.all_articles_by_source?.[sourceName] || []
+                            }
                           >
-                            {s.source ?? hostFrom(s.url)}
-                          </a>
+                            <a
+                              href={href}
+                              className="no-underline hover:underline text-zinc-700 hover:text-zinc-900 transition-colors"
+                            >
+                              {sourceName}
+                            </a>
+                          </SourceTooltip>
                           {i < secondaries.length - 1 && (
                             <span className="text-zinc-400">, </span>
                           )}
