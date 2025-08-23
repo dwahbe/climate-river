@@ -1,5 +1,7 @@
-/* Tailwind v4 entry */
-@import 'tailwindcss';
+/* Tailwind v3 entry */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
 
 /* --- Base (theme + defaults) --- */
 @layer base {
