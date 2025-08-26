@@ -126,7 +126,7 @@ function Tab({
       prefetch={false}
       title={title}
       className={clsx(
-        'relative pb-1 px-1 text-sm sm:text-sm font-medium tracking-tight',
+        'relative before:absolute before:content-[""] before:-inset-y-2 before:-inset-x-2 before:rounded pb-1 px-1 text-sm sm:text-sm font-medium tracking-tight',
         'transition-colors text-zinc-500 hover:text-zinc-800',
         active && 'text-zinc-900'
       )}
@@ -170,7 +170,7 @@ function CategoryTab({
       prefetch={false}
       title={title}
       className={clsx(
-        'relative pb-1 px-1 text-sm sm:text-sm font-medium tracking-tight whitespace-nowrap',
+        'relative before:absolute before:content-[""] before:-inset-y-2 before:-inset-x-2 before:rounded pb-1 px-1 text-sm sm:text-sm font-medium tracking-tight whitespace-nowrap',
         'transition-colors text-zinc-500 hover:text-zinc-800',
         active && 'text-zinc-900'
       )}
