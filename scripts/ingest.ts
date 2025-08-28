@@ -3,7 +3,6 @@ import './_env'
 import Parser from 'rss-parser'
 import dayjs from 'dayjs'
 import { query, endPool } from '@/lib/db'
-import sources from '@/data/sources.json'
 import { categorizeAndStoreArticle } from '@/lib/categorizer'
 import OpenAI from 'openai'
 
@@ -160,14 +159,7 @@ function bestDek(it: RssItem) {
   return raw ? oneLine(raw) : null
 }
 
-type SourceRaw = {
-  slug?: string
-  name: string
-  rss?: string
-  feed?: string
-  homepage?: string
-  weight?: number
-}
+// Removed SourceRaw type - no longer needed since we fetch from database
 type SourceDef = {
   name: string
   homepage: string
@@ -263,24 +255,7 @@ async function mapLimit<T, R>(
   })
 }
 
-// ---------- Normalize sources.json ----------
-function normalizeSource(s: SourceRaw): SourceDef | null {
-  const feed = s.feed ?? s.rss ?? ''
-  if (!feed) return null
-  const homepage =
-    s.homepage ||
-    (() => {
-      try {
-        return new URL(feed).origin
-      } catch {
-        return ''
-      }
-    })()
-  const slug =
-    (s.slug && slugify(s.slug)) ||
-    `${slugify(s.name || homepage)}-${shortHash(feed)}`
-  return { name: s.name, homepage, feed, weight: s.weight ?? 1, slug }
-}
+// Removed normalizeSource function - no longer needed since we fetch from database
 
 // ---------- Idempotent schema guard ----------
 async function ensureSchema() {
@@ -354,29 +329,7 @@ async function ensureSchema() {
 }
 
 // ---------- DB helpers ----------
-async function upsertSources(defs: SourceDef[]) {
-  if (!defs.length) return
-  const params: any[] = []
-  const valuesSql = defs
-    .map((r, i) => {
-      const o = i * 5
-      params.push(r.name, r.homepage, r.feed, r.weight, r.slug)
-      return `($${o + 1}, $${o + 2}, $${o + 3}, $${o + 4}, $${o + 5})`
-    })
-    .join(', ')
-  await query(
-    `
-      insert into sources (name, homepage_url, feed_url, weight, slug)
-      values ${valuesSql}
-      on conflict (feed_url) do update set
-        name = excluded.name,
-        homepage_url = excluded.homepage_url,
-        weight = excluded.weight,
-        slug = excluded.slug
-    `,
-    params
-  )
-}
+// Removed upsertSources function - sources are now managed directly in database
 
 async function sourceMap(): Promise<Record<string, { id: number }>> {
   const { rows } = await query<{ id: number; feed_url: string }>(
@@ -385,6 +338,31 @@ async function sourceMap(): Promise<Record<string, { id: number }>> {
   const map: Record<string, { id: number }> = {}
   for (const r of rows) map[r.feed_url] = { id: r.id }
   return map
+}
+
+// ---------- Fetch sources from database ----------
+async function fetchSourcesFromDB(): Promise<SourceDef[]> {
+  const { rows } = await query<{
+    id: number
+    name: string
+    homepage_url: string | null
+    feed_url: string
+    weight: number
+    slug: string
+  }>(`
+    SELECT id, name, homepage_url, feed_url, weight, slug 
+    FROM sources 
+    WHERE feed_url IS NOT NULL 
+    ORDER BY weight DESC, name
+  `)
+
+  return rows.map((row) => ({
+    name: row.name,
+    homepage: row.homepage_url || '',
+    feed: row.feed_url,
+    weight: row.weight,
+    slug: row.slug,
+  }))
 }
 
 function parseDateMaybe(s?: string) {
@@ -851,11 +829,17 @@ export async function run(opts: { limit?: number; closePool?: boolean } = {}) {
   const start = Date.now()
   await ensureSchema()
 
-  const defs = (sources as unknown as SourceRaw[])
-    .map(normalizeSource)
-    .filter((d): d is SourceDef => !!d && !!d.feed)
+  // Fetch sources from database instead of JSON file
+  const defs = await fetchSourcesFromDB()
 
-  await upsertSources(defs)
+  if (defs.length === 0) {
+    console.log(
+      '⚠️  No sources found in database. Make sure sources are properly configured.'
+    )
+    if (opts.closePool) await endPool()
+    return { total: 0, results: [] }
+  }
+
   const idByFeed = await sourceMap()
 
   const perFeedLimit = opts.limit ?? 25

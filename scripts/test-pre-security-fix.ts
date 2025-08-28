@@ -11,7 +11,6 @@ async function testPreSecurityFix() {
     console.log('='.repeat(40))
 
     const functions = [
-      'trg_source_weights_audit',
       'get_recent_articles_with_deduplication',
       'update_updated_at_column',
       'find_similar_articles',
