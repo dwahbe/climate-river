@@ -14,8 +14,8 @@ type DiscoverMod = {
 }
 
 /** --- Auth helper --- */
-function authorized(req: Request) {
-  const h = headers()
+async function authorized(req: Request) {
+  const h = await headers()
   const isCron = h.get('x-vercel-cron') === '1'
 
   const url = new URL(req.url)
@@ -45,14 +45,14 @@ function getIntParam(
 
 /** --- Runner --- */
 async function handle(req: Request) {
-  if (!authorized(req)) {
+  if (!(await authorized(req))) {
     return NextResponse.json(
       { ok: false, error: 'unauthorized' },
       { status: 401 }
     )
   }
 
-  const h = headers()
+  const h = await headers()
   const isCron = h.get('x-vercel-cron') === '1'
   const url = new URL(req.url)
 

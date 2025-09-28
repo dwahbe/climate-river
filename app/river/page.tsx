@@ -48,17 +48,18 @@ type Row = {
 
 function hostFrom(url: string) {
   try {
-    return new URL(url).hostname.replace(/^www\./, '')
+    return new URL(url).hostname.replace(/^www\./, '');
   } catch {
     return ''
   }
 }
 
-export default async function RiverPage({
-  searchParams,
-}: {
-  searchParams?: Record<string, string | string[] | undefined>
-}) {
+export default async function RiverPage(
+  props: {
+    searchParams?: Promise<Record<string, string | string[] | undefined>>
+  }
+) {
+  const searchParams = await props.searchParams;
   noStore()
 
   const view = Array.isArray(searchParams?.view)

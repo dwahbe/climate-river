@@ -6,8 +6,8 @@ import { NextResponse } from 'next/server'
 import { headers } from 'next/headers'
 
 /** Same auth policy as /api/ingest */
-function authorized(req: Request) {
-  const h = headers()
+async function authorized(req: Request) {
+  const h = await headers()
   const url = new URL(req.url)
 
   const isCron =
@@ -32,7 +32,7 @@ async function runRescore() {
 }
 
 export async function GET(req: Request) {
-  if (!authorized(req)) {
+  if (!(await authorized(req))) {
     return NextResponse.json(
       { ok: false, error: 'unauthorized' },
       { status: 401 }

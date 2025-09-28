@@ -5,8 +5,8 @@ export const dynamic = 'force-dynamic'
 import { NextResponse } from 'next/server'
 import { headers } from 'next/headers'
 
-function authorized(req: Request) {
-  const h = headers()
+async function authorized(req: Request) {
+  const h = await headers()
   const isCron = h.get('x-vercel-cron') === '1'
   const url = new URL(req.url)
   const qToken = url.searchParams.get('token')?.trim()
@@ -25,13 +25,13 @@ async function runRewrite(limit?: number) {
 }
 
 async function handle(req: Request) {
-  if (!authorized(req)) {
+  if (!(await authorized(req))) {
     return NextResponse.json(
       { ok: false, error: 'unauthorized' },
       { status: 401 }
     )
   }
-  const h = headers()
+  const h = await headers()
   const url = new URL(req.url)
   const q = url.searchParams.get('limit')
   const isCron = h.get('x-vercel-cron') === '1'

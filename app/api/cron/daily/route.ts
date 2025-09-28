@@ -4,7 +4,6 @@ export const dynamic = 'force-dynamic'
 
 import { NextResponse } from 'next/server'
 import { headers } from 'next/headers'
-// import { endPool } from '@/lib/db' // Not needed anymore
 
 /**
  * Allow:
@@ -12,8 +11,8 @@ import { headers } from 'next/headers'
  *  - ADMIN_TOKEN via Bearer token or ?token=...
  *  - Optional ?cron=1 for manual tests
  */
-function authorized(req: Request) {
-  const h = headers()
+async function authorized(req: Request) {
+  const h = await headers()
   const url = new URL(req.url)
 
   const isCron =
@@ -47,7 +46,7 @@ async function safeRun(modPromise: Promise<any>, opts?: any) {
 }
 
 export async function GET(req: Request) {
-  if (!authorized(req)) {
+  if (!(await authorized(req))) {
     return NextResponse.json(
       { ok: false, error: 'unauthorized' },
       { status: 401 }

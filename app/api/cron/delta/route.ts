@@ -12,8 +12,8 @@ import { endPool } from '@/lib/db'
  *  - ADMIN_TOKEN via Bearer token or ?token=... query param
  *  - Optional ?cron=1 for manual testing
  */
-function authorized(req: Request) {
-  const h = headers()
+async function authorized(req: Request) {
+  const h = await headers()
   const url = new URL(req.url)
 
   const isCron =
@@ -42,7 +42,7 @@ async function safeRun(modPromise: Promise<any>, opts?: any) {
 }
 
 export async function GET(req: Request) {
-  if (!authorized(req)) {
+  if (!(await authorized(req))) {
     return NextResponse.json(
       { ok: false, error: 'unauthorized' },
       { status: 401 }
