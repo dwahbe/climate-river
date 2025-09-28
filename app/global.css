@@ -1,7 +1,5 @@
-/* Tailwind v3 entry */
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+/* Tailwind v4 entry */
+@import 'tailwindcss';
 
 /* Details element animation */
 details {
