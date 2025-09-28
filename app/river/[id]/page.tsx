@@ -1,9 +1,9 @@
 import Link from 'next/link'
 import * as DB from '@/lib/db'
 import LocalTime from '@/components/LocalTime'
-import { unstable_noStore as noStore } from 'next/cache'
 
-export const dynamic = 'force-dynamic'
+// Cache for 5 minutes (300 seconds)
+export const revalidate = 300
 export const runtime = 'nodejs'
 
 type Sub = {
@@ -42,7 +42,6 @@ export default async function ClusterPage(props: {
   params: Promise<{ id: string }>
 }) {
   const params = await props.params
-  noStore()
   const cid = Number(params.id)
 
   const { rows } = await DB.query<ClusterRow>(

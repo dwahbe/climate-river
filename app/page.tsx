@@ -5,9 +5,9 @@ import RiverControls from '@/components/RiverControls'
 import PublisherLink from '@/components/PublisherLink'
 import SourceTooltip from '@/components/SourceTooltip'
 import { CATEGORIES } from '@/lib/tagger'
-import { unstable_noStore as noStore } from 'next/cache'
 
-export const dynamic = 'force-dynamic'
+// Cache for 5 minutes (300 seconds)
+export const revalidate = 300
 export const runtime = 'nodejs'
 
 type SubLink = {
@@ -57,7 +57,6 @@ export default async function RiverPage(props: {
   searchParams?: Promise<Record<string, string | string[] | undefined>>
 }) {
   const searchParams = await props.searchParams
-  noStore()
 
   const view = Array.isArray(searchParams?.view)
     ? searchParams?.view[0]

@@ -1,7 +1,7 @@
 import './global.css'
 import Link from 'next/link'
-import * as DB from '@/lib/db'
 import { Analytics } from '@vercel/analytics/react'
+import LastUpdated from '@/components/LastUpdated'
 
 export const metadata = {
   title: 'Climate River',
@@ -11,111 +11,43 @@ export const metadata = {
     apple: '/apple-icon.png',
   },
 }
-export const dynamic = 'force-dynamic'
-export const runtime = 'nodejs'
 
 export default async function RootLayout({
   children,
 }: {
   children: React.ReactNode
 }) {
-  // Get the last time articles were fetched by cron jobs
-  const latest = await DB.query(`
-    select coalesce(max(fetched_at), now()) as ts
-    from articles
-  `)
-  const lastTs = latest.rows[0]?.ts ?? new Date().toISOString()
-  const lastUpdatedDate = new Date(lastTs)
   return (
     <html lang="en" className="h-full">
       <body className="min-h-full bg-zinc-50 text-zinc-900 antialiased">
         <nav className="bg-white border-b border-zinc-100">
           <div className="mx-auto max-w-5xl px-4 sm:px-6">
             {/* Two columns: left / right — all vertically centered */}
-            <div className="flex items-center justify-between py-3 sm:py-4">
+            <div className="flex md:items-center md:justify-between max-md:flex-col gap-2 py-3 sm:py-4">
               {/* Left: brand + navigation */}
-              <div className="flex items-center gap-6">
+              <div className="flex items-baseline-last gap-6">
                 <Link href="/" className="flex items-center gap-2 no-underline">
-                  <span className="h-2.5 w-2.5 rounded-full bg-emerald-600" />
+                  <span className="h-2.5 w-2.5 rounded-full bg-emerald-600 flex-shrink-0" />
                   <span className="font-semibold text-base sm:text-lg tracking-tight">
                     Climate River
                   </span>
                 </Link>
 
-                {/* Desktop navigation */}
-                <div className="hidden sm:flex items-baseline gap-3 text-sm">
-                  <Link
-                    href="/"
-                    className="text-zinc-600 hover:text-zinc-900 no-underline"
-                  >
-                    Home
-                  </Link>
-                  <span className="text-zinc-300">/</span>
-                  <Link
-                    href="/about"
-                    className="text-zinc-600 hover:text-zinc-900 no-underline"
-                  >
-                    About
-                  </Link>
-                </div>
-
-                {/* Mobile navigation */}
-                <div className="flex sm:hidden items-center">
-                  <Link
-                    href="/about"
-                    className="text-zinc-600 hover:text-zinc-900 no-underline text-sm"
-                  >
-                    About
-                  </Link>
-                </div>
+                <Link
+                  href="/about"
+                  className="text-zinc-600 hover:text-zinc-900 no-underline"
+                >
+                  About
+                </Link>
               </div>
 
               {/* Right: Last updated - Desktop only */}
-              <div className="hidden sm:block text-xs text-zinc-500">
-                Last updated{' '}
-                {lastUpdatedDate.toLocaleDateString('en-US', {
-                  month: 'short',
-                  day: 'numeric',
-                  year: 'numeric',
-                  timeZone: 'America/New_York',
-                })}{' '}
-                at{' '}
-                {lastUpdatedDate.toLocaleTimeString('en-US', {
-                  hour: 'numeric',
-                  minute: '2-digit',
-                  hour12: false,
-                  timeZone: 'America/New_York',
-                })}{' '}
-                ET
-              </div>
+              <LastUpdated />
             </div>
           </div>
         </nav>
 
-        {/* Mobile: Last updated below navbar */}
-        <div className="sm:hidden bg-white border-b border-zinc-100">
-          <div className="mx-auto max-w-5xl px-4">
-            <div className="py-2 text-center text-xs text-zinc-500">
-              Last updated{' '}
-              {lastUpdatedDate.toLocaleDateString('en-US', {
-                month: 'short',
-                day: 'numeric',
-                year: 'numeric',
-                timeZone: 'America/New_York',
-              })}{' '}
-              at{' '}
-              {lastUpdatedDate.toLocaleTimeString('en-US', {
-                hour: 'numeric',
-                minute: '2-digit',
-                hour12: false,
-                timeZone: 'America/New_York',
-              })}{' '}
-              ET
-            </div>
-          </div>
-        </div>
-
-        <main className="mx-auto max-w-5xl px-4 sm:px-6 py-6 content">
+        <main className="mx-auto max-w-5xl md:px-4 py-6 content">
           {children}
         </main>
 
