@@ -1,8 +1,4 @@
 import { query, endPool } from '@/lib/db'
-import dotenv from 'dotenv'
-
-// Load environment variables
-dotenv.config({ path: '.env.local' })
 
 async function debugFrontendData() {
   console.log('🔍 Debugging frontend data for our cluster...')

@@ -1,9 +1,5 @@
 import { query, endPool } from '@/lib/db'
 import OpenAI from 'openai'
-import dotenv from 'dotenv'
-
-// Load environment variables
-dotenv.config({ path: '.env.local' })
 
 // Initialize OpenAI client
 const openai = new OpenAI({
