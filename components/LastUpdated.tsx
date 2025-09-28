@@ -1,13 +1,28 @@
 import * as DB from '@/lib/db'
 
+export async function getLastUpdatedDate() {
+  try {
+    // Get the last time articles were fetched by cron jobs
+    const latest = await DB.query(`
+      select coalesce(max(fetched_at), now()) as ts
+      from articles
+    `)
+    const lastTs = latest.rows[0]?.ts ?? new Date().toISOString()
+    const lastUpdatedDate = new Date(lastTs)
+    return lastUpdatedDate
+  } catch (error) {
+    console.error('Failed to get last updated date:', error)
+    return null
+  }
+}
+
 export default async function LastUpdated() {
-  // Get the last time articles were fetched by cron jobs
-  const latest = await DB.query(`
-    select coalesce(max(fetched_at), now()) as ts
-    from articles
-  `)
-  const lastTs = latest.rows[0]?.ts ?? new Date().toISOString()
-  const lastUpdatedDate = new Date(lastTs)
+  const lastUpdatedDate = await getLastUpdatedDate()
+
+  // If database connection failed, don't render anything
+  if (!lastUpdatedDate) {
+    return null
+  }
 
   return (
     <>
