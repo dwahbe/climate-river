@@ -1,5 +1,4 @@
 // scripts/discover-web.ts
-import './_env'
 import { query, endPool } from '@/lib/db'
 
 // Climate search queries designed to find stories RSS feeds might miss

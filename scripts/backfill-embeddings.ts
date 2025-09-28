@@ -1,5 +1,4 @@
 // scripts/backfill-embeddings.ts
-import './_env'
 import { query, endPool } from '@/lib/db'
 import OpenAI from 'openai'
 

@@ -1,5 +1,4 @@
 // scripts/rescore.ts
-import './_env'
 import { query, endPool } from '@/lib/db'
 
 const HOUR = 3600
