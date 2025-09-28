@@ -2,6 +2,14 @@ import './global.css'
 import Link from 'next/link'
 import { Analytics } from '@vercel/analytics/react'
 import LastUpdated from '@/components/LastUpdated'
+import { Inclusive_Sans } from 'next/font/google'
+
+const inclusive = Inclusive_Sans({
+  subsets: ['latin'],
+  weight: ['400'],
+  variable: '--font-inclusive',
+  display: 'swap',
+})
 
 export const metadata = {
   title: 'Climate River',
@@ -18,17 +26,17 @@ export default async function RootLayout({
   children: React.ReactNode
 }) {
   return (
-    <html lang="en" className="h-full">
+    <html lang="en" className={inclusive.className}>
       <body className="min-h-full bg-zinc-50 text-zinc-900 antialiased">
         <nav className="bg-white border-b border-zinc-100">
-          <div className="mx-auto max-w-5xl px-4 sm:px-6">
+          <div className="mx-auto max-w-3xl px-4 sm:px-6">
             {/* Two columns: left / right — all vertically centered */}
             <div className="flex md:items-center md:justify-between max-md:flex-col gap-2 py-3 sm:py-4">
               {/* Left: brand + navigation */}
               <div className="flex items-baseline-last gap-6">
                 <Link href="/" className="flex items-center gap-2 no-underline">
                   <span className="h-2.5 w-2.5 rounded-full bg-emerald-600 flex-shrink-0" />
-                  <span className="font-semibold text-base sm:text-lg tracking-tight">
+                  <span className="font-semibold text-base sm:text-lg">
                     Climate River
                   </span>
                 </Link>
@@ -41,7 +49,7 @@ export default async function RootLayout({
                 </Link>
               </div>
 
-              {/* Right: Last updated - Desktop only */}
+              {/* Right: Last updated */}
               <LastUpdated />
             </div>
           </div>

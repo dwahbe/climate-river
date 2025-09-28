@@ -318,7 +318,7 @@ export default async function RiverPage(props: {
                   </div>
                 )}
 
-                <h3 className="text-[18px] sm:text-[19px] md:text-[20px] font-semibold leading-snug tracking-tight text-pretty">
+                <h3 className="text-[18px] sm:text-[19px] md:text-[20px] font-semibold leading-snug text-pretty">
                   <a
                     href={leadClickHref}
                     className="no-underline hover:underline text-zinc-950 hover:text-zinc-900 focus-visible:underline rounded transition"
