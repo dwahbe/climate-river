@@ -3,7 +3,7 @@ export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
 import { NextResponse } from 'next/server'
-import { headers, type UnsafeUnwrappedHeaders } from 'next/headers';
+import { headers } from 'next/headers'
 
 /** --- Types for dynamic imports (keeps TS happy without ts-expect-error) --- */
 type IngestMod = {
@@ -14,8 +14,8 @@ type DiscoverMod = {
 }
 
 /** --- Auth helper --- */
-function authorized(req: Request) {
-  const h = (headers() as unknown as UnsafeUnwrappedHeaders)
+async function authorized(req: Request) {
+  const h = await headers()
   const isCron = h.get('x-vercel-cron') === '1'
 
   const url = new URL(req.url)
@@ -45,7 +45,7 @@ function getIntParam(
 
 /** --- Runner --- */
 async function handle(req: Request) {
-  if (!authorized(req)) {
+  if (!(await authorized(req))) {
     return NextResponse.json(
       { ok: false, error: 'unauthorized' },
       { status: 401 }
