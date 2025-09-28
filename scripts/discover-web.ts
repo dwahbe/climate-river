@@ -1,5 +1,7 @@
 // scripts/discover-web.ts
 import { query, endPool } from '@/lib/db'
+import { generateText } from 'ai'
+import { openai } from '@ai-sdk/openai'
 
 // Climate search queries designed to find stories RSS feeds might miss
 const SEARCH_QUERIES = [
@@ -45,28 +47,16 @@ type WebSearchResult = {
 async function callOpenAIEnhancedSearch(
   query: string
 ): Promise<WebSearchResult[]> {
-  const apiKey = process.env.OPENAI_API_KEY?.trim()
-  if (!apiKey) {
-    console.error('OPENAI_API_KEY not found')
-    return []
-  }
-
   try {
     console.log(`OpenAI Enhanced Search: ${query}`)
 
-    // Use Chat Completions with a smart prompt that suggests real news sources
-    const response = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: 'gpt-4o-mini', // More cost-effective for this use case
-        messages: [
-          {
-            role: 'system',
-            content: `You are a climate news expert. Based on your training data and knowledge of major news outlets, suggest specific article searches for Google News RSS that would find recent stories about the given topic. 
+    // Use AI SDK's generateText with a smart prompt that suggests real news sources
+    const { text } = await generateText({
+      model: openai('gpt-4o-mini'),
+      messages: [
+        {
+          role: 'system',
+          content: `You are a climate news expert. Based on your training data and knowledge of major news outlets, suggest specific article searches for Google News RSS that would find recent stories about the given topic. 
 
 Focus on:
 - Specific search terms that would work well in Google News
@@ -82,30 +72,18 @@ Return your response as a JSON array with this format:
     "expectedSources": ["source1", "source2"]
   }
 ]`,
-          },
-          {
-            role: 'user',
-            content: `Suggest 3-5 specific Google News search terms for: "${query}". Focus on recent climate/environmental news that major outlets would cover.`,
-          },
-        ],
-        max_tokens: 1000,
-        temperature: 0.3,
-      }),
+        },
+        {
+          role: 'user',
+          content: `Suggest 3-5 specific Google News search terms for: "${query}". Focus on recent climate/environmental news that major outlets would cover.`,
+        },
+      ],
+      temperature: 0.3,
+      maxOutputTokens: 1000,
     })
 
-    if (!response.ok) {
-      const errorText = await response.text()
-      console.error(
-        `OpenAI API error: ${response.status} ${response.statusText}`
-      )
-      return []
-    }
-
-    const data = await response.json()
-    const content = data.choices?.[0]?.message?.content || ''
-
     // Extract search suggestions and execute them
-    const results = await executeAISearchSuggestions(content)
+    const results = await executeAISearchSuggestions(text)
     return results
   } catch (error) {
     console.error('Error calling OpenAI enhanced search:', error)

@@ -1,5 +1,7 @@
 // scripts/rewrite.ts
 import { query, endPool } from '@/lib/db'
+import { generateText } from 'ai'
+import { openai } from '@ai-sdk/openai'
 
 type Row = {
   id: number
@@ -10,21 +12,10 @@ type Row = {
 
 const MAX_CHARS = 160
 
-// Endpoints
-const BASE = process.env.OPENAI_BASE_URL?.trim() || 'https://api.openai.com/v1'
-const RESPONSES_URL = `${BASE}/responses`
-const CHAT_URL = `${BASE}/chat/completions`
-
 // Config
 function getModel() {
   // Default to 4o-mini (you can override with REWRITE_MODEL in Vercel)
   return (process.env.REWRITE_MODEL || 'gpt-4o-mini').trim()
-}
-
-// Let operator pick "responses" explicitly via env, otherwise prefer Chat for stability.
-function preferResponses() {
-  const mode = (process.env.REWRITE_MODE || '').toLowerCase()
-  return mode === 'responses'
 }
 
 /* ------------------------- Prompt & validation ------------------------- */
@@ -86,93 +77,6 @@ function passesChecks(original: string, draft: string) {
   return true
 }
 
-/* --------------------------- OpenAI integration --------------------------- */
-
-async function sleep(ms: number) {
-  return new Promise((r) => setTimeout(r, ms))
-}
-
-type PostResult = {
-  ok: boolean
-  status: number
-  json: any
-  raw: string
-  headers: Headers
-}
-
-async function post(
-  url: string,
-  body: any,
-  abortMs = 20000
-): Promise<PostResult> {
-  const apiKey = process.env.OPENAI_API_KEY?.trim()
-  if (!apiKey) {
-    return {
-      ok: false,
-      status: 0,
-      json: null,
-      raw: 'no_api_key',
-      headers: new Headers(),
-    }
-  }
-
-  const ctrl = new AbortController()
-  const t = setTimeout(() => ctrl.abort(), abortMs)
-  try {
-    const res = await fetch(url, {
-      method: 'POST',
-      signal: ctrl.signal,
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(body),
-    })
-    const text = await res.text()
-    let json: any = null
-    try {
-      json = JSON.parse(text)
-    } catch {
-      // keep raw text
-    }
-    return {
-      ok: res.ok,
-      status: res.status,
-      json,
-      raw: text,
-      headers: res.headers,
-    }
-  } finally {
-    clearTimeout(t)
-  }
-}
-
-function extractFromResponsesJSON(j: any): string {
-  // Preferred single helper property
-  if (typeof j?.output_text === 'string') return j.output_text
-
-  // Structured content array
-  const arr = j?.output?.[0]?.content
-  if (Array.isArray(arr)) {
-    // look for either output_text or text element
-    const hit = arr.find(
-      (p: any) =>
-        p &&
-        typeof p === 'object' &&
-        (p.type === 'output_text' || p.type === 'text') &&
-        typeof p.text === 'string'
-    )
-    if (hit?.text) return hit.text
-  }
-
-  // Nothing found
-  return ''
-}
-
-function extractFromChatJSON(j: any): string {
-  return j?.choices?.[0]?.message?.content ?? ''
-}
-
 async function generateWithOpenAI(
   title: string,
   dek?: string | null,
@@ -182,108 +86,30 @@ async function generateWithOpenAI(
   const model = getModel()
   const prompt = buildPrompt({ title, dek })
 
-  const tryOnce = async (mode: 'responses' | 'chat'): Promise<PostResult> => {
-    if (mode === 'responses') {
-      // Responses API uses max_output_tokens
-      return post(
-        RESPONSES_URL,
-        { model, input: prompt, temperature: 0.2, max_output_tokens: 120 },
-        abortMs
-      )
+  try {
+    const { text } = await generateText({
+      model: openai(model),
+      prompt,
+      temperature: 0.2,
+      maxOutputTokens: 120,
+      maxRetries: retries,
+      abortSignal: AbortSignal.timeout(abortMs),
+    })
+
+    const sanitized = sanitizeHeadline(text)
+    return {
+      text: sanitized,
+      model,
+      notes: 'success:ai_sdk',
     }
-    // Chat Completions uses max_tokens
-    return post(
-      CHAT_URL,
-      {
-        model,
-        messages: [{ role: 'user', content: prompt }],
-        temperature: 0.2,
-        max_tokens: 120,
-      },
-      abortMs
-    )
-  }
-
-  const mainMode: 'responses' | 'chat' = preferResponses()
-    ? 'responses'
-    : 'chat'
-  const fallbackMode: 'responses' | 'chat' =
-    mainMode === 'responses' ? 'chat' : 'responses'
-
-  for (let attempt = 0; attempt <= retries; attempt++) {
-    try {
-      // First, try the preferred mode
-      let r = await tryOnce(mainMode)
-
-      // On error or empty, try fallback once (only on first attempt)
-      if (!r.ok || (!r.json && !r.raw)) {
-        const msg = r.json?.error?.message || r.raw || ''
-        const retryable =
-          r.status === 429 || (r.status >= 500 && r.status <= 599)
-        const unsupported =
-          r.status === 404 ||
-          msg.toLowerCase().includes('not supported') ||
-          msg.toLowerCase().includes('unknown')
-
-        if ((unsupported || !r.ok) && attempt === 0) {
-          const r2 = await tryOnce(fallbackMode)
-          // use fallback if it succeeded; otherwise keep the original response for error reporting
-          if (r2.ok) r = r2
-          else if (r2.status) r = r2
-        }
-
-        if (!r.ok) {
-          if (retryable && attempt < retries) {
-            await sleep(400 * (attempt + 1) + Math.random() * 250)
-            continue
-          }
-          return {
-            text: null,
-            model,
-            notes: `api_error:${r.status}:${(r.json?.error?.message || r.raw || '').slice(0, 200)}`,
-          }
-        }
-      }
-
-      // Parse success (both APIs handled)
-      let out = ''
-      if (r.json && typeof r.json === 'object') {
-        out =
-          extractFromResponsesJSON(r.json) || extractFromChatJSON(r.json) || ''
-      }
-
-      // If JSON path yielded nothing, accept raw text bodies too
-      if (!out && typeof r.raw === 'string') {
-        out = r.raw.trim()
-        if (out) {
-          // Keep a breadcrumb for diagnostics
-          return {
-            text: sanitizeHeadline(out),
-            model,
-            notes: 'responses-string',
-          }
-        }
-      }
-
-      if (!out) {
-        return { text: null, model, notes: `empty_output:${r.status}` }
-      }
-
-      return { text: sanitizeHeadline(String(out).trim()), model, notes: 'ok' }
-    } catch (e: any) {
-      if (attempt < retries) {
-        await sleep(400 * (attempt + 1) + Math.random() * 250)
-        continue
-      }
-      return {
-        text: null,
-        model,
-        notes: `fetch_error:${e?.message || String(e)}`,
-      }
+  } catch (error: any) {
+    console.error('Error generating text with AI SDK:', error)
+    return {
+      text: null,
+      model,
+      notes: `failed:${error?.message || 'unknown_error'}`,
     }
   }
-
-  return { text: null, model, notes: 'unreachable' }
 }
 
 /* ------------------------------- Runner -------------------------------- */
