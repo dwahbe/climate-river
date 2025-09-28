@@ -3,12 +3,8 @@ import Parser from 'rss-parser'
 import dayjs from 'dayjs'
 import { query, endPool } from '@/lib/db'
 import { categorizeAndStoreArticle } from '@/lib/categorizer'
-import OpenAI from 'openai'
-
-// Initialize OpenAI client for embeddings
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-})
+import { embed } from 'ai'
+import { openai } from '@ai-sdk/openai'
 
 // ---------- Parser configured once (captures <source>, rich content) ----------
 type RssItem = {
@@ -70,12 +66,12 @@ async function generateEmbedding(
     // Truncate to prevent token limit issues (rough estimate: 1 token ≈ 4 chars)
     const truncatedText = text.substring(0, 8000)
 
-    const response = await openai.embeddings.create({
-      model: 'text-embedding-3-small', // More cost-effective than text-embedding-ada-002
-      input: truncatedText,
+    const { embedding } = await embed({
+      model: openai.textEmbeddingModel('text-embedding-3-small'),
+      value: truncatedText,
     })
 
-    return response.data[0].embedding
+    return embedding
   } catch (error) {
     console.error('Error generating embedding:', error)
     return []

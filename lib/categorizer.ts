@@ -8,12 +8,8 @@ import {
   type CategoryScore,
   type CategorySlug,
 } from './tagger'
-import OpenAI from 'openai'
-
-// Initialize OpenAI client for embeddings
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-})
+import { embed } from 'ai'
+import { openai } from '@ai-sdk/openai'
 
 // Cache for category embeddings to avoid repeated API calls
 const categoryEmbeddingsCache = new Map<string, number[]>()
@@ -41,12 +37,11 @@ async function getCategoryEmbedding(
       ...category.keywords.slice(0, 10), // Use top keywords
     ].join(' ')
 
-    const response = await openai.embeddings.create({
-      model: 'text-embedding-3-small',
-      input: representativeText,
+    const { embedding } = await embed({
+      model: openai.textEmbeddingModel('text-embedding-3-small'),
+      value: representativeText,
     })
 
-    const embedding = response.data[0].embedding
     categoryEmbeddingsCache.set(categorySlug, embedding)
     return embedding
   } catch (error) {
@@ -68,12 +63,12 @@ async function generateArticleEmbedding(
   try {
     const text = [title, summary].filter(Boolean).join(' ').slice(0, 1200)
 
-    const response = await openai.embeddings.create({
-      model: 'text-embedding-3-small',
-      input: text,
+    const { embedding } = await embed({
+      model: openai.textEmbeddingModel('text-embedding-3-small'),
+      value: text,
     })
 
-    return response.data[0].embedding
+    return embedding
   } catch (error) {
     console.error('Error generating article embedding:', error)
     return null

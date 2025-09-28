@@ -15,11 +15,12 @@
     "format": "prettier --write ."
   },
   "dependencies": {
+    "@ai-sdk/openai": "^2.0.38",
     "@vercel/analytics": "^1.5.0",
+    "ai": "^5.0.56",
     "clsx": "^2.1.1",
     "dayjs": "^1.11.11",
     "next": "15.5.4",
-    "openai": "^5.12.2",
     "pg": "^8.16.3",
     "react": "19.1.1",
     "react-dom": "19.1.1",
