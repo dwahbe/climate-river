@@ -33,18 +33,16 @@ type ClusterRow = {
 
 function hostFrom(url: string) {
   try {
-    return new URL(url).hostname.replace(/^www\./, '');
+    return new URL(url).hostname.replace(/^www\./, '')
   } catch {
     return ''
   }
 }
 
-export default async function ClusterPage(
-  props: {
-    params: Promise<{ id: string }>
-  }
-) {
-  const params = await props.params;
+export default async function ClusterPage(props: {
+  params: Promise<{ id: string }>
+}) {
+  const params = await props.params
   noStore()
   const cid = Number(params.id)
 
@@ -188,7 +186,7 @@ export default async function ClusterPage(
           {r.lead_source ?? hostFrom(r.lead_url)}
         </div>
 
-        <h1 className="text-2xl font-semibold leading-tight mb-3">
+        <h1 className="text-2xl font-semibold leading-tight mb-3 text-pretty">
           <a
             href={leadClickHref}
             className="text-zinc-900 hover:underline decoration-zinc-300"
@@ -198,7 +196,9 @@ export default async function ClusterPage(
         </h1>
 
         {r.lead_dek && (
-          <p className="text-zinc-600 leading-relaxed mb-3">{r.lead_dek}</p>
+          <p className="text-zinc-600 leading-relaxed mb-3 text-pretty">
+            {r.lead_dek}
+          </p>
         )}
 
         <div className="text-xs text-zinc-500">
@@ -212,26 +212,26 @@ export default async function ClusterPage(
           <h2 className="text-sm font-medium text-zinc-500 mb-4">
             Related articles
           </h2>
-          <div className="space-y-4">
+          <ul className="flex flex-col gap-4 list-none">
             {r.subs.map((s) => {
               const href = `/api/click?aid=${s.article_id}&url=${encodeURIComponent(
                 s.url
               )}`
               return (
-                <div key={s.article_id}>
+                <li key={s.article_id}>
                   <div className="text-xs text-zinc-500 mb-1">
                     {s.source ?? hostFrom(s.url)}
                   </div>
                   <a
                     href={href}
-                    className="text-zinc-900 hover:underline decoration-zinc-300 leading-snug"
+                    className="block text-zinc-900 hover:underline decoration-zinc-300 leading-snug text-pretty"
                   >
                     {s.title}
                   </a>
-                </div>
+                </li>
               )
             })}
-          </div>
+          </ul>
         </section>
       )}
     </div>

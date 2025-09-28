@@ -155,7 +155,7 @@ export default function SourceTooltip({
               <div key={article.article_id} className="space-y-1">
                 <a
                   href={`/api/click?aid=${article.article_id}&url=${encodeURIComponent(article.url)}`}
-                  className="text-sm text-zinc-900 hover:text-zinc-600 leading-relaxed block transition-colors"
+                  className="text-sm text-zinc-900 hover:text-zinc-600 leading-relaxed block transition-colors text-pretty"
                 >
                   {article.title}
                 </a>

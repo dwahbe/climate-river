@@ -320,7 +320,7 @@ export default async function RiverPage(props: {
                   </div>
                 )}
 
-                <h3 className="text-[18px] sm:text-[19px] md:text-[20px] font-semibold leading-snug tracking-tight">
+                <h3 className="text-[18px] sm:text-[19px] md:text-[20px] font-semibold leading-snug tracking-tight text-pretty">
                   <a
                     href={leadClickHref}
                     className="no-underline hover:underline text-zinc-950 hover:text-zinc-900 focus-visible:underline rounded transition"
@@ -330,7 +330,7 @@ export default async function RiverPage(props: {
                 </h3>
 
                 {r.lead_dek && (
-                  <p className="mt-1 text-sm sm:text-[0.95rem] text-zinc-600">
+                  <p className="mt-1 text-sm sm:text-[0.95rem] text-zinc-600 text-pretty">
                     {r.lead_dek}
                   </p>
                 )}

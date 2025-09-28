@@ -5,7 +5,7 @@ export default function AboutPage() {
   return (
     <div className="mx-auto max-w-3xl px-4 sm:px-6 py-8 content">
       <h1 className="text-2xl font-semibold tracking-tight">About</h1>
-      <p className="mt-3 text-zinc-700">
+      <p className="mt-3 text-zinc-700 text-pretty">
         Despite being one of the defining crises of our time, the climate crisis
         is often overshadowed by political maneuvering and the outrage cycle.
         Climate River brings focus to the latest climate news by aggregating
@@ -21,12 +21,12 @@ export default function AboutPage() {
         </a>
         .
       </p>
-      <p className="mt-3 text-zinc-700">
+      <p className="mt-3 text-zinc-700 text-pretty">
         If you have feedback or suggestions, please email me at
         contact@climateriver.org
       </p>
       <hr className="my-4 border-zinc-200" />
-      <p className="mt-3 text-zinc-700">
+      <p className="mt-3 text-zinc-700 text-pretty">
         Built with Next.js, Tailwind, and Postgres.{' '}
         <a
           href="https://github.com/dwahbe/climate-river"
@@ -39,7 +39,7 @@ export default function AboutPage() {
         .
       </p>
 
-      <p className="mt-3 text-zinc-700">
+      <p className="mt-3 text-zinc-700 text-pretty">
         Created by{' '}
         <a
           href="https://dylanwahbe.com"
@@ -72,7 +72,7 @@ export default function AboutPage() {
           Small disclaimer
         </summary>
         <div className="grid gap-6 md:gap-6 p-2 text-zinc-700 text-pretty font-mono-slabs weight-book">
-          <p>
+          <p className="text-pretty">
             Climate River is in beta. I’m improving article clustering & scoring
             and adding more sources—especially independent and local outlets. I
             built Climate River to help people cut through the noise and
