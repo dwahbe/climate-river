@@ -12,12 +12,6 @@ type Row = {
 
 const MAX_CHARS = 160
 
-// Config
-function getModel() {
-  // Default to 4o-mini (you can override with REWRITE_MODEL in Vercel)
-  return (process.env.REWRITE_MODEL || 'gpt-4o-mini').trim()
-}
-
 /* ------------------------- Prompt & validation ------------------------- */
 
 function buildPrompt(input: { title: string; dek?: string | null }) {
@@ -83,8 +77,8 @@ async function generateWithOpenAI(
   abortMs = 20000,
   retries = 2
 ): Promise<{ text: string | null; model: string; notes: string }> {
-  const model = getModel()
   const prompt = buildPrompt({ title, dek })
+  const model = 'gpt-5-nano'
 
   try {
     const { text } = await generateText({
