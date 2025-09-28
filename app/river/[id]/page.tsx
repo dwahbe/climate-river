@@ -1,4 +1,3 @@
-// app/river/[id]/page.tsx
 import Link from 'next/link'
 import * as DB from '@/lib/db'
 import LocalTime from '@/components/LocalTime'

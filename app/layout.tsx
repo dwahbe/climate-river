@@ -1,4 +1,3 @@
-// app/layout.tsx
 import './global.css'
 import Link from 'next/link'
 import * as DB from '@/lib/db'
