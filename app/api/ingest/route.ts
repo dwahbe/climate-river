@@ -3,7 +3,7 @@ export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
 import { NextResponse } from 'next/server'
-import { headers } from 'next/headers'
+import { headers, type UnsafeUnwrappedHeaders } from 'next/headers';
 
 /** --- Types for dynamic imports (keeps TS happy without ts-expect-error) --- */
 type IngestMod = {
@@ -15,7 +15,7 @@ type DiscoverMod = {
 
 /** --- Auth helper --- */
 function authorized(req: Request) {
-  const h = headers()
+  const h = (headers() as unknown as UnsafeUnwrappedHeaders)
   const isCron = h.get('x-vercel-cron') === '1'
 
   const url = new URL(req.url)
@@ -52,7 +52,7 @@ async function handle(req: Request) {
     )
   }
 
-  const h = headers()
+  const h = await headers()
   const isCron = h.get('x-vercel-cron') === '1'
   const url = new URL(req.url)
 

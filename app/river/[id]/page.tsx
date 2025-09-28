@@ -33,17 +33,18 @@ type ClusterRow = {
 
 function hostFrom(url: string) {
   try {
-    return new URL(url).hostname.replace(/^www\./, '')
+    return new URL(url).hostname.replace(/^www\./, '');
   } catch {
     return ''
   }
 }
 
-export default async function ClusterPage({
-  params,
-}: {
-  params: { id: string }
-}) {
+export default async function ClusterPage(
+  props: {
+    params: Promise<{ id: string }>
+  }
+) {
+  const params = await props.params;
   noStore()
   const cid = Number(params.id)
 

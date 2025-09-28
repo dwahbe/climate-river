@@ -3,10 +3,10 @@ export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
 import { NextResponse } from 'next/server'
-import { headers } from 'next/headers'
+import { headers, type UnsafeUnwrappedHeaders } from 'next/headers';
 
 function authorized(req: Request) {
-  const h = headers()
+  const h = (headers() as unknown as UnsafeUnwrappedHeaders)
   const isCron = h.get('x-vercel-cron') === '1'
   const url = new URL(req.url)
   const qToken = url.searchParams.get('token')?.trim()
@@ -31,7 +31,7 @@ async function handle(req: Request) {
       { status: 401 }
     )
   }
-  const h = headers()
+  const h = await headers()
   const url = new URL(req.url)
   const q = url.searchParams.get('limit')
   const isCron = h.get('x-vercel-cron') === '1'

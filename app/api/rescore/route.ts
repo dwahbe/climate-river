@@ -3,11 +3,11 @@ export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 
 import { NextResponse } from 'next/server'
-import { headers } from 'next/headers'
+import { headers, type UnsafeUnwrappedHeaders } from 'next/headers';
 
 /** Same auth policy as /api/ingest */
 function authorized(req: Request) {
-  const h = headers()
+  const h = (headers() as unknown as UnsafeUnwrappedHeaders)
   const url = new URL(req.url)
 
   const isCron =
