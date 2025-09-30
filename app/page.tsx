@@ -68,12 +68,14 @@ export default async function RiverPage(props: {
   const selectedCategory = CATEGORIES.find((c) => c.slug === view)?.slug
   const isCategory = !!selectedCategory
 
-  const topWindowHours = 168 // Expanded to 1 week to ensure enough articles
+  const topWindowHours = 168 // 1 week for Top tab
+  const categoryWindowHours = 336 // 2 weeks for Category tabs (activism news is less frequent)
   const topLimit = 10 // Top tab: 10 articles
   const latestLimit = 20 // Latest tab: 20 articles
   const categoryLimit = 15 // Category tabs: 15 articles
 
   const limit = isCategory ? categoryLimit : isLatest ? latestLimit : topLimit
+  const windowHours = isCategory ? categoryWindowHours : topWindowHours
 
   const { rows } = await DB.query<Row>(
     `
@@ -93,21 +95,28 @@ export default async function RiverPage(props: {
       FROM cluster_scores cs
       JOIN articles a ON a.id = cs.lead_article_id
       LEFT JOIN sources s ON s.id = a.source_id
-      -- Category filtering join
+      -- Category filtering: check if cluster has ANY article with this category
       ${
         isCategory
           ? `
-      JOIN article_categories ac ON ac.article_id = a.id
-      JOIN categories cat ON cat.id = ac.category_id AND cat.slug = $4
+      WHERE EXISTS (
+        SELECT 1
+        FROM article_clusters ac_check
+        JOIN article_categories acat ON acat.article_id = ac_check.article_id
+        JOIN categories cat ON cat.id = acat.category_id
+        WHERE ac_check.cluster_id = cs.cluster_id
+          AND cat.slug = $4
+          AND acat.confidence >= 0.3
+      )
+        AND (
       `
-          : ''
+          : 'WHERE ('
       }
-      WHERE ($1::boolean
+      $1::boolean
          OR a.published_at >= now() - make_interval(hours => $2::int))
         AND a.canonical_url NOT LIKE 'https://news.google.com%'
         AND a.canonical_url NOT LIKE 'https://news.yahoo.com%'
         AND a.canonical_url NOT LIKE 'https://www.msn.com%'
-        ${isCategory ? 'AND ac.confidence >= 0.3' : ''}
     )
     SELECT
       l.cluster_id,
@@ -261,8 +270,8 @@ export default async function RiverPage(props: {
     LIMIT $3::int
   `,
     isCategory
-      ? [isLatest, topWindowHours, limit, selectedCategory]
-      : [isLatest, topWindowHours, limit]
+      ? [isLatest, windowHours, limit, selectedCategory]
+      : [isLatest, windowHours, limit]
   )
 
   return (
