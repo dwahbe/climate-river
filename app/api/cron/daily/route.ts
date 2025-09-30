@@ -1,6 +1,7 @@
 // app/api/cron/daily/route.ts
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
+export const maxDuration = 300 // 5 minutes for comprehensive daily job
 
 import { NextResponse } from 'next/server'
 import { headers } from 'next/headers'

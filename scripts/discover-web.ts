@@ -3,7 +3,16 @@ import { query, endPool } from '@/lib/db'
 import { generateText } from 'ai'
 import { openai } from '@ai-sdk/openai'
 
-// Climate search queries designed to find stories RSS feeds might miss
+// Breaking news queries - optimized for frequent runs to catch urgent stories
+const BREAKING_NEWS_QUERIES = [
+  'climate emergency breaking news today',
+  'extreme weather event happening now',
+  'huge climate protest happening now',
+  'climate policy announcement today',
+  'wildfire flood hurricane current',
+]
+
+// Comprehensive search queries for daily deep discovery
 const SEARCH_QUERIES = [
   // Breaking news & emergencies
   'climate emergency declaration 2025',
@@ -535,21 +544,29 @@ export async function run(
   opts: {
     limitPerQuery?: number
     maxQueries?: number
+    breakingNewsMode?: boolean
     closePool?: boolean
   } = {}
 ) {
   const startTime = Date.now()
   const limitPerQuery = opts.limitPerQuery || 2 // Reduced from 3
   const maxQueries = opts.maxQueries || 3 // Reduced from 6
-  const maxTotalArticles = 20 // Hard limit to prevent cost explosion
+  const breakingNewsMode = opts.breakingNewsMode || false
 
-  console.log(`Starting web discovery with ${maxQueries} queries...`)
+  // Stricter limits for breaking news mode (runs frequently)
+  const maxTotalArticles = breakingNewsMode ? 5 : 20
+
+  // Select appropriate query set
+  const querySet = breakingNewsMode ? BREAKING_NEWS_QUERIES : SEARCH_QUERIES
+  const mode = breakingNewsMode ? 'breaking news' : 'comprehensive'
+
+  console.log(`Starting ${mode} web discovery with ${maxQueries} queries...`)
 
   const sourceId = await getOrCreateWebDiscoverySource()
   let totalInserted = 0
   let totalScanned = 0
 
-  const selectedQueries = SEARCH_QUERIES.slice(0, maxQueries)
+  const selectedQueries = querySet.slice(0, maxQueries)
 
   for (const query of selectedQueries) {
     console.log(`Searching: ${query}`)
