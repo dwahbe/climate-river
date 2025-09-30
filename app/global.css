@@ -101,6 +101,26 @@ summary::-webkit-details-marker {
   .mobile-scroll {
     scroll-behavior: smooth;
   }
+
+  /* Pop bounce animation for category icons */
+  @keyframes popBounce {
+    0% {
+      transform: scale(0);
+      opacity: 0;
+    }
+    50% {
+      transform: scale(1.2);
+      opacity: 1;
+    }
+    100% {
+      transform: scale(1);
+      opacity: 1;
+    }
+  }
+
+  .animate-popBounce {
+    animation: popBounce 0.4s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+  }
 }
 
 /* Optional tiny reset */

@@ -6,6 +6,24 @@ import { usePathname, useSearchParams } from 'next/navigation'
 import { useEffect, useRef } from 'react'
 import { CATEGORIES, type CategorySlug } from '@/lib/tagger'
 import clsx from 'clsx'
+import {
+  Landmark,
+  Megaphone,
+  Briefcase,
+  AlertTriangle,
+  Zap,
+  Microscope,
+} from 'lucide-react'
+
+// Map category slugs to their icons
+const CATEGORY_ICONS = {
+  government: Landmark,
+  justice: Megaphone,
+  business: Briefcase,
+  impacts: AlertTriangle,
+  tech: Zap,
+  research: Microscope,
+} as const
 
 interface RiverControlsProps {
   currentView?: string
@@ -47,7 +65,7 @@ export default function RiverControls({
     <div className="w-full">
       <div className="overflow-x-auto overflow-y-hidden scrollbar-hide mobile-scroll">
         {/* baseline lives on the scrolling content */}
-        <div className="flex min-w-full w-max whitespace-nowrap items-end gap-4 sm:gap-6 border-b border-zinc-200">
+        <div className="flex min-w-full w-max whitespace-nowrap items-end gap-3 sm:gap-4 border-b border-zinc-200">
           <span
             ref={(el) => {
               tabRefs.current['top'] = el
@@ -97,6 +115,7 @@ export default function RiverControls({
                   active={isActive}
                   color={category.color}
                   title={category.description}
+                  slug={category.slug}
                 >
                   {category.name}
                 </CategoryTab>
@@ -143,7 +162,7 @@ function Tab({
       <span
         aria-hidden
         className={clsx(
-          'pointer-events-none absolute left-0 right-0 bottom-0 h-[3px] z-10 transform translate-y-[1px]',
+          'pointer-events-none absolute left-0 right-0 bottom-0 h-[2px] z-10 transform translate-y-[1px]',
           active ? 'bg-zinc-900' : 'bg-transparent'
         )}
       />
@@ -157,13 +176,17 @@ function CategoryTab({
   color,
   title,
   children,
+  slug,
 }: {
   href: string
   active?: boolean
   color: string
   title?: string
   children: React.ReactNode
+  slug: CategorySlug
 }) {
+  const Icon = CATEGORY_ICONS[slug]
+
   return (
     <Link
       href={href}
@@ -182,12 +205,23 @@ function CategoryTab({
         e.currentTarget.style.textDecoration = 'none'
       }}
     >
+      {/* Icon - always rendered but invisible when not active to prevent layout shift */}
+      {Icon && (
+        <Icon
+          className={clsx(
+            'w-3.5 h-3.5 inline-block align-text-bottom mr-1.5',
+            active ? 'animate-popBounce' : 'opacity-0'
+          )}
+          style={{ color: active ? color : 'transparent' }}
+          aria-hidden
+        />
+      )}
       {children}
       {/* Active bar only (no secondary line to conflict with) */}
       <span
         aria-hidden
         className={clsx(
-          'pointer-events-none absolute left-0 right-0 bottom-0 h-[3px] z-10 transform translate-y-[1px]',
+          'pointer-events-none absolute left-0 right-0 bottom-0 h-[2px] z-10 transform translate-y-[1px]',
           active ? 'opacity-100' : 'opacity-0'
         )}
         style={{ backgroundColor: active ? color : 'transparent' }}
