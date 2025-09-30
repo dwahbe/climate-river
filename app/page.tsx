@@ -3,6 +3,7 @@ import LocalTime from '@/components/LocalTime'
 import RiverControls from '@/components/RiverControls'
 import PublisherLink from '@/components/PublisherLink'
 import SourceTooltip from '@/components/SourceTooltip'
+import ReadNowButton from '@/components/ReadNowButton'
 import { CATEGORIES } from '@/lib/tagger'
 import { getRiverData } from '@/lib/services/riverService'
 
@@ -64,28 +65,35 @@ export default async function RiverPage(props: {
                 className="group relative py-5 sm:py-6 border-b border-zinc-200/70"
               >
                 {(r.lead_author || publisher) && (
-                  <div className="mb-1.5 text-[11px] sm:text-xs font-medium tracking-wide text-zinc-500">
-                    {r.lead_author && (
-                      <span className="text-zinc-700">{r.lead_author}</span>
-                    )}
-                    {r.lead_author && publisher && (
-                      <span className="px-1 text-zinc-400">•</span>
-                    )}
-                    <SourceTooltip
-                      sourceName={publisher}
-                      articles={r.all_articles_by_source?.[publisher] || []}
-                    >
-                      {r.lead_homepage ? (
-                        <PublisherLink
-                          href={r.lead_homepage}
-                          className="hover:underline"
-                        >
-                          {publisher}
-                        </PublisherLink>
-                      ) : (
-                        <span>{publisher}</span>
+                  <div className="mb-1.5 flex items-center justify-between gap-4">
+                    <div className="text-[11px] sm:text-xs font-medium tracking-wide text-zinc-500">
+                      {r.lead_author && (
+                        <span className="text-zinc-700">{r.lead_author}</span>
                       )}
-                    </SourceTooltip>
+                      {r.lead_author && publisher && (
+                        <span className="px-1 text-zinc-400">•</span>
+                      )}
+                      <SourceTooltip
+                        sourceName={publisher}
+                        articles={r.all_articles_by_source?.[publisher] || []}
+                      >
+                        {r.lead_homepage ? (
+                          <PublisherLink
+                            href={r.lead_homepage}
+                            className="hover:underline"
+                          >
+                            {publisher}
+                          </PublisherLink>
+                        ) : (
+                          <span>{publisher}</span>
+                        )}
+                      </SourceTooltip>
+                    </div>
+                    <ReadNowButton
+                      articleId={r.lead_article_id}
+                      articleTitle={r.lead_title}
+                      articleUrl={r.lead_url}
+                    />
                   </div>
                 )}
 

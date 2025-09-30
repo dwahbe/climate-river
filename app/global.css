@@ -1,5 +1,6 @@
 /* Tailwind v4 entry */
 @import 'tailwindcss';
+@plugin '@tailwindcss/typography';
 
 /* Details element animation */
 details {
