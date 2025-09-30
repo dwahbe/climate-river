@@ -133,20 +133,11 @@ export default function ReaderView({
         <Drawer.Content
           className={
             isMobile
-              ? 'bg-white flex flex-col rounded-t-[10px] h-[90%] mt-24 fixed bottom-0 left-0 right-0 z-50'
-              : 'right-2 top-2 bottom-2 fixed z-50 outline-none w-[45%] flex'
-          }
-          style={
-            !isMobile
-              ? ({
-                  '--initial-transform': 'calc(100% + 8px)',
-                } as React.CSSProperties)
-              : undefined
+              ? 'bg-white flex flex-col rounded-t-[10px] h-[90%] mt-24 fixed bottom-0 left-0 right-0 z-50 overflow-hidden'
+              : 'bg-white rounded-l-[16px] overflow-hidden bg-clip-padding right-0 top-0 bottom-0 fixed z-50 outline-none w-[45%] flex shadow-2xl'
           }
         >
-          <div
-            className={`bg-white h-full w-full flex flex-col ${isMobile ? '' : 'rounded-l-[16px]'}`}
-          >
+          <div className="h-full w-full flex flex-col relative">
             {/* Mobile drag handle */}
             {isMobile && (
               <div className="mx-auto w-12 h-1.5 flex-shrink-0 rounded-full bg-zinc-300 mt-4 mb-2" />
