@@ -62,10 +62,10 @@ export default function RiverControls({
   }, [isLatest, selectedCategory])
 
   return (
-    <div className="w-full">
-      <div className="overflow-x-auto overflow-y-visible scrollbar-hide mobile-scroll">
+    <div className="w-full relative after:content-[''] after:absolute after:left-0 after:right-0 after:bottom-0 after:h-px after:bg-zinc-200 after:pointer-events-none after:z-0">
+      <div className="overflow-x-auto scrollbar-hide mobile-scroll">
         {/* baseline lives on the scrolling content */}
-        <div className="flex min-w-full w-max whitespace-nowrap items-end gap-3 sm:gap-4 border-b border-zinc-200">
+        <div className="flex min-w-full w-max whitespace-nowrap items-end gap-3 sm:gap-4">
           <span
             ref={(el) => {
               tabRefs.current['top'] = el
@@ -145,9 +145,13 @@ function Tab({
       prefetch={false}
       title={title}
       className={clsx(
-        'relative before:absolute before:content-[""] before:-inset-y-2 before:-inset-x-2 before:rounded pb-1 px-1 text-sm sm:text-sm font-medium',
-        'transition-colors text-zinc-500 hover:text-zinc-800',
-        active && 'text-zinc-900'
+        'relative inline-block px-1 pb-[3px] text-sm font-medium tracking-tight whitespace-nowrap',
+        'text-zinc-500 hover:text-zinc-800',
+        "after:content-[''] after:absolute after:left-0 after:right-0 after:bottom-0",
+        'after:h-[2px] after:rounded after:transition-opacity after:opacity-0 after:z-10',
+        active
+          ? 'text-zinc-900 after:bg-zinc-900 after:opacity-100'
+          : 'after:bg-transparent'
       )}
       style={{ textDecoration: 'none' }}
       onMouseEnter={(e) => {
@@ -158,14 +162,6 @@ function Tab({
       }}
     >
       {children}
-      {/* Active bar only (no secondary line to conflict with) */}
-      <span
-        aria-hidden
-        className={clsx(
-          'pointer-events-none absolute left-0 right-0 bottom-0 h-[2px] z-10 transform translate-y-[1px]',
-          active ? 'bg-zinc-900' : 'bg-transparent'
-        )}
-      />
     </Link>
   )
 }
@@ -193,11 +189,18 @@ function CategoryTab({
       prefetch={false}
       title={title}
       className={clsx(
-        'relative before:absolute before:content-[""] before:-inset-y-2 before:-inset-x-2 before:rounded pb-1 px-1 text-sm sm:text-sm font-medium whitespace-nowrap',
-        'transition-colors text-zinc-500 hover:text-zinc-800',
-        active && 'text-zinc-900'
+        'relative inline-block px-1 pb-[3px] text-sm font-medium tracking-tight whitespace-nowrap',
+        'text-zinc-500 hover:text-zinc-800',
+        "after:content-[''] after:absolute after:left-0 after:right-0 after:bottom-0",
+        'after:h-[2px] after:rounded after:transition-opacity after:bg-[var(--underline-color)] after:z-10',
+        active ? 'text-zinc-900 after:opacity-100' : 'after:opacity-0'
       )}
-      style={{ textDecoration: 'none' }}
+      style={
+        {
+          textDecoration: 'none',
+          '--underline-color': color,
+        } as React.CSSProperties & { '--underline-color': string }
+      }
       onMouseEnter={(e) => {
         e.currentTarget.style.textDecoration = 'none'
       }}
@@ -217,15 +220,6 @@ function CategoryTab({
         />
       )}
       {children}
-      {/* Active bar only (no secondary line to conflict with) */}
-      <span
-        aria-hidden
-        className={clsx(
-          'pointer-events-none absolute left-0 right-0 bottom-0 h-[2px] z-10 transform translate-y-[1px]',
-          active ? 'opacity-100' : 'opacity-0'
-        )}
-        style={{ backgroundColor: active ? color : 'transparent' }}
-      />
     </Link>
   )
 }
