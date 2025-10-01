@@ -140,12 +140,12 @@ export default function ReaderView({
           <div className="h-full w-full flex flex-col relative">
             {/* Mobile drag handle */}
             {isMobile && (
-              <div className="mx-auto w-12 h-1.5 flex-shrink-0 rounded-full bg-zinc-300 mt-4 mb-2" />
+              <div className="mx-auto w-12 h-1.5 flex-shrink-0 rounded-full bg-zinc-300 mt-4 mb-4 relative z-10" />
             )}
 
             {/* Header */}
             <div
-              className={`flex items-start justify-between gap-4 ${isMobile ? 'px-4 pb-4' : 'p-6'} border-b border-zinc-200 bg-zinc-50/50`}
+              className={`flex items-start justify-between gap-4 ${isMobile ? 'px-4 pb-4 -mt-2' : 'p-6'} border-b border-zinc-200 bg-zinc-50/50`}
             >
               <div className="flex-1 min-w-0">
                 <Drawer.Title className="text-lg font-semibold text-zinc-900 mb-2 line-clamp-2">
