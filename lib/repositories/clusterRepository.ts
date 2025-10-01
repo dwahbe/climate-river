@@ -112,6 +112,8 @@ export async function getClusterById(
       subs: [],
       subs_total: 0,
       all_articles_by_source: {},
+      lead_content_status: null, // Not fetched in this query
+      lead_content_word_count: null, // Not fetched in this query
     } as Cluster
   } catch (error) {
     console.error('Repository error fetching cluster by ID:', error)

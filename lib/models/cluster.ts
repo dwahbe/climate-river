@@ -32,6 +32,8 @@ export type Cluster = {
   subs: SubLink[]
   subs_total: number
   all_articles_by_source: Record<string, ClusterArticle[]>
+  lead_content_status: string | null
+  lead_content_word_count: number | null
 }
 
 export type RiverFilters = {

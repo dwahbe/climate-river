@@ -93,6 +93,8 @@ export default async function RiverPage(props: {
                       articleId={r.lead_article_id}
                       articleTitle={r.lead_title}
                       articleUrl={r.lead_url}
+                      contentStatus={r.lead_content_status}
+                      contentWordCount={r.lead_content_word_count}
                     />
                   </div>
                 )}

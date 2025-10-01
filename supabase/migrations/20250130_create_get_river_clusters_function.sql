@@ -24,7 +24,9 @@ BEGIN
       a.author AS lead_author,
       a.published_at,
       COALESCE(a.publisher_name, s.name) AS lead_source,
-      COALESCE(a.publisher_homepage, s.homepage_url) AS lead_homepage
+      COALESCE(a.publisher_homepage, s.homepage_url) AS lead_homepage,
+      a.content_status AS lead_content_status,
+      a.content_word_count AS lead_content_word_count
     FROM cluster_scores cs
     JOIN articles a ON a.id = cs.lead_article_id
     LEFT JOIN sources s ON s.id = a.source_id
@@ -59,6 +61,8 @@ BEGIN
       'published_at', l.published_at,
       'size', l.size,
       'score', l.score,
+      'lead_content_status', l.lead_content_status,
+      'lead_content_word_count', l.lead_content_word_count,
       'sources_count', (
         SELECT COUNT(DISTINCT s.id)
         FROM article_clusters ac
