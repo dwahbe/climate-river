@@ -9,7 +9,7 @@ import clsx from 'clsx'
 import {
   Landmark,
   Megaphone,
-  Briefcase,
+  Factory,
   AlertTriangle,
   Zap,
   Microscope,
@@ -19,7 +19,7 @@ import {
 const CATEGORY_ICONS = {
   government: Landmark,
   justice: Megaphone,
-  business: Briefcase,
+  business: Factory,
   impacts: AlertTriangle,
   tech: Zap,
   research: Microscope,
@@ -212,10 +212,13 @@ function CategoryTab({
       {Icon && (
         <Icon
           className={clsx(
-            'w-3.5 h-3.5 inline-block align-text-bottom mr-1.5',
+            'w-3.5 h-3.5 inline-block mr-1.5',
             active ? 'animate-popBounce' : 'opacity-0'
           )}
-          style={{ color: active ? color : 'transparent' }}
+          style={{
+            color: active ? color : 'transparent',
+            verticalAlign: '-0.125em',
+          }}
           aria-hidden
         />
       )}

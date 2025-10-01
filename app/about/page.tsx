@@ -2,7 +2,7 @@
 import {
   Landmark,
   Megaphone,
-  Briefcase,
+  Factory,
   AlertTriangle,
   Zap,
   Microscope,
@@ -483,7 +483,7 @@ export default function AboutPage() {
           <div className="flex items-center gap-2">
             <Landmark className="w-4 h-4 text-[#3B82F6]" />
             <Megaphone className="w-4 h-4 text-[#EC4899]" />
-            <Briefcase className="w-4 h-4 text-[#06B6D4]" />
+            <Factory className="w-4 h-4 text-[#06B6D4]" />
             <AlertTriangle className="w-4 h-4 text-[#EF4444]" />
             <Zap className="w-4 h-4 text-[#10B981]" />
             <Microscope className="w-4 h-4 text-[#8B5CF6]" />
