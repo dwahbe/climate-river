@@ -49,9 +49,48 @@ export async function run() {
   await query(
     `alter table if exists articles add column if not exists dek text;`
   )
+
+  // Add content columns for Defuddler-fetched article content
+  await query(
+    `alter table if exists articles add column if not exists content_html text;`
+  )
+  await query(
+    `alter table if exists articles add column if not exists content_text text;`
+  )
+  await query(
+    `alter table if exists articles add column if not exists content_word_count int;`
+  )
+  await query(
+    `alter table if exists articles add column if not exists content_status text;`
+  )
+  await query(
+    `alter table if exists articles add column if not exists content_error text;`
+  )
+  await query(
+    `alter table if exists articles add column if not exists content_fetched_at timestamptz;`
+  )
+
+  // Add rewritten title columns
+  await query(
+    `alter table if exists articles add column if not exists rewritten_title text;`
+  )
+  await query(
+    `alter table if exists articles add column if not exists rewritten_at timestamptz;`
+  )
+  await query(
+    `alter table if exists articles add column if not exists rewrite_model text;`
+  )
+  await query(
+    `alter table if exists articles add column if not exists rewrite_notes text;`
+  )
+
   await query(`
     create index if not exists idx_articles_published_at
       on articles(published_at desc);
+  `)
+  await query(`
+    create index if not exists idx_articles_content_status 
+      on articles(content_status) where content_status is not null;
   `)
 
   // --- clusters -------------------------------------------------------------
