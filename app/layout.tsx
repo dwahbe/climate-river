@@ -1,29 +1,30 @@
-import "./global.css";
-import Link from "next/link";
-import { Analytics } from "@vercel/analytics/react";
-import LastUpdated from "@/components/LastUpdated";
-import { Inclusive_Sans } from "next/font/google";
+import './global.css'
+import Link from 'next/link'
+import { Analytics } from '@vercel/analytics/react'
+import LastUpdated from '@/components/LastUpdated'
+import ClimateRiverLogo from '@/components/ClimateRiverLogo'
+import { Inclusive_Sans } from 'next/font/google'
 
 const inclusive = Inclusive_Sans({
-  subsets: ["latin"],
-  weight: ["400"],
-  variable: "--font-inclusive",
-  display: "swap",
-});
+  subsets: ['latin'],
+  weight: ['400'],
+  variable: '--font-inclusive',
+  display: 'swap',
+})
 
 export const metadata = {
-  title: "Climate River",
+  title: 'Climate River',
   icons: {
-    icon: "/icon.svg",
-    shortcut: "/icon.svg",
-    apple: "/apple-icon.png",
+    icon: '/icon.svg',
+    shortcut: '/icon.svg',
+    apple: '/apple-icon.png',
   },
-};
+}
 
 export default async function RootLayout({
   children,
 }: {
-  children: React.ReactNode;
+  children: React.ReactNode
 }) {
   return (
     <html lang="en" className={inclusive.className}>
@@ -35,7 +36,11 @@ export default async function RootLayout({
               {/* Left: brand + navigation */}
               <div className="flex items-baseline-last gap-6">
                 <Link href="/" className="flex items-center gap-2 no-underline">
-                  <span className="h-2.5 w-2.5 rounded-full bg-emerald-600 flex-shrink-0" />
+                  <ClimateRiverLogo
+                    size="lg"
+                    variant="monochrome"
+                    animated={false}
+                  />
                   <span className="font-semibold text-base sm:text-lg">
                     Climate River
                   </span>
@@ -63,5 +68,5 @@ export default async function RootLayout({
         <Analytics />
       </body>
     </html>
-  );
+  )
 }
