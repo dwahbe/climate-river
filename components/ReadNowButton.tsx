@@ -79,9 +79,9 @@ export default function ReadNowButton({
         onClick={handleClick}
         disabled={disabled}
         className="text-[11px] sm:text-xs font-medium text-zinc-600 hover:text-zinc-900 disabled:text-zinc-400 disabled:cursor-not-allowed transition-colors"
-        aria-label="Read article in reader view"
+        aria-label="Preview article in reader view"
       >
-        Read now
+        Preview article
       </button>
 
       <ReaderView
