@@ -6,9 +6,10 @@ import {
   AlertTriangle,
   Zap,
   Microscope,
-} from "lucide-react";
+} from 'lucide-react'
+import ClimateRiverLogo from '@/components/ClimateRiverLogo'
 
-export const dynamic = "force-static";
+export const dynamic = 'force-static'
 
 export default function AboutPage() {
   return (
@@ -481,13 +482,19 @@ export default function AboutPage() {
           </svg> */}
           {/* Category Icons */}
           <div className="flex items-center gap-2">
-            <Landmark className="w-4 h-4 text-[#3B82F6]" />
-            <Megaphone className="w-4 h-4 text-[#EC4899]" />
-            <Factory className="w-4 h-4 text-[#06B6D4]" />
-            <AlertTriangle className="w-4 h-4 text-[#EF4444]" />
-            <Zap className="w-4 h-4 text-[#10B981]" />
-            <Microscope className="w-4 h-4 text-[#8B5CF6]" />
+            <Landmark className="w-5 h-5 text-[#3B82F6]" />
+            <Megaphone className="w-5 h-5 text-[#EC4899]" />
+            <Factory className="w-5 h-5 text-[#06B6D4]" />
+            <AlertTriangle className="w-5 h-5 text-[#EF4444]" />
+            <Zap className="w-5 h-5 text-[#10B981]" />
+            <Microscope className="w-5 h-5 text-[#8B5CF6]" />
           </div>
+
+          {/* Vertical Divider */}
+          <div className="w-px h-6 bg-zinc-300" />
+
+          {/* Climate River Logo */}
+          <ClimateRiverLogo size="lg" variant="colored" animated={true} />
         </div>
       </div>
       <p className="mt-3 text-zinc-700 text-pretty">
@@ -495,7 +502,7 @@ export default function AboutPage() {
         is often overshadowed by political maneuvering and the outrage cycle.
         Climate River brings focus to the latest climate news by aggregating
         articles from leading outlets, organizing by story, and ranking for
-        trust and timeliness. Inspired by{" "}
+        trust and timeliness. Inspired by{' '}
         <a
           href="https://techmeme.com"
           target="_blank"
@@ -512,7 +519,7 @@ export default function AboutPage() {
       </p>
       <hr className="my-4 border-zinc-200" />
       <p className="mt-3 text-zinc-700 text-pretty">
-        Built with Next.js, Tailwind, and Postgres.{" "}
+        Built with Next.js, Tailwind, and Postgres.{' '}
         <a
           href="https://github.com/dwahbe/climate-river"
           target="_blank"
@@ -525,7 +532,7 @@ export default function AboutPage() {
       </p>
 
       <p className="mt-3 text-zinc-700 text-pretty">
-        Created by{" "}
+        Created by{' '}
         <a
           href="https://dylanwahbe.com"
           target="_blank"
@@ -567,5 +574,5 @@ export default function AboutPage() {
         </div>
       </details>
     </div>
-  );
+  )
 }

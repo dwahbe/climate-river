@@ -1,5 +1,69 @@
-<svg version="1.1" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 304 272" fill="none">
-  <path fill="#000000" d="
+'use client'
+
+import React from 'react'
+
+interface ClimateRiverLogoProps {
+  className?: string
+  animated?: boolean
+  size?: 'sm' | 'md' | 'lg' | 'xl'
+  variant?: 'monochrome' | 'colored'
+}
+
+export default function ClimateRiverLogo({
+  className = '',
+  animated = false,
+  size = 'md',
+  variant = 'monochrome',
+}: ClimateRiverLogoProps) {
+  const sizeClasses = {
+    sm: 'w-4 h-4',
+    md: 'w-6 h-6',
+    lg: 'w-8 h-8',
+    xl: 'w-12 h-12',
+  }
+
+  const colorClass = variant === 'monochrome' ? 'text-black' : 'text-current'
+
+  return (
+    <svg
+      version="1.1"
+      id="Layer_1"
+      xmlns="http://www.w3.org/2000/svg"
+      xmlnsXlink="http://www.w3.org/1999/xlink"
+      x="0px"
+      y="0px"
+      width="100%"
+      viewBox="0 0 304 272"
+      enableBackground="new 0 0 304 272"
+      xmlSpace="preserve"
+      className={`${sizeClasses[size]} ${colorClass} ${className}`}
+    >
+      {/* Gradient definitions for colored variant */}
+      {variant === 'colored' && (
+        <defs>
+          <linearGradient
+            id="climate-gradient"
+            x1="0%"
+            y1="0%"
+            x2="100%"
+            y2="100%"
+          >
+            <stop offset="0%" stopColor="#3B82F6" />
+            <stop offset="20%" stopColor="#EC4899" />
+            <stop offset="40%" stopColor="#06B6D4" />
+            <stop offset="60%" stopColor="#EF4444" />
+            <stop offset="80%" stopColor="#10B981" />
+            <stop offset="100%" stopColor="#8B5CF6" />
+          </linearGradient>
+        </defs>
+      )}
+
+      <path
+        fill={variant === 'colored' ? 'url(#climate-gradient)' : 'currentColor'}
+        opacity="1.000000"
+        stroke="none"
+        className={animated ? 'animate-flow' : ''}
+        d="
 M57.575699,185.216431 
 	C39.610359,137.772995 50.559528,82.090637 97.318161,49.757851 
 	C120.056435,34.034718 145.166763,27.145428 172.417480,29.857119 
@@ -53,5 +117,40 @@ M146.844421,238.601273
 	C97.850189,197.179642 91.407829,196.928116 84.433403,197.839096 
 	C86.425728,202.711456 89.515656,205.968765 92.607597,209.151474 
 	C107.396133,224.374069 125.329857,233.931152 146.844421,238.601273 
-z"/>
-</svg>
+z"
+      />
+
+      {/* Animation styles */}
+      {animated && (
+        <style jsx>{`
+          @keyframes flow {
+            0% {
+              transform: scale(1) rotate(0deg);
+              filter: hue-rotate(0deg);
+            }
+            25% {
+              transform: scale(1.05) rotate(1deg);
+              filter: hue-rotate(90deg);
+            }
+            50% {
+              transform: scale(1.1) rotate(0deg);
+              filter: hue-rotate(180deg);
+            }
+            75% {
+              transform: scale(1.05) rotate(-1deg);
+              filter: hue-rotate(270deg);
+            }
+            100% {
+              transform: scale(1) rotate(0deg);
+              filter: hue-rotate(360deg);
+            }
+          }
+
+          .animate-flow {
+            animation: flow 4s ease-in-out infinite;
+          }
+        `}</style>
+      )}
+    </svg>
+  )
+}
