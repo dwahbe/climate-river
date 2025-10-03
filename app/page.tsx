@@ -1,41 +1,41 @@
-import Link from 'next/link'
-import LocalTime from '@/components/LocalTime'
-import RiverControls from '@/components/RiverControls'
-import PublisherLink from '@/components/PublisherLink'
-import SourceTooltip from '@/components/SourceTooltip'
-import ReadNowButton from '@/components/ReadNowButton'
-import { CATEGORIES } from '@/lib/tagger'
-import { getRiverData } from '@/lib/services/riverService'
+import Link from "next/link";
+import LocalTime from "@/components/LocalTime";
+import RiverControls from "@/components/RiverControls";
+import PublisherLink from "@/components/PublisherLink";
+import SourceTooltip from "@/components/SourceTooltip";
+import ReadNowButton from "@/components/ReadNowButton";
+import { CATEGORIES } from "@/lib/tagger";
+import { getRiverData } from "@/lib/services/riverService";
 
 // Cache for 5 minutes (300 seconds)
-export const revalidate = 300
-export const runtime = 'nodejs'
+export const revalidate = 300;
+export const runtime = "nodejs";
 
 function hostFrom(url: string) {
   try {
-    return new URL(url).hostname.replace(/^www\./, '')
+    return new URL(url).hostname.replace(/^www\./, "");
   } catch {
-    return ''
+    return "";
   }
 }
 
 export default async function RiverPage(props: {
-  searchParams?: Promise<Record<string, string | string[] | undefined>>
+  searchParams?: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  const searchParams = await props.searchParams
+  const searchParams = await props.searchParams;
 
   const view = Array.isArray(searchParams?.view)
     ? searchParams?.view[0]
-    : searchParams?.view
+    : searchParams?.view;
 
   // Check if it's a category view
-  const selectedCategory = CATEGORIES.find((c) => c.slug === view)?.slug
+  const selectedCategory = CATEGORIES.find((c) => c.slug === view)?.slug;
 
   // Fetch data using the service layer
   const clusters = await getRiverData({
-    view: view || 'top',
+    view: view || "top",
     category: selectedCategory,
-  })
+  });
 
   return (
     <>
@@ -51,13 +51,13 @@ export default async function RiverPage(props: {
       <div className="mx-auto w-full max-w-3xl px-4 sm:px-6">
         <section>
           {clusters.map((r) => {
-            const secondaries = r.subs ?? []
-            const moreCount = Math.max(0, r.subs_total - secondaries.length)
-            const isCluster = r.size > 1
-            const publisher = r.lead_source || hostFrom(r.lead_url)
+            const secondaries = r.subs ?? [];
+            const moreCount = Math.max(0, r.subs_total - secondaries.length);
+            const isCluster = r.size > 1;
+            const publisher = r.lead_source || hostFrom(r.lead_url);
             const leadClickHref = `/api/click?aid=${r.lead_article_id}&url=${encodeURIComponent(
-              r.lead_url
-            )}`
+              r.lead_url,
+            )}`;
 
             return (
               <article
@@ -132,9 +132,9 @@ export default async function RiverPage(props: {
                     <span> </span>
                     {secondaries.map((s, i) => {
                       const href = `/api/click?aid=${s.article_id}&url=${encodeURIComponent(
-                        s.url
-                      )}`
-                      const sourceName = s.source ?? hostFrom(s.url)
+                        s.url,
+                      )}`;
+                      const sourceName = s.source ?? hostFrom(s.url);
                       return (
                         <span key={s.article_id}>
                           <SourceTooltip
@@ -154,15 +154,15 @@ export default async function RiverPage(props: {
                             <span className="text-zinc-400">, </span>
                           )}
                         </span>
-                      )
+                      );
                     })}
                   </div>
                 )}
               </article>
-            )
+            );
           })}
         </section>
       </div>
     </>
-  )
+  );
 }

@@ -1,50 +1,50 @@
 // app/api/reader/[articleId]/route.ts
-import { NextResponse } from 'next/server'
-import { getArticleContent } from '@/lib/services/readerService'
+import { NextResponse } from "next/server";
+import { getArticleContent } from "@/lib/services/readerService";
 
-export const runtime = 'nodejs'
-export const dynamic = 'force-dynamic'
-export const maxDuration = 10 // Vercel timeout (10s on hobby, can increase on Pro)
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+export const maxDuration = 10; // Vercel timeout (10s on hobby, can increase on Pro)
 
 type Params = {
   params: Promise<{
-    articleId: string
-  }>
-}
+    articleId: string;
+  }>;
+};
 
 export async function GET(request: Request, { params }: Params) {
   try {
-    const { articleId } = await params
-    const id = parseInt(articleId, 10)
+    const { articleId } = await params;
+    const id = parseInt(articleId, 10);
 
     if (isNaN(id) || id <= 0) {
       return NextResponse.json(
-        { success: false, error: 'Invalid article ID' },
-        { status: 400 }
-      )
+        { success: false, error: "Invalid article ID" },
+        { status: 400 },
+      );
     }
 
-    const startTime = Date.now()
-    const result = await getArticleContent(id)
-    const elapsed = Date.now() - startTime
+    const startTime = Date.now();
+    const result = await getArticleContent(id);
+    const elapsed = Date.now() - startTime;
 
     // Log for monitoring
     console.log(
-      `Reader API: article ${id} - ${result.success ? 'SUCCESS' : result.status} in ${elapsed}ms (cache: ${result.fromCache})`
-    )
+      `Reader API: article ${id} - ${result.success ? "SUCCESS" : result.status} in ${elapsed}ms (cache: ${result.fromCache})`,
+    );
 
     if (!result.success) {
       // Return specific error responses
       const statusCode =
-        result.status === 'not_found'
+        result.status === "not_found"
           ? 404
-          : result.status === 'paywall'
+          : result.status === "paywall"
             ? 402 // 402 Payment Required
-            : result.status === 'blocked'
+            : result.status === "blocked"
               ? 403
-              : result.status === 'timeout'
+              : result.status === "timeout"
                 ? 408 // Request Timeout
-                : 500
+                : 500;
 
       return NextResponse.json(
         {
@@ -53,8 +53,8 @@ export async function GET(request: Request, { params }: Params) {
           error: result.error,
           fromCache: result.fromCache,
         },
-        { status: statusCode }
-      )
+        { status: statusCode },
+      );
     }
 
     // Success - return content
@@ -72,16 +72,16 @@ export async function GET(request: Request, { params }: Params) {
       timing: {
         elapsed,
       },
-    })
+    });
   } catch (error: any) {
-    console.error('Reader API error:', error)
+    console.error("Reader API error:", error);
     return NextResponse.json(
       {
         success: false,
-        status: 'error',
-        error: error.message || 'Internal server error',
+        status: "error",
+        error: error.message || "Internal server error",
       },
-      { status: 500 }
-    )
+      { status: 500 },
+    );
   }
 }

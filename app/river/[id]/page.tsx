@@ -1,48 +1,48 @@
-import Link from 'next/link'
-import * as DB from '@/lib/db'
-import LocalTime from '@/components/LocalTime'
+import Link from "next/link";
+import * as DB from "@/lib/db";
+import LocalTime from "@/components/LocalTime";
 
 // Cache for 5 minutes (300 seconds)
-export const revalidate = 300
-export const runtime = 'nodejs'
+export const revalidate = 300;
+export const runtime = "nodejs";
 
 type Sub = {
-  article_id: number
-  title: string
-  url: string
-  source: string | null
-  author: string | null
-  published_at: string
-}
+  article_id: number;
+  title: string;
+  url: string;
+  source: string | null;
+  author: string | null;
+  published_at: string;
+};
 
 type ClusterRow = {
-  cluster_id: number
-  size: number
-  sources_count: number
-  lead_article_id: number
-  lead_title: string
-  lead_url: string
-  lead_dek: string | null
-  lead_source: string | null
-  lead_homepage: string | null
-  lead_author: string | null
-  published_at: string
-  subs: Sub[]
-}
+  cluster_id: number;
+  size: number;
+  sources_count: number;
+  lead_article_id: number;
+  lead_title: string;
+  lead_url: string;
+  lead_dek: string | null;
+  lead_source: string | null;
+  lead_homepage: string | null;
+  lead_author: string | null;
+  published_at: string;
+  subs: Sub[];
+};
 
 function hostFrom(url: string) {
   try {
-    return new URL(url).hostname.replace(/^www\./, '')
+    return new URL(url).hostname.replace(/^www\./, "");
   } catch {
-    return ''
+    return "";
   }
 }
 
 export default async function ClusterPage(props: {
-  params: Promise<{ id: string }>
+  params: Promise<{ id: string }>;
 }) {
-  const params = await props.params
-  const cid = Number(params.id)
+  const params = await props.params;
+  const cid = Number(params.id);
 
   const { rows } = await DB.query<ClusterRow>(
     `
@@ -147,10 +147,10 @@ export default async function ClusterPage(props: {
       ) AS subs
     FROM lead l
     `,
-    [cid]
-  )
+    [cid],
+  );
 
-  const r = rows[0]
+  const r = rows[0];
   if (!r) {
     return (
       <div className="mx-auto max-w-3xl px-4 sm:px-6 py-10 text-zinc-600">
@@ -159,12 +159,12 @@ export default async function ClusterPage(props: {
         </Link>
         <p className="mt-6">Cluster not found.</p>
       </div>
-    )
+    );
   }
 
   const leadClickHref = `/api/click?aid=${r.lead_article_id}&url=${encodeURIComponent(
-    r.lead_url
-  )}`
+    r.lead_url,
+  )}`;
 
   return (
     <div className="mx-auto max-w-3xl px-4 sm:px-6 py-5">
@@ -174,7 +174,7 @@ export default async function ClusterPage(props: {
           ← Back to river
         </Link>
         <span>
-          {r.size} {r.size === 1 ? 'article' : 'articles'}
+          {r.size} {r.size === 1 ? "article" : "articles"}
         </span>
       </div>
 
@@ -213,8 +213,8 @@ export default async function ClusterPage(props: {
           <ul className="flex flex-col gap-4 list-none">
             {r.subs.map((s) => {
               const href = `/api/click?aid=${s.article_id}&url=${encodeURIComponent(
-                s.url
-              )}`
+                s.url,
+              )}`;
               return (
                 <li key={s.article_id}>
                   <div className="text-xs text-zinc-500 mb-1">
@@ -227,11 +227,11 @@ export default async function ClusterPage(props: {
                     {s.title}
                   </a>
                 </li>
-              )
+              );
             })}
           </ul>
         </section>
       )}
     </div>
-  )
+  );
 }

@@ -6,9 +6,9 @@ import {
   AlertTriangle,
   Zap,
   Microscope,
-} from 'lucide-react'
+} from "lucide-react";
 
-export const dynamic = 'force-static'
+export const dynamic = "force-static";
 
 export default function AboutPage() {
   return (
@@ -495,7 +495,7 @@ export default function AboutPage() {
         is often overshadowed by political maneuvering and the outrage cycle.
         Climate River brings focus to the latest climate news by aggregating
         articles from leading outlets, organizing by story, and ranking for
-        trust and timeliness. Inspired by{' '}
+        trust and timeliness. Inspired by{" "}
         <a
           href="https://techmeme.com"
           target="_blank"
@@ -512,7 +512,7 @@ export default function AboutPage() {
       </p>
       <hr className="my-4 border-zinc-200" />
       <p className="mt-3 text-zinc-700 text-pretty">
-        Built with Next.js, Tailwind, and Postgres.{' '}
+        Built with Next.js, Tailwind, and Postgres.{" "}
         <a
           href="https://github.com/dwahbe/climate-river"
           target="_blank"
@@ -525,7 +525,7 @@ export default function AboutPage() {
       </p>
 
       <p className="mt-3 text-zinc-700 text-pretty">
-        Created by{' '}
+        Created by{" "}
         <a
           href="https://dylanwahbe.com"
           target="_blank"
@@ -567,5 +567,5 @@ export default function AboutPage() {
         </div>
       </details>
     </div>
-  )
+  );
 }
