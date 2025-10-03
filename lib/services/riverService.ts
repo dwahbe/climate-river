@@ -1,6 +1,11 @@
 // lib/services/riverService.ts
 import { getClustersForRiver } from '@/lib/repositories/clusterRepository'
-import type { Cluster, RiverFilters } from '@/lib/models/cluster'
+import type {
+  Cluster,
+  ClusterArticle,
+  RiverFilters,
+  SubLink,
+} from '@/lib/models/cluster'
 
 /**
  * Get river data for the homepage
@@ -14,11 +19,137 @@ export async function getRiverData(filters: RiverFilters): Promise<Cluster[]> {
     // Fetch clusters from repository
     const clusters = await getClustersForRiver(filters)
 
-    // Apply any business logic transformations here if needed
-    return clusters
+    return normalizeRiverClusters(clusters)
   } catch (error) {
     console.error('Service error in getRiverData:', error)
     throw error
+  }
+}
+
+/**
+ * Normalize raw cluster data for the river view by consolidating secondary
+ * sources and annotating them with article counts.
+ */
+export function normalizeRiverClusters(clusters: Cluster[]): Cluster[] {
+  return clusters.map((cluster) => normalizeCluster(cluster))
+}
+
+function normalizeCluster(cluster: Cluster): Cluster {
+  const subs = cluster.subs ?? []
+
+  if (subs.length === 0) {
+    return {
+      ...cluster,
+      subs: [],
+      subs_total: 0,
+    }
+  }
+
+  const articleIndex = buildArticleIndex(cluster.all_articles_by_source)
+  const deduped = new Map<
+    string,
+    {
+      sub: SubLink
+      latestPublishedAt?: string
+      articleCountFromMap?: number
+    }
+  >()
+  const occurrenceCounts = new Map<string, number>()
+
+  for (const sub of subs) {
+    const articleEntry = findArticleEntry(articleIndex, sub)
+    const fallbackHost = hostFrom(sub.url)
+    const sourceCandidate =
+      articleEntry?.key || sub.source || fallbackHost || ''
+    const resolvedSource = sourceCandidate.trim() || null
+    const normalizedKey = normalizeSourceName(sourceCandidate)
+    const articleCountFromMap = articleEntry?.articles.length
+
+    if (normalizedKey) {
+      occurrenceCounts.set(
+        normalizedKey,
+        (occurrenceCounts.get(normalizedKey) ?? 0) + 1
+      )
+    }
+
+    const enrichedSub: SubLink = {
+      ...sub,
+      source: resolvedSource,
+    }
+
+    const existing = normalizedKey ? deduped.get(normalizedKey) : undefined
+
+    if (!existing && normalizedKey) {
+      deduped.set(normalizedKey, {
+        sub: enrichedSub,
+        latestPublishedAt: sub.published_at,
+        articleCountFromMap,
+      })
+      continue
+    }
+
+    if (existing && normalizedKey) {
+      if (isLater(sub.published_at, existing.latestPublishedAt)) {
+        existing.sub = enrichedSub
+        existing.latestPublishedAt = sub.published_at
+      }
+
+      if (!existing.articleCountFromMap && articleCountFromMap) {
+        existing.articleCountFromMap = articleCountFromMap
+      }
+
+      continue
+    }
+
+    // Fallback for entries without a normalized key; keep them as-is.
+    const fallbackKey = `${sub.article_id}`
+    const fallbackExisting = deduped.get(fallbackKey)
+
+    if (!fallbackExisting) {
+      deduped.set(fallbackKey, {
+        sub: enrichedSub,
+        latestPublishedAt: sub.published_at,
+        articleCountFromMap,
+      })
+      occurrenceCounts.set(
+        fallbackKey,
+        (occurrenceCounts.get(fallbackKey) ?? 0) + 1
+      )
+    } else {
+      if (isLater(sub.published_at, fallbackExisting.latestPublishedAt)) {
+        fallbackExisting.sub = enrichedSub
+        fallbackExisting.latestPublishedAt = sub.published_at
+      }
+
+      if (!fallbackExisting.articleCountFromMap && articleCountFromMap) {
+        fallbackExisting.articleCountFromMap = articleCountFromMap
+      }
+
+      occurrenceCounts.set(
+        fallbackKey,
+        (occurrenceCounts.get(fallbackKey) ?? 0) + 1
+      )
+    }
+  }
+
+  const dedupedSubs = Array.from(deduped.entries()).map(
+    ([normalizedKey, entry]) => {
+      const count =
+        entry.articleCountFromMap ??
+        occurrenceCounts.get(normalizedKey) ??
+        1
+
+      return {
+        ...entry.sub,
+        article_count: count,
+      }
+    }
+  )
+
+  return {
+    ...cluster,
+    subs: dedupedSubs,
+    subs_total: dedupedSubs.length,
   }
 }
 
@@ -58,4 +189,127 @@ function validateFilters(filters: RiverFilters): void {
       throw new Error('Limit must be between 1 and 100')
     }
   }
+}
+
+type ArticleIndexEntry = {
+  key: string
+  normalizedKey: string
+  articles: ClusterArticle[]
+}
+
+function buildArticleIndex(
+  allArticles?: Record<string, ClusterArticle[]> | null
+): Map<string, ArticleIndexEntry> {
+  const index = new Map<string, ArticleIndexEntry>()
+
+  if (!allArticles) {
+    return index
+  }
+
+  for (const [key, articles] of Object.entries(allArticles)) {
+    const normalizedKey = normalizeSourceName(key)
+
+    if (!normalizedKey) {
+      continue
+    }
+
+    index.set(normalizedKey, {
+      key,
+      normalizedKey,
+      articles,
+    })
+  }
+
+  return index
+}
+
+function findArticleEntry(
+  index: Map<string, ArticleIndexEntry>,
+  sub: SubLink
+): ArticleIndexEntry | undefined {
+  const candidates: string[] = []
+
+  if (sub.source) {
+    candidates.push(sub.source)
+  }
+
+  const host = hostFrom(sub.url)
+
+  if (host) {
+    candidates.push(host)
+  }
+
+  for (const candidate of candidates) {
+    const normalizedCandidate = normalizeSourceName(candidate)
+
+    if (!normalizedCandidate) {
+      continue
+    }
+
+    const exact = index.get(normalizedCandidate)
+
+    if (exact) {
+      return exact
+    }
+  }
+
+  for (const candidate of candidates) {
+    const normalizedCandidate = normalizeSourceName(candidate)
+
+    if (!normalizedCandidate) {
+      continue
+    }
+
+    for (const entry of index.values()) {
+      if (
+        entry.normalizedKey.includes(normalizedCandidate) ||
+        normalizedCandidate.includes(entry.normalizedKey)
+      ) {
+        return entry
+      }
+    }
+  }
+
+  return undefined
+}
+
+function hostFrom(url: string): string {
+  if (!url) {
+    return ''
+  }
+
+  try {
+    return new URL(url).hostname.replace(/^www\./, '')
+  } catch {
+    return ''
+  }
+}
+
+function normalizeSourceName(value?: string | null): string {
+  return value
+    ? value
+        .trim()
+        .toLowerCase()
+        .replace(/^https?:\/\//, '')
+        .replace(/^www\./, '')
+    : ''
+}
+
+function isLater(candidate: string, current?: string): boolean {
+  if (!current) {
+    return true
+  }
+
+  const candidateTime = Date.parse(candidate)
+  const currentTime = Date.parse(current)
+
+  if (Number.isNaN(candidateTime)) {
+    return false
+  }
+
+  if (Number.isNaN(currentTime)) {
+    return true
+  }
+
+  return candidateTime > currentTime
 }
