@@ -549,12 +549,12 @@ export async function run(
   } = {}
 ) {
   const startTime = Date.now()
-  const limitPerQuery = opts.limitPerQuery || 2 // Reduced from 3
-  const maxQueries = opts.maxQueries || 3 // Reduced from 6
+  const limitPerQuery = opts.limitPerQuery || 3 // Increased defaults
+  const maxQueries = opts.maxQueries || 5 // Increased defaults
   const breakingNewsMode = opts.breakingNewsMode || false
 
-  // Stricter limits for breaking news mode (runs frequently)
-  const maxTotalArticles = breakingNewsMode ? 5 : 20
+  // Updated limits for better coverage
+  const maxTotalArticles = breakingNewsMode ? 10 : 40
 
   // Select appropriate query set
   const querySet = breakingNewsMode ? BREAKING_NEWS_QUERIES : SEARCH_QUERIES

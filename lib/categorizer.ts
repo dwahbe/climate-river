@@ -126,13 +126,14 @@ export async function categorizeArticleHybrid(
 
     if (categoryEmbedding) {
       const similarity = cosineSimilarity(articleEmbedding, categoryEmbedding)
-      // Scale similarity to confidence (adjust threshold as needed)
-      semanticConfidence = Math.max(0, (similarity - 0.5) * 2) // Maps 0.5-1.0 to 0-1.0
+      // Scale similarity to confidence with more gradual scaling
+      // Maps 0.3-1.0 similarity to 0.0-1.0 confidence
+      semanticConfidence = Math.max(0, Math.min(1.0, (similarity - 0.3) * 1.43))
     }
 
     // Combine rule-based and semantic scores
-    // Weight: 60% rule-based, 40% semantic (rule-based is more reliable for now)
-    const combinedConfidence = ruleConfidence * 0.6 + semanticConfidence * 0.4
+    // Weight: 40% rule-based, 60% semantic (semantic embeddings are more accurate)
+    const combinedConfidence = ruleConfidence * 0.4 + semanticConfidence * 0.6
 
     const reasons = [
       ...(ruleScore?.reasons || []),
@@ -158,7 +159,7 @@ export async function categorizeArticleHybrid(
 export async function storeArticleCategories(
   articleId: number,
   scores: CategoryScore[],
-  minConfidence: number = 0.2
+  minConfidence: number = 0.35
 ): Promise<void> {
   try {
     // Filter scores by minimum confidence
