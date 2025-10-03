@@ -7,6 +7,7 @@ export type SubLink = {
   source: string | null
   author: string | null
   published_at: string
+  article_count?: number
 }
 
 export type ClusterArticle = {
