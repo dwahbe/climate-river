@@ -2,8 +2,8 @@
 
 import React from 'react'
 
-interface ClimateRiverLogoProps {
-  className?: string
+interface ClimateRiverLogoProps
+  extends React.SVGAttributes<SVGSVGElement> {
   animated?: boolean
   size?: 'sm' | 'md' | 'lg' | 'xl'
   variant?: 'monochrome' | 'colored'
@@ -14,6 +14,7 @@ export default function ClimateRiverLogo({
   animated = false,
   size = 'md',
   variant = 'monochrome',
+  ...svgProps
 }: ClimateRiverLogoProps) {
   const sizeClasses = {
     sm: 'w-4 h-4',
@@ -23,9 +24,12 @@ export default function ClimateRiverLogo({
   }
 
   const colorClass = variant === 'monochrome' ? 'text-black' : 'text-current'
+  const uniqueGradientId = React.useId().replace(/:/g, '')
+  const gradientId = `climate-gradient-${uniqueGradientId}`
 
   return (
     <svg
+      {...svgProps}
       version="1.1"
       id="Layer_1"
       xmlns="http://www.w3.org/2000/svg"
@@ -42,7 +46,7 @@ export default function ClimateRiverLogo({
       {variant === 'colored' && (
         <defs>
           <linearGradient
-            id="climate-gradient"
+            id={gradientId}
             x1="0%"
             y1="0%"
             x2="100%"
@@ -59,7 +63,7 @@ export default function ClimateRiverLogo({
       )}
 
       <path
-        fill={variant === 'colored' ? 'url(#climate-gradient)' : 'currentColor'}
+        fill={variant === 'colored' ? `url(#${gradientId})` : 'currentColor'}
         opacity="1.000000"
         stroke="none"
         className={animated ? 'animate-flow' : ''}

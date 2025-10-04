@@ -35,12 +35,24 @@ export default async function RootLayout({
             <div className="flex md:items-center md:justify-between max-md:flex-col gap-2 py-3 sm:py-4">
               {/* Left: brand + navigation */}
               <div className="flex items-baseline-last gap-6">
-                <Link href="/" className="flex items-center gap-2 no-underline">
-                  <ClimateRiverLogo
-                    size="lg"
-                    variant="monochrome"
-                    animated={false}
-                  />
+                <Link
+                  href="/"
+                  className="group flex items-center gap-2 no-underline"
+                >
+                  <span className="relative inline-flex" aria-hidden="true">
+                    <ClimateRiverLogo
+                      size="lg"
+                      variant="monochrome"
+                      animated={false}
+                      className="transition-opacity duration-200 ease-out group-hover:opacity-0 group-focus-visible:opacity-0"
+                    />
+                    <ClimateRiverLogo
+                      size="lg"
+                      variant="colored"
+                      animated={false}
+                      className="absolute inset-0 opacity-0 transition-opacity duration-200 ease-out group-hover:opacity-100 group-focus-visible:opacity-100"
+                    />
+                  </span>
                   <span className="font-semibold text-base sm:text-lg">
                     Climate River
                   </span>
