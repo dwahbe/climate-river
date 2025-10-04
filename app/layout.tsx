@@ -2,7 +2,7 @@ import './global.css'
 import Link from 'next/link'
 import { Analytics } from '@vercel/analytics/react'
 import LastUpdated from '@/components/LastUpdated'
-import ClimateRiverLogo from '@/components/ClimateRiverLogo'
+import HeaderLogoHover from '@/components/HeaderLogoHover'
 import { Inclusive_Sans } from 'next/font/google'
 
 const inclusive = Inclusive_Sans({
@@ -39,20 +39,7 @@ export default async function RootLayout({
                   href="/"
                   className="group flex items-center gap-2 no-underline"
                 >
-                  <span className="relative inline-flex" aria-hidden="true">
-                    <ClimateRiverLogo
-                      size="lg"
-                      variant="monochrome"
-                      animated={false}
-                      className="transition-opacity duration-200 ease-out group-hover:opacity-0 group-focus-visible:opacity-0"
-                    />
-                    <ClimateRiverLogo
-                      size="lg"
-                      variant="colored"
-                      animated={false}
-                      className="absolute inset-0 opacity-0 transition-opacity duration-200 ease-out group-hover:opacity-100 group-focus-visible:opacity-100"
-                    />
-                  </span>
+                  <HeaderLogoHover />
                   <span className="font-semibold text-base sm:text-lg">
                     Climate River
                   </span>
