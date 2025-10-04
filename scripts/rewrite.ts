@@ -3,6 +3,12 @@ import { query, endPool } from '@/lib/db'
 import { generateText } from 'ai'
 import { openai } from '@ai-sdk/openai'
 
+type ClusterContextItem = {
+  article_id: number
+  title: string
+  source: string | null
+}
+
 type Row = {
   id: number
   title: string
@@ -11,6 +17,8 @@ type Row = {
   content_text: string | null
   content_html: string | null
   content_status: string | null
+  cluster_id: number | null
+  cluster_context: ClusterContextItem[] | null
 }
 
 const MAX_CHARS = 160
@@ -90,6 +98,7 @@ function buildPrompt(input: {
   title: string
   dek?: string | null
   contentSnippet?: string | null
+  clusterContext?: ClusterContextItem[]
 }) {
   const lines = [
     'Rewrite this climate news headline in the style of Techmeme - dense, factual, scannable, with all key details.',
@@ -145,6 +154,15 @@ function buildPrompt(input: {
     lines.push(`Article excerpt: ${input.contentSnippet}`)
   }
 
+  if (input.clusterContext && input.clusterContext.length > 0) {
+    lines.push('')
+    lines.push('OTHER COVERAGE (cluster context):')
+    for (const related of input.clusterContext.slice(0, 3)) {
+      const sourceLabel = related.source ? `${related.source}:` : 'Related article:'
+      lines.push(`- ${sourceLabel} ${related.title}`)
+    }
+  }
+
   lines.push('')
   lines.push(
     'OUTPUT: Rewritten headline only (no quotes, no explanation, no "Here is...")'
@@ -163,24 +181,72 @@ function sanitizeHeadline(s: string) {
   return t
 }
 
+const QUANTIFIER_WORDS = [
+  'one',
+  'two',
+  'three',
+  'four',
+  'five',
+  'six',
+  'seven',
+  'eight',
+  'nine',
+  'ten',
+  'eleven',
+  'twelve',
+  'thirteen',
+  'fourteen',
+  'fifteen',
+  'sixteen',
+  'seventeen',
+  'eighteen',
+  'nineteen',
+  'twenty',
+  'thirty',
+  'forty',
+  'fifty',
+  'sixty',
+  'seventy',
+  'eighty',
+  'ninety',
+  'hundred',
+  'thousand',
+  'million',
+  'billion',
+  'trillion',
+  'percent',
+  'percentage',
+]
+
+const QUANTIFIER_REGEXES = QUANTIFIER_WORDS.map(
+  (word) => new RegExp(`\\b${word}\\b`, 'i')
+)
+
+function containsQuantifier(headline: string) {
+  if (/\d/.test(headline)) return true
+  return QUANTIFIER_REGEXES.some((regex) => regex.test(headline))
+}
+
 /* ------------------------- Enhanced Validation ------------------------- */
 
 function passesChecks(original: string, draft: string, hasContent: boolean) {
   if (!draft) return false
   const t = sanitizeHeadline(draft)
 
-  // Techmeme-style density: 80-170 characters
-  if (t.length < 80 || t.length > 170) {
+  // Techmeme-style density: keep fairly dense but allow slightly shorter rewrites
+  const minLength = hasContent ? 70 : 60;
+  if (t.length < minLength || t.length > 170) {
     console.warn(
       `⚠️  Length check failed (${t.length} chars): "${t.slice(0, 50)}..."`
     )
     return false
   }
 
-  // Must contain at least one number (critical for Techmeme density)
-  const hasNumber = /\d/.test(t)
-  if (!hasNumber) {
-    console.warn(`⚠️  No numbers in headline: "${t.slice(0, 50)}..."`)
+  // Require some quantifiable detail: digits or explicit magnitude words
+  if (!containsQuantifier(t)) {
+    console.warn(
+      `⚠️  No quantifier in headline: "${t.slice(0, 50)}..."`
+    )
     return false
   }
 
@@ -241,6 +307,12 @@ function passesChecks(original: string, draft: string, hasContent: boolean) {
   // Check for climate context (at least one climate-related term)
   const climateTerms = [
     /\b(climate|carbon|emission|renewable|fossil|solar|wind|epa|greenhouse|warming|energy|environmental?)\b/i,
+    /\b(ev|evs|electric[- ]vehicles?|electric[- ]cars?|plug-in)\b/i,
+    /\b(battery|charging station|charging network)\b/i,
+    /\b(flood|floods|flooding|drought|droughts)\b/i,
+    /\b(wildfire|wildfires|fire danger|fire weather)\b/i,
+    /\b(heatwave|heat wave|heatwaves|heat waves|heat dome|heat domes|heat index)\b/i,
+    /\b(crop yield|crop yields|harvest|agricultural|farmers)\b/i,
   ]
 
   if (!climateTerms.some((p) => p.test(t))) {
@@ -254,13 +326,16 @@ function passesChecks(original: string, draft: string, hasContent: boolean) {
 /* ------------------------- LLM Generation ------------------------- */
 
 async function generateWithOpenAI(
-  title: string,
-  dek?: string | null,
-  contentSnippet?: string | null,
+  input: {
+    title: string
+    dek?: string | null
+    contentSnippet?: string | null
+    clusterContext?: ClusterContextItem[]
+  },
   abortMs = 20000,
   retries = 2
 ): Promise<{ text: string | null; model: string; notes: string }> {
-  const prompt = buildPrompt({ title, dek, contentSnippet })
+  const prompt = buildPrompt(input)
   const model = 'gpt-4o-mini'
 
   try {
@@ -274,19 +349,35 @@ async function generateWithOpenAI(
     })
 
     const sanitized = sanitizeHeadline(text)
+    const notesParts = [
+      input.contentSnippet
+        ? `with_content:${input.contentSnippet.length}chars`
+        : 'title_only',
+    ]
+
+    if (input.clusterContext && input.clusterContext.length > 0) {
+      notesParts.push(`with_cluster:${Math.min(input.clusterContext.length, 5)}`)
+    } else {
+      notesParts.push('no_cluster')
+    }
+
     return {
       text: sanitized,
       model,
-      notes: contentSnippet
-        ? `success:with_content:${contentSnippet.length}chars`
-        : 'success:title_only',
+      notes: `success:${notesParts.join(':')}`,
     }
   } catch (error: any) {
     console.error('❌ Error generating text with AI SDK:', error)
+    const failureParts = [
+      `failed:${error?.message || 'unknown_error'}`,
+      input.clusterContext && input.clusterContext.length > 0
+        ? `with_cluster:${Math.min(input.clusterContext.length, 5)}`
+        : 'no_cluster',
+    ]
     return {
       text: null,
       model,
-      notes: `failed:${error?.message || 'unknown_error'}`,
+      notes: failureParts.join(':'),
     }
   }
 }
@@ -330,8 +421,35 @@ async function fetchBatch(limit = 40) {
         a.canonical_url,
         a.content_text,
         a.content_html,
-        a.content_status
+        a.content_status,
+        cluster_map.cluster_id,
+        cluster_ctx.cluster_context
       from articles a
+      left join lateral (
+        select ac.cluster_id
+        from article_clusters ac
+        where ac.article_id = a.id
+        order by ac.cluster_id desc
+        limit 1
+      ) cluster_map on true
+      left join lateral (
+        select jsonb_agg(item) as cluster_context
+        from (
+          select jsonb_build_object(
+            'article_id', a2.id,
+            'title', coalesce(a2.rewritten_title, a2.title),
+            'source', coalesce(a2.publisher_name, s2.name)
+          ) as item
+          from article_clusters ac2
+          join articles a2 on a2.id = ac2.article_id
+          left join sources s2 on s2.id = a2.source_id
+          where cluster_map.cluster_id is not null
+            and ac2.cluster_id = cluster_map.cluster_id
+            and ac2.article_id <> a.id
+          order by a2.published_at desc
+          limit 5
+        ) as cluster_items
+      ) cluster_ctx on true
       where a.rewritten_title is null
         and coalesce(a.published_at, now()) > now() - interval '21 days'
       order by a.fetched_at desc
@@ -349,6 +467,26 @@ async function processOne(r: Row) {
       ? extractContentSnippet(r.content_text, r.content_html)
       : null
 
+  const clusterContext: ClusterContextItem[] = Array.isArray(r.cluster_context)
+    ? (() => {
+        const seen = new Set<string>()
+        const items: ClusterContextItem[] = []
+        for (const item of r.cluster_context) {
+          if (!item || !item.title) continue
+          const normalizedSource = item.source ?? null
+          const dedupeKey = `${normalizedSource?.toLowerCase() || ''}|${item.title}`
+          if (seen.has(dedupeKey)) continue
+          seen.add(dedupeKey)
+          items.push({
+            article_id: item.article_id,
+            title: item.title,
+            source: normalizedSource,
+          })
+        }
+        return items
+      })()
+    : []
+
   // Track what happened with content
   let contentNote = ''
   if (!r.content_status) {
@@ -359,7 +497,12 @@ async function processOne(r: Row) {
     contentNote = ':content_rejected' // Had content but failed quality checks
   }
 
-  const llm = await generateWithOpenAI(r.title, r.dek, contentSnippet)
+  const llm = await generateWithOpenAI({
+    title: r.title,
+    dek: r.dek,
+    contentSnippet,
+    clusterContext,
+  })
   const draft = llm.text || ''
 
   if (passesChecks(r.title, draft, !!contentSnippet)) {
@@ -425,7 +568,8 @@ export async function run(opts: { limit?: number; closePool?: boolean } = {}) {
 
 // CLI support: `npm run rewrite`
 if (import.meta.url === `file://${process.argv[1]}`) {
-  run({ closePool: true })
+  const cliOpts = parseCliArgs(process.argv.slice(2))
+  run({ ...cliOpts, closePool: true })
     .then((r) => {
       console.log('\n📊 Final results:', r)
       process.exit(r.ok > 0 ? 0 : 1)
@@ -434,4 +578,45 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       console.error('❌ Fatal error:', err)
       process.exit(1)
     })
+}
+
+type CliOptions = {
+  limit?: number
+}
+
+function parseCliArgs(argv: string[]): CliOptions {
+  const opts: CliOptions = {}
+
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i]
+
+    if (arg === '--limit' || arg === '-l') {
+      const next = argv[i + 1]
+      if (!next) {
+        console.warn('⚠️  --limit flag provided without a value; ignoring')
+        continue
+      }
+      const parsed = Number(next)
+      if (Number.isFinite(parsed)) {
+        opts.limit = Math.max(1, Math.floor(parsed))
+      } else {
+        console.warn(`⚠️  Invalid --limit value "${next}"; ignoring`)
+      }
+      i++
+      continue
+    }
+
+    const limitMatch = arg.match(/^--limit=(.+)$/)
+    if (limitMatch) {
+      const parsed = Number(limitMatch[1])
+      if (Number.isFinite(parsed)) {
+        opts.limit = Math.max(1, Math.floor(parsed))
+      } else {
+        console.warn(`⚠️  Invalid --limit value "${limitMatch[1]}"; ignoring`)
+      }
+      continue
+    }
+  }
+
+  return opts
 }
