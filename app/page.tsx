@@ -208,7 +208,7 @@ export default async function RiverPage(props: {
                 </h3>
 
                 {r.lead_dek && (
-                  <p className="mt-1 text-sm sm:text-[0.95rem] text-zinc-600 text-pretty">
+                  <p className="mt-1 hidden sm:block text-sm sm:text-[0.95rem] text-zinc-600 text-pretty">
                     {r.lead_dek}
                   </p>
                 )}
