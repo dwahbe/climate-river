@@ -307,12 +307,19 @@ function passesChecks(original: string, draft: string, hasContent: boolean) {
   // Check for climate context (at least one climate-related term)
   const climateTerms = [
     /\b(climate|carbon|emission|renewable|fossil|solar|wind|epa|greenhouse|warming|energy|environmental?)\b/i,
-    /\b(ev|evs|electric[- ]vehicles?|electric[- ]cars?|plug-in)\b/i,
-    /\b(battery|charging station|charging network)\b/i,
-    /\b(flood|floods|flooding|drought|droughts)\b/i,
-    /\b(wildfire|wildfires|fire danger|fire weather)\b/i,
-    /\b(heatwave|heat wave|heatwaves|heat waves|heat dome|heat domes|heat index)\b/i,
-    /\b(crop yield|crop yields|harvest|agricultural|farmers)\b/i,
+    /\b(ev|evs|electric[- ]vehicles?|electric[- ]cars?|plug-in|battery[- ]electric)\b/i,
+    /\b(battery|charging station|charging network|grid storage|long-duration storage)\b/i,
+    /\b(flood|floods|flooding|drought|droughts|storm surge|hurricane|typhoon|cyclone|tornado)\b/i,
+    /\b(wildfire|wildfires|fire danger|fire weather|smoke plume|smoke plumes)\b/i,
+    /\b(heatwave|heat wave|heatwaves|heat waves|heat dome|heat domes|heat index|extreme heat)\b/i,
+    /\b(crop yield|crop yields|harvest|agricultural|farmers|food security|food supply)\b/i,
+    /\b(oil|gas|methane|petroleum|petrochemical|refinery|refineries|diesel|jet fuel)\b/i,
+    /\b(coal|mining|miners|mine|strip mine|mountaintop removal)\b/i,
+    /\b(fracking|drilling|offshore rig|rigs|pipeline|pipelines|liquefied natural gas|lng)\b/i,
+    /\b(pollution|pollutants|air quality|soot|smog)\b/i,
+    /\b(hydrogen|ammonia|electrolyzer|carbon capture|ccs|direct air capture)\b/i,
+    /\b(nuclear|reactor|reactors|fusion|fission)\b/i,
+    /\b(sunrise movement|greenpeace|sierra club|friends of the earth|350\.org|earthjustice|world wildlife fund|wwf|green new deal network|union of concerned scientists|campus climate network)\b/i,
   ]
 
   if (!climateTerms.some((p) => p.test(t))) {

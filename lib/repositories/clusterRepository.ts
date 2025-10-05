@@ -101,6 +101,7 @@ export async function getClusterById(
       score: data.score,
       lead_article_id: article.id,
       lead_title: article.rewritten_title || article.title,
+      lead_was_rewritten: !!article.rewritten_title,
       lead_url: article.canonical_url,
       lead_dek: article.dek,
       lead_author: article.author,

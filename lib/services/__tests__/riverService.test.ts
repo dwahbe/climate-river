@@ -8,6 +8,7 @@ const baseCluster: Cluster = {
   cluster_id: 1,
   lead_article_id: 101,
   lead_title: 'Lead article',
+  lead_was_rewritten: false,
   lead_url: 'https://example.com/lead',
   lead_dek: null,
   lead_source: 'Example Source',

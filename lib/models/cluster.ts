@@ -21,6 +21,7 @@ export type Cluster = {
   cluster_id: number
   lead_article_id: number
   lead_title: string
+  lead_was_rewritten: boolean
   lead_url: string
   lead_dek: string | null
   lead_source: string | null

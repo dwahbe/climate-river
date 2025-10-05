@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { Sparkles } from "lucide-react";
 import LocalTime from "@/components/LocalTime";
 import RiverControls from "@/components/RiverControls";
 import PublisherLink from "@/components/PublisherLink";
@@ -153,12 +154,12 @@ export default async function RiverPage(props: {
               >
                 {(r.lead_author || publisher) && (
                   <div className="mb-1.5 flex items-center justify-between gap-4">
-                    <div className="text-[11px] sm:text-xs font-medium tracking-wide text-zinc-500">
+                    <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[11px] sm:text-xs font-medium tracking-wide text-zinc-500">
                       {r.lead_author && (
                         <span className="text-zinc-700">{r.lead_author}</span>
                       )}
                       {r.lead_author && publisher && (
-                        <span className="px-1 text-zinc-400">•</span>
+                        <span className="text-zinc-400">•</span>
                       )}
                       <SourceTooltip
                         sourceName={publisher}
@@ -175,6 +176,17 @@ export default async function RiverPage(props: {
                           <span>{publisher}</span>
                         )}
                       </SourceTooltip>
+                      {r.lead_was_rewritten && (
+                        <span
+                          className="inline-flex items-center text-amber-500"
+                          title="Rewritten for improved context by Climate River"
+                        >
+                          <Sparkles className="h-3.5 w-3.5" aria-hidden="true" />
+                          <span className="sr-only">
+                            Rewritten for improved context by Climate River
+                          </span>
+                        </span>
+                      )}
                     </div>
                     <ReadNowButton
                       articleId={r.lead_article_id}
