@@ -56,21 +56,9 @@ export default function ReadNowButton({
     return null
   }
 
-  const handleClick = async () => {
-    // Pre-check if the content is available before opening drawer
-    try {
-      const res = await fetch(`/api/reader/${articleId}`)
-      if (!res.ok) {
-        // Silently redirect to original site for blocked/paywall/error
-        window.open(articleUrl, '_blank', 'noopener,noreferrer')
-        return
-      }
-      // Content available, open reader view
-      setIsOpen(true)
-    } catch {
-      // On error, redirect to original site
-      window.open(articleUrl, '_blank', 'noopener,noreferrer')
-    }
+  const handleClick = () => {
+    // Open drawer immediately so loading state is visible while content fetches
+    setIsOpen(true)
   }
 
   return (
