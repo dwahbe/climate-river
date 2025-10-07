@@ -46,6 +46,13 @@ export default async function RootLayout({
                 </Link>
 
                 <Link
+                  href="/categories"
+                  className="text-zinc-600 hover:text-zinc-900 no-underline"
+                >
+                  Categories
+                </Link>
+
+                <Link
                   href="/about"
                   className="text-zinc-600 hover:text-zinc-900 no-underline"
                 >

@@ -27,8 +27,7 @@ export default function AboutPage() {
     <div className="mx-auto max-w-3xl px-4 sm:px-6 pt-2 sm:pt-2.5 pb-8 content">
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-2xl font-semibold tracking-tight">About</h1>
-        <div className="flex items-center gap-3">
-          {/* Category Icons */}
+        {/* <div className="flex items-center gap-3">
           <div className="flex items-center gap-2">
             {CATEGORIES.map((category) => {
               const Icon = CATEGORY_ICONS[category.slug]
@@ -66,12 +65,10 @@ export default function AboutPage() {
             })}
           </div>
 
-          {/* Vertical Divider */}
           <div className="w-px h-6 bg-zinc-300" />
 
-          {/* Climate River Logo */}
           <ClimateRiverLogo size="lg" variant="colored" animated={true} />
-        </div>
+        </div> */}
       </div>
       <p className="mt-3 text-zinc-700 text-pretty">
         Despite being one of the defining crises of our time, the climate crisis

@@ -6,24 +6,7 @@ import { usePathname, useSearchParams } from 'next/navigation'
 import { useEffect, useRef } from 'react'
 import { CATEGORIES, type CategorySlug } from '@/lib/tagger'
 import clsx from 'clsx'
-import {
-  Landmark,
-  Megaphone,
-  Factory,
-  AlertTriangle,
-  Zap,
-  Microscope,
-} from 'lucide-react'
-
-// Map category slugs to their icons
-const CATEGORY_ICONS = {
-  government: Landmark,
-  justice: Megaphone,
-  business: Factory,
-  impacts: AlertTriangle,
-  tech: Zap,
-  research: Microscope,
-} as const
+import { CATEGORY_ICON_MAP } from '@/components/categoryIcons'
 
 interface RiverControlsProps {
   currentView?: string
@@ -181,7 +164,7 @@ function CategoryTab({
   children: React.ReactNode
   slug: CategorySlug
 }) {
-  const Icon = CATEGORY_ICONS[slug]
+  const Icon = CATEGORY_ICON_MAP[slug]
 
   return (
     <Link
