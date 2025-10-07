@@ -1,4 +1,5 @@
 // app/about/page.tsx
+import type { LucideIcon } from 'lucide-react'
 import {
   Landmark,
   Megaphone,
@@ -8,8 +9,18 @@ import {
   Microscope,
 } from 'lucide-react'
 import ClimateRiverLogo from '@/components/ClimateRiverLogo'
+import { CATEGORIES, type CategorySlug } from '@/lib/tagger'
 
 export const dynamic = 'force-static'
+
+const CATEGORY_ICONS: Record<CategorySlug, LucideIcon> = {
+  government: Landmark,
+  justice: Megaphone,
+  business: Factory,
+  impacts: AlertTriangle,
+  tech: Zap,
+  research: Microscope,
+}
 
 export default function AboutPage() {
   return (
@@ -19,12 +30,40 @@ export default function AboutPage() {
         <div className="flex items-center gap-3">
           {/* Category Icons */}
           <div className="flex items-center gap-2">
-            <Landmark className="w-5 h-5 text-[#3B82F6]" />
-            <Megaphone className="w-5 h-5 text-[#EC4899]" />
-            <Factory className="w-5 h-5 text-[#06B6D4]" />
-            <AlertTriangle className="w-5 h-5 text-[#EF4444]" />
-            <Zap className="w-5 h-5 text-[#10B981]" />
-            <Microscope className="w-5 h-5 text-[#8B5CF6]" />
+            {CATEGORIES.map((category) => {
+              const Icon = CATEGORY_ICONS[category.slug]
+              if (!Icon) return null
+
+              const tooltipId = `about-category-${category.slug}-tooltip`
+
+              return (
+                <span
+                  key={category.slug}
+                  tabIndex={0}
+                  className="relative group inline-flex items-center outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-zinc-300 focus-visible:rounded-full"
+                  aria-label={`${category.name}: ${category.description}`}
+                  aria-describedby={tooltipId}
+                  role="img"
+                >
+                  <Icon
+                    className="w-5 h-5 transition-transform duration-150 group-hover:scale-110 group-focus-visible:scale-110"
+                    style={{ color: category.color }}
+                    aria-hidden="true"
+                    focusable="false"
+                  />
+                  <span
+                    id={tooltipId}
+                    className="pointer-events-none absolute left-1/2 bottom-full z-10 mb-2 w-max max-w-xs -translate-x-1/2 rounded-md bg-zinc-900 px-2 py-1 text-xs font-medium text-white opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-visible:opacity-100"
+                    role="tooltip"
+                  >
+                    <span className="block">{category.name}</span>
+                    <span className="mt-0.5 block text-[0.675rem] font-normal text-zinc-100/80">
+                      {category.description}
+                    </span>
+                  </span>
+                </span>
+              )
+            })}
           </div>
 
           {/* Vertical Divider */}
