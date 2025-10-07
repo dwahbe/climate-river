@@ -53,70 +53,363 @@ type WebSearchResult = {
   source?: string
 }
 
-async function callOpenAIEnhancedSearch(
-  query: string
-): Promise<WebSearchResult[]> {
-  try {
-    console.log(`OpenAI Enhanced Search: ${query}`)
-
-    // Use AI SDK's generateText with a smart prompt that suggests real news sources
-    const { text } = await generateText({
-      model: openai('gpt-5-nano'),
-      messages: [
-        {
-          role: 'system',
-          content: `You are a climate news expert. Based on your training data and knowledge of major news outlets, suggest specific article searches for Google News RSS that would find recent stories about the given topic. 
-
-Focus on:
-- Specific search terms that would work well in Google News
-- Recent developments in climate/environment
-- Stories likely to be covered by major outlets
-- Breaking news or trending topics
-
-Return your response as a JSON array with this format:
-[
-  {
-    "searchTerm": "specific search phrase for Google News",
-    "reasoning": "why this search would find relevant articles",
-    "expectedSources": ["source1", "source2"]
+type WebBrowseStats = {
+  estimatedCost: number
+  toolCalls: number
+  usage?: {
+    inputTokens?: number
+    outputTokens?: number
+    totalTokens?: number
+    promptTokens?: number
+    completionTokens?: number
   }
-]`,
-        },
-        {
-          role: 'user',
-          content: `Suggest 3-5 specific Google News search terms for: "${query}". Focus on recent climate/environmental news that major outlets would cover.`,
-        },
-      ],
-      temperature: 0.3,
-      maxOutputTokens: 1000,
-    })
+}
 
-    // Extract search suggestions and execute them
-    const results = await executeAISearchSuggestions(text)
+type EnhancedSearchResult = {
+  results: WebSearchResult[]
+  browseStats: WebBrowseStats | null
+}
+
+const GOOGLE_SUGGESTION_MODEL =
+  process.env.GOOGLE_SUGGESTION_MODEL || 'gpt-4o-mini'
+const GOOGLE_SUGGESTION_MAX_OUTPUT_TOKENS = parseEnvInt(
+  'GOOGLE_SUGGESTION_MAX_OUTPUT_TOKENS',
+  600
+)
+
+const WEB_SEARCH_ENABLED = process.env.WEB_SEARCH_ENABLED !== '0'
+const WEB_SEARCH_MODEL = process.env.WEB_SEARCH_MODEL || 'gpt-4o'
+const WEB_SEARCH_MAX_OUTPUT_TOKENS = parseEnvInt(
+  'WEB_SEARCH_MAX_OUTPUT_TOKENS',
+  600
+)
+const WEB_SEARCH_RESULT_LIMIT = parseEnvInt(
+  'WEB_SEARCH_LIMIT_PER_QUERY',
+  6
+)
+const WEB_SEARCH_CONTEXT_SIZE = (() => {
+  const raw = (process.env.WEB_SEARCH_CONTEXT_SIZE || 'medium').toLowerCase()
+  return raw === 'low' || raw === 'high' ? raw : ('medium' as const)
+})()
+const WEB_SEARCH_ALLOWED_DOMAINS = process.env.WEB_SEARCH_ALLOWED_DOMAINS
+  ? process.env.WEB_SEARCH_ALLOWED_DOMAINS.split(',')
+      .map((domain) => domain.trim())
+      .filter(Boolean)
+  : undefined
+const WEB_SEARCH_DEBUG = process.env.WEB_SEARCH_DEBUG === '1'
+
+const OPENAI_WEB_SEARCH_INPUT_PER_M = 2.5
+const OPENAI_WEB_SEARCH_OUTPUT_PER_M = 10
+const OPENAI_WEB_SEARCH_TOOL_CALL_COST = 0.015
+
+function parseEnvInt(name: string, defaultValue: number): number {
+  const raw = process.env[name]
+  if (!raw) return defaultValue
+  const parsed = Number.parseInt(raw, 10)
+  return Number.isFinite(parsed) ? parsed : defaultValue
+}
+
+function estimateWebSearchCost(usage: any, toolCalls: number): number {
+  if (!usage && !toolCalls) return 0
+
+  const inputTokens =
+    typeof usage?.inputTokens === 'number'
+      ? usage.inputTokens
+      : typeof usage?.promptTokens === 'number'
+        ? usage.promptTokens
+        : 0
+  const outputTokens =
+    typeof usage?.outputTokens === 'number'
+      ? usage.outputTokens
+      : typeof usage?.completionTokens === 'number'
+        ? usage.completionTokens
+        : 0
+
+  const fallbackTokens =
+    inputTokens === 0 && outputTokens === 0 && typeof usage?.totalTokens === 'number'
+      ? usage.totalTokens
+      : 0
+
+  const costFromTokens =
+    (inputTokens / 1_000_000) * OPENAI_WEB_SEARCH_INPUT_PER_M +
+    (outputTokens / 1_000_000) * OPENAI_WEB_SEARCH_OUTPUT_PER_M +
+    (fallbackTokens / 1_000_000) * OPENAI_WEB_SEARCH_INPUT_PER_M
+
+  const totalCost = costFromTokens + toolCalls * OPENAI_WEB_SEARCH_TOOL_CALL_COST
+  return Number.isFinite(totalCost) ? totalCost : 0
+}
+
+function dedupeWebResults(results: WebSearchResult[]): WebSearchResult[] {
+  const seen = new Set<string>()
+  return results.filter((result) => {
+    const urlKey = result.url ? result.url.trim().toLowerCase() : ''
+    const titleKey = result.title ? result.title.trim().toLowerCase() : ''
+    const key = urlKey || titleKey
+    if (!key) return false
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+}
+
+function parseWebSearchJson(
+  content: string | null | undefined,
+  query: string
+): WebSearchResult[] {
+  if (!content) return []
+  const jsonMatch = content.match(/\[[\s\S]*\]/)
+  if (!jsonMatch) return []
+
+  try {
+    const parsed = JSON.parse(jsonMatch[0])
+    if (!Array.isArray(parsed)) return []
+
+    const results: WebSearchResult[] = []
+    for (const item of parsed) {
+      if (!item) continue
+      const title =
+        typeof item.title === 'string'
+          ? item.title.trim()
+          : typeof item.headline === 'string'
+            ? item.headline.trim()
+            : ''
+      const url =
+        typeof item.url === 'string'
+          ? item.url.trim()
+          : typeof item.link === 'string'
+            ? item.link.trim()
+            : ''
+      if (!title || !url) continue
+
+      const snippet =
+        typeof item.snippet === 'string' && item.snippet.trim().length > 0
+          ? item.snippet.trim()
+          : typeof item.summary === 'string' && item.summary.trim().length > 0
+            ? item.summary.trim()
+            : typeof item.description === 'string' && item.description.trim().length > 0
+              ? item.description.trim()
+              : `Latest climate coverage for "${query}"`
+
+      const published =
+        typeof item.publishedDate === 'string'
+          ? item.publishedDate
+          : typeof item.published_at === 'string'
+            ? item.published_at
+            : typeof item.date === 'string'
+              ? item.date
+              : undefined
+
+      const source =
+        typeof item.source === 'string' && item.source.trim().length > 0
+          ? item.source.trim()
+          : extractSourceFromUrl(url)
+
+      results.push({
+        title,
+        url,
+        snippet,
+        publishedDate: published,
+        source,
+      })
+    }
+
     return results
   } catch (error) {
-    console.error('Error calling OpenAI enhanced search:', error)
+    console.error('Error parsing web search JSON:', error)
     return []
   }
 }
 
-async function executeAISearchSuggestions(
-  content: string
-): Promise<WebSearchResult[]> {
+async function callOpenAIWebSearch(
+  query: string
+): Promise<{ results: WebSearchResult[]; stats: WebBrowseStats | null }> {
+  if (!WEB_SEARCH_ENABLED) {
+    return { results: [], stats: null }
+  }
+
   try {
-    // Parse the JSON suggestions from OpenAI
-    const jsonMatch = content.match(/\[[\s\S]*\]/)
-    if (!jsonMatch) {
+    console.log(`🔎 OpenAI web search: ${query}`)
+
+    const toolArgs =
+      WEB_SEARCH_ALLOWED_DOMAINS && WEB_SEARCH_ALLOWED_DOMAINS.length > 0
+        ? { filters: { allowedDomains: WEB_SEARCH_ALLOWED_DOMAINS } }
+        : {}
+
+    const response = await generateText({
+      model: openai(WEB_SEARCH_MODEL),
+      messages: [
+        {
+          role: 'system',
+          content: `You are a climate and environment news researcher. Use the web search tool to locate the most recent, high-quality coverage about the user's query. Return ONLY a JSON array where each item has: title, url, snippet, publishedDate (ISO if known), and source (publication name or domain). Do not include additional text outside the JSON.`,
+        },
+        {
+          role: 'user',
+          content: `Find up to ${WEB_SEARCH_RESULT_LIMIT} timely climate or environment-related articles for: "${query}". Favor reporting from reputable outlets within the past 72 hours.`,
+        },
+      ],
+      tools: {
+        webSearch: openai.tools.webSearch({
+          searchContextSize: WEB_SEARCH_CONTEXT_SIZE,
+          ...toolArgs,
+        }),
+      },
+      toolChoice: 'auto',
+      maxOutputTokens: WEB_SEARCH_MAX_OUTPUT_TOKENS,
+      providerOptions: {
+        openai: {
+          maxCompletionTokens: WEB_SEARCH_MAX_OUTPUT_TOKENS,
+        },
+      },
+    })
+
+    let results = parseWebSearchJson(response.text, query)
+    if (results.length === 0) {
+      console.log('Web search returned no structured results; attempting fallback parsing')
+      if (WEB_SEARCH_DEBUG && response.text) {
+        console.log(
+          'Web search response text preview:',
+          response.text.substring(0, 200)
+        )
+      }
+      if (WEB_SEARCH_DEBUG && Array.isArray(response.toolResults) && response.toolResults.length > 0) {
+        console.log(
+          'Web search tool result sample:',
+          JSON.stringify(response.toolResults[0] ?? null).substring(0, 200)
+        )
+      }
+      if (WEB_SEARCH_DEBUG && Array.isArray(response.toolCalls) && response.toolCalls.length > 0) {
+        console.log(
+          'Web search tool call sample:',
+          JSON.stringify(response.toolCalls[0] ?? null).substring(0, 200)
+        )
+      }
+      if (WEB_SEARCH_DEBUG && Array.isArray(response.sources) && response.sources.length > 0) {
+        console.log(
+          'Web search source sample:',
+          JSON.stringify(response.sources[0] ?? null).substring(0, 200)
+        )
+      }
+      const fallback = parseContentForArticles(response.text || '')
+      if (fallback.length > 0) {
+        console.log('Falling back to parsed content for web search results')
+        results = fallback
+      }
+    }
+
+    results = dedupeWebResults(results).slice(0, WEB_SEARCH_RESULT_LIMIT)
+
+    const toolCalls =
+      Array.isArray(response.toolResults) && response.toolResults.length > 0
+        ? response.toolResults.length
+        : Array.isArray(response.toolCalls)
+          ? response.toolCalls.length
+          : 0
+    const usage = response.totalUsage || response.usage
+    const estimatedCost = estimateWebSearchCost(usage, toolCalls)
+
+    if (estimatedCost > 0) {
+      console.log(
+        `OpenAI web search returned ${results.length} results (~$${estimatedCost.toFixed(4)})`
+      )
+    } else {
+      console.log(`OpenAI web search returned ${results.length} results`)
+    }
+
+    return {
+      results,
+      stats: {
+        estimatedCost,
+        toolCalls,
+        usage,
+      },
+    }
+  } catch (error) {
+    console.error('Error calling OpenAI web search:', error)
+    return { results: [], stats: { estimatedCost: 0, toolCalls: 0 } }
+  }
+}
+
+async function generateGoogleNewsSuggestions(query: string): Promise<string | null> {
+  console.log(`OpenAI Google News suggestions: ${query}`)
+
+  try {
+    const { text } = await generateText({
+      model: openai(GOOGLE_SUGGESTION_MODEL),
+      messages: [
+        {
+          role: 'system',
+          content: `You are assisting with building Google News RSS queries for climate reporting. Return only a JSON array. Each element must contain "searchTerm" (string suitable for Google News), "reasoning" (short justification), and "expectedSources" (array of publication names). Do not include any additional prose outside the JSON.`,
+        },
+        {
+          role: 'user',
+          content: `Provide 2-4 optimized Google News search phrases to surface fresh climate or environment coverage for: "${query}". Prioritize the past 48 hours.`,
+        },
+      ],
+      maxOutputTokens: GOOGLE_SUGGESTION_MAX_OUTPUT_TOKENS,
+    })
+
+    return text ?? null
+  } catch (error) {
+    console.error('Error generating Google News suggestions:', error)
+    return null
+  }
+}
+
+async function discoverViaGoogleNews(query: string): Promise<WebSearchResult[]> {
+  const suggestionText = await generateGoogleNewsSuggestions(query)
+  const suggestionResults = await executeAISearchSuggestions(suggestionText)
+
+  if (suggestionResults.length > 0) {
+    return suggestionResults
+  }
+
+  console.log('AI suggestions empty, falling back to direct Google News search')
+  return await searchGoogleNewsRSS(query)
+}
+
+async function callOpenAIEnhancedSearch(
+  query: string
+): Promise<EnhancedSearchResult> {
+  const combined: WebSearchResult[] = []
+  let browseStats: WebBrowseStats | null = null
+
+  const webSearch = await callOpenAIWebSearch(query)
+  if (webSearch.results.length > 0) {
+    combined.push(...webSearch.results)
+  }
+  if (webSearch.stats) {
+    browseStats = webSearch.stats
+  }
+
+  const googleResults = await discoverViaGoogleNews(query)
+  if (googleResults.length > 0) {
+    combined.push(...googleResults)
+  }
+
+  return {
+    results: dedupeWebResults(combined),
+    browseStats,
+  }
+}
+
+async function executeAISearchSuggestions(
+  content: string | null | undefined
+): Promise<WebSearchResult[]> {
+  if (!content) {
+    return []
+  }
+
+  try {
+    const suggestions = JSON.parse(content.match(/\[[\s\S]*\]/)?.[0] ?? '[]')
+    if (!Array.isArray(suggestions) || suggestions.length === 0) {
       console.log('No JSON array found in AI response')
       return []
     }
 
-    const suggestions = JSON.parse(jsonMatch[0])
     console.log(`AI suggested ${suggestions.length} search terms`)
 
     const allResults: WebSearchResult[] = []
 
-    // Execute each suggested search term against Google News RSS
     for (const suggestion of suggestions.slice(0, 3)) {
       // Limit to 3 suggestions
       const searchTerm = suggestion.searchTerm || suggestion.search_term
@@ -565,13 +858,20 @@ export async function run(
   const sourceId = await getOrCreateWebDiscoverySource()
   let totalInserted = 0
   let totalScanned = 0
+  let totalBrowseCost = 0
+  let totalBrowseToolCalls = 0
 
   const selectedQueries = querySet.slice(0, maxQueries)
 
   for (const query of selectedQueries) {
     console.log(`Searching: ${query}`)
 
-    const results = await callOpenAIEnhancedSearch(query)
+    const { results, browseStats } = await callOpenAIEnhancedSearch(query)
+    if (browseStats) {
+      totalBrowseCost += browseStats.estimatedCost
+      totalBrowseToolCalls += browseStats.toolCalls
+    }
+
     totalScanned += results.length
 
     let inserted = 0
@@ -620,6 +920,14 @@ export async function run(
     `Web discovery completed: ${totalInserted} new articles from ${totalScanned} results in ${duration}s`
   )
 
+  if (totalBrowseCost > 0) {
+    console.log(
+      `Estimated OpenAI web search spend: ~$${totalBrowseCost.toFixed(
+        4
+      )} (${totalBrowseToolCalls} tool calls)`
+    )
+  }
+
   if (opts.closePool) {
     await endPool()
   }
@@ -629,6 +937,8 @@ export async function run(
     totalScanned,
     duration,
     queriesRun: selectedQueries.length,
+    estimatedBrowseCost: totalBrowseCost,
+    browseToolCalls: totalBrowseToolCalls,
   }
 }
 
