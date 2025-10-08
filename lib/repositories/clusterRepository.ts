@@ -15,7 +15,9 @@ export async function getClustersForRiver(
   const isCategory = !!filters.category
 
   // Determine time window based on view type
-  const windowHours = filters.windowHours || (isCategory ? 336 : 168)
+  // Data-driven: 72h provides 70+ cluster buffer while ensuring freshness
+  const windowHours =
+    filters.windowHours || (isCategory ? 168 : isLatest ? 48 : 72)
 
   // Determine limit based on view type
   const limit = filters.limit || (isCategory ? 15 : isLatest ? 20 : 10)

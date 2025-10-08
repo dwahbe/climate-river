@@ -2,9 +2,9 @@
 import { query, endPool } from '@/lib/db'
 
 const HOUR = 3600
-// Even faster decay for more dynamic content (articles become "stale" much quicker)
-const HL_ARTICLE_H = 8 // 8 hours instead of 12 - much faster decay
-const HL_CLUSTER_H = 12 // 12 hours instead of 18 - faster cluster decay
+// Optimized decay for dynamic, fresh content (data-driven analysis)
+const HL_ARTICLE_H = 6 // 6h half-life: articles lose 50% score every 6 hours
+const HL_CLUSTER_H = 9 // 9h half-life: clusters decay 25% faster for fresher homepage
 
 export async function run(opts: { closePool?: boolean } = {}) {
   console.log('🔄 Starting rescore process...')
@@ -111,8 +111,9 @@ export async function run(opts: { closePool?: boolean } = {}) {
     final AS (
       SELECT
         cluster_id,
-        -- blend: heavily favor freshness and velocity for dynamic content
-        (0.25 * coverage) + (0.10 * avg_w) + (0.25 * LN(1 + v6)) + (0.35 * fresh)
+        -- Optimized blend: 45% freshness, 27% velocity, 18% coverage, 5% avg_weight, 5% pool
+        -- Data-driven weights that prioritize recency while maintaining quality signals
+        (0.18 * coverage) + (0.05 * avg_w) + (0.27 * LN(1 + v6)) + (0.45 * fresh)
           + 0.05 * LN(1 + pool_strength) AS score,
         lead_article_id,
         (SELECT size FROM clust c2 WHERE c2.cluster_id = clust_scored.cluster_id) AS size
