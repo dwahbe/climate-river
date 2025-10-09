@@ -1,6 +1,57 @@
 // lib/services/readerService.ts
 import { query } from '@/lib/db'
 
+/**
+ * Convert markdown to HTML for display
+ * Simple implementation - can be enhanced with a proper markdown library if needed
+ */
+function markdownToHtml(markdown: string): string {
+  let html = markdown
+
+  // Headers
+  html = html.replace(/^### (.*$)/gim, '<h3>$1</h3>')
+  html = html.replace(/^## (.*$)/gim, '<h2>$1</h2>')
+  html = html.replace(/^# (.*$)/gim, '<h1>$1</h1>')
+
+  // Bold
+  html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+  html = html.replace(/__(.+?)__/g, '<strong>$1</strong>')
+
+  // Italic
+  html = html.replace(/\*(.+?)\*/g, '<em>$1</em>')
+  html = html.replace(/_(.+?)_/g, '<em>$1</em>')
+
+  // Links
+  html = html.replace(
+    /\[([^\]]+)\]\(([^)]+)\)/g,
+    '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>'
+  )
+
+  // Images
+  html = html.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<img src="$2" alt="$1" />')
+
+  // Paragraphs (split by double newlines)
+  const paragraphs = html.split(/\n\n+/)
+  html = paragraphs
+    .map((p) => {
+      p = p.trim()
+      if (!p) return ''
+      // Don't wrap if already a tag
+      if (
+        p.startsWith('<h') ||
+        p.startsWith('<img') ||
+        p.startsWith('<ul') ||
+        p.startsWith('<ol')
+      ) {
+        return p
+      }
+      return `<p>${p.replace(/\n/g, '<br>')}</p>`
+    })
+    .join('\n')
+
+  return html
+}
+
 // Types
 export type ReaderSuccess = {
   success: true
@@ -67,7 +118,7 @@ function detectBlocked(html: string, text: string): boolean {
  */
 async function fetchArticleContent(url: string): Promise<ReaderResult> {
   const startTime = Date.now()
-  const TIMEOUT = 8000 // 8 seconds (leaving 2s buffer for Vercel's 10s limit)
+  const TIMEOUT = 12000 // 12 seconds (increased for slower sites)
 
   try {
     // Dynamic imports to reduce cold start
@@ -81,13 +132,16 @@ async function fetchArticleContent(url: string): Promise<ReaderResult> {
       // Fetch with proper headers
       const response = await fetch(url, {
         headers: {
-          'User-Agent': 'ClimateRiverBot/1.0 (+https://climateriver.org)',
+          'User-Agent':
+            'Mozilla/5.0 (compatible; ClimateRiverBot/1.0; +https://climateriver.org)',
           Accept:
             'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
           'Accept-Language': 'en-US,en;q=0.9',
           'Cache-Control': 'no-cache',
+          'Accept-Encoding': 'gzip, deflate, br',
         },
         redirect: 'follow',
+        signal: AbortSignal.timeout(TIMEOUT),
       })
 
       if (!response.ok) {
@@ -113,37 +167,31 @@ async function fetchArticleContent(url: string): Promise<ReaderResult> {
       // Parse with JSDOM
       const dom = new JSDOM(html, { url })
 
-      // Use Defuddle to extract clean content
+      // Use Defuddle to extract clean content with improved configuration
       const result = await Defuddle(dom, url, {
         debug: false,
-        markdown: false, // We'll store HTML
+        markdown: true, // Use markdown for cleaner, more reliable extraction
+        // Defuddle will try multiple extraction strategies
+        minContentLength: 200, // Ensure we get substantial content
       })
 
       // Cleanup JSDOM to free memory
       dom.window.close()
 
-      // Aggressive cleanup: Defuddle sometimes includes too much page scaffolding
+      // Since we're using markdown mode, content should already be cleaner
+      // But still do minimal cleanup if needed
       if (result.content) {
-        // Use regex-based cleaning to avoid JSDOM CSS parsing errors
-        let cleaned = result.content
+        let cleaned = result.content.trim()
 
-        // Remove tags entirely
-        cleaned = cleaned.replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
-        cleaned = cleaned.replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
-        cleaned = cleaned.replace(/<noscript[^>]*>[\s\S]*?<\/noscript>/gi, '')
-        cleaned = cleaned.replace(/<svg[^>]*>[\s\S]*?<\/svg>/gi, '')
-        cleaned = cleaned.replace(/<nav[^>]*>[\s\S]*?<\/nav>/gi, '')
-        cleaned = cleaned.replace(/<footer[^>]*>[\s\S]*?<\/footer>/gi, '')
-        cleaned = cleaned.replace(/<aside[^>]*>[\s\S]*?<\/aside>/gi, '')
-        cleaned = cleaned.replace(/<!--[\s\S]*?-->/g, '')
+        // Remove common markdown artifacts that might have slipped through
+        cleaned = cleaned
+          .replace(/\[Advertisement\]/gi, '')
+          .replace(/\[Skip to content\]/gi, '')
+          .replace(/\[Show more\]/gi, '')
+          .replace(/\[Read more\]/gi, '')
+          .trim()
 
-        // Strip all class, id, style, and data-* attributes
-        cleaned = cleaned.replace(/\s+class="[^"]*"/gi, '')
-        cleaned = cleaned.replace(/\s+id="[^"]*"/gi, '')
-        cleaned = cleaned.replace(/\s+style="[^"]*"/gi, '')
-        cleaned = cleaned.replace(/\s+data-[a-z-]+=["'][^"']*["']/gi, '')
-
-        result.content = cleaned.trim()
+        result.content = cleaned
       }
 
       // Detect paywall or blocking
@@ -169,10 +217,13 @@ async function fetchArticleContent(url: string): Promise<ReaderResult> {
         } as ReaderError
       }
 
+      // Convert markdown to HTML for display
+      const htmlContent = result.content ? markdownToHtml(result.content) : ''
+
       // Success!
       return {
         success: true,
-        content: result.content || '',
+        content: htmlContent,
         title: result.title || '',
         author: result.author,
         wordCount: result.wordCount || 0,

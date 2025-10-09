@@ -24,9 +24,9 @@ const CATEGORY_ICONS: Record<CategorySlug, LucideIcon> = {
 
 export default function AboutPage() {
   return (
-    <div className="mx-auto max-w-3xl px-4 sm:px-6 pt-2 sm:pt-2.5 pb-8 content">
-      <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-semibold tracking-tight">About</h1>
+    <div className="mx-auto max-w-3xl px-4 sm:px-6 pt-1 sm:pt-1.5 pb-8 content">
+      <div className="flex items-center justify-between mb-4">
+        <h1 className="text-xl font-semibold tracking-tight">About</h1>
         {/* <div className="flex items-center gap-3">
           <div className="flex items-center gap-2">
             {CATEGORIES.map((category) => {

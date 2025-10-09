@@ -13,6 +13,7 @@
     "discover-web": "tsx --env-file=.env.local scripts/discover-web.ts",
     "rewrite": "tsx --env-file=.env.local scripts/rewrite.ts",
     "categorize": "tsx --env-file=.env.local scripts/categorize.ts",
+    "prefetch": "tsx --env-file=.env.local scripts/prefetch-content.ts",
     "format": "prettier --write ."
   },
   "dependencies": {

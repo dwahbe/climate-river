@@ -49,9 +49,9 @@ export default async function CategoriesPage() {
   )
 
   return (
-    <div className="mx-auto max-w-3xl px-4 sm:px-6 pt-2 sm:pt-2.5 pb-8 content">
-      <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-semibold tracking-tight">Categories</h1>
+    <div className="mx-auto max-w-3xl px-4 sm:px-6 pt-1 sm:pt-1.5 pb-8 content">
+      <div className="flex items-center justify-between mb-4">
+        <h1 className="text-xl font-semibold tracking-tight">Categories</h1>
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-2">
             {CATEGORIES.map((category) => {
@@ -97,7 +97,8 @@ export default async function CategoriesPage() {
       </div>
 
       <p className="mt-3 text-sm text-zinc-600">
-        Explore the climate beats where we curate the most consequential reporting in real time.
+        Explore the climate beats where we curate the most consequential
+        reporting in real time.
       </p>
 
       <div className="mt-8 divide-y divide-zinc-200/70">
@@ -112,7 +113,10 @@ export default async function CategoriesPage() {
                   className="inline-flex h-9 w-9 flex-none items-center justify-center rounded-full bg-zinc-100"
                   style={{ color: category.color }}
                 >
-                  <CategoryIcon slug={category.slug} className="h-4 w-4 text-current" />
+                  <CategoryIcon
+                    slug={category.slug}
+                    className="h-4 w-4 text-current"
+                  />
                 </span>
                 <div>
                   <h2 className="text-base font-semibold tracking-tight text-zinc-900">
@@ -137,13 +141,11 @@ export default async function CategoriesPage() {
                   const leadHref = `/api/click?aid=${cluster.lead_article_id}&url=${encodeURIComponent(
                     cluster.lead_url
                   )}`
-                  const source = cluster.lead_source || hostFrom(cluster.lead_url)
+                  const source =
+                    cluster.lead_source || hostFrom(cluster.lead_url)
 
                   return (
-                    <li
-                      key={cluster.cluster_id}
-                      className="flex gap-3"
-                    >
+                    <li key={cluster.cluster_id} className="flex gap-3">
                       <span className="mt-0.5 text-xs font-medium text-zinc-400 tabular-nums leading-6">
                         {index + 1}.
                       </span>
