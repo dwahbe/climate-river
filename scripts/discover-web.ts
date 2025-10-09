@@ -2,6 +2,7 @@
 import { query, endPool } from '@/lib/db'
 import { generateText } from 'ai'
 import { openai } from '@ai-sdk/openai'
+import { categorizeAndStoreArticle } from '@/lib/categorizer'
 
 // Breaking news queries - optimized for frequent runs to catch urgent stories
 const BREAKING_NEWS_QUERIES = [
@@ -83,10 +84,7 @@ const WEB_SEARCH_MAX_OUTPUT_TOKENS = parseEnvInt(
   'WEB_SEARCH_MAX_OUTPUT_TOKENS',
   600
 )
-const WEB_SEARCH_RESULT_LIMIT = parseEnvInt(
-  'WEB_SEARCH_LIMIT_PER_QUERY',
-  6
-)
+const WEB_SEARCH_RESULT_LIMIT = parseEnvInt('WEB_SEARCH_LIMIT_PER_QUERY', 6)
 const WEB_SEARCH_CONTEXT_SIZE = (() => {
   const raw = (process.env.WEB_SEARCH_CONTEXT_SIZE || 'medium').toLowerCase()
   return raw === 'low' || raw === 'high' ? raw : ('medium' as const)
@@ -126,7 +124,9 @@ function estimateWebSearchCost(usage: any, toolCalls: number): number {
         : 0
 
   const fallbackTokens =
-    inputTokens === 0 && outputTokens === 0 && typeof usage?.totalTokens === 'number'
+    inputTokens === 0 &&
+    outputTokens === 0 &&
+    typeof usage?.totalTokens === 'number'
       ? usage.totalTokens
       : 0
 
@@ -135,7 +135,8 @@ function estimateWebSearchCost(usage: any, toolCalls: number): number {
     (outputTokens / 1_000_000) * OPENAI_WEB_SEARCH_OUTPUT_PER_M +
     (fallbackTokens / 1_000_000) * OPENAI_WEB_SEARCH_INPUT_PER_M
 
-  const totalCost = costFromTokens + toolCalls * OPENAI_WEB_SEARCH_TOOL_CALL_COST
+  const totalCost =
+    costFromTokens + toolCalls * OPENAI_WEB_SEARCH_TOOL_CALL_COST
   return Number.isFinite(totalCost) ? totalCost : 0
 }
 
@@ -186,7 +187,8 @@ function parseWebSearchJson(
           ? item.snippet.trim()
           : typeof item.summary === 'string' && item.summary.trim().length > 0
             ? item.summary.trim()
-            : typeof item.description === 'string' && item.description.trim().length > 0
+            : typeof item.description === 'string' &&
+                item.description.trim().length > 0
               ? item.description.trim()
               : `Latest climate coverage for "${query}"`
 
@@ -264,26 +266,40 @@ async function callOpenAIWebSearch(
 
     let results = parseWebSearchJson(response.text, query)
     if (results.length === 0) {
-      console.log('Web search returned no structured results; attempting fallback parsing')
+      console.log(
+        'Web search returned no structured results; attempting fallback parsing'
+      )
       if (WEB_SEARCH_DEBUG && response.text) {
         console.log(
           'Web search response text preview:',
           response.text.substring(0, 200)
         )
       }
-      if (WEB_SEARCH_DEBUG && Array.isArray(response.toolResults) && response.toolResults.length > 0) {
+      if (
+        WEB_SEARCH_DEBUG &&
+        Array.isArray(response.toolResults) &&
+        response.toolResults.length > 0
+      ) {
         console.log(
           'Web search tool result sample:',
           JSON.stringify(response.toolResults[0] ?? null).substring(0, 200)
         )
       }
-      if (WEB_SEARCH_DEBUG && Array.isArray(response.toolCalls) && response.toolCalls.length > 0) {
+      if (
+        WEB_SEARCH_DEBUG &&
+        Array.isArray(response.toolCalls) &&
+        response.toolCalls.length > 0
+      ) {
         console.log(
           'Web search tool call sample:',
           JSON.stringify(response.toolCalls[0] ?? null).substring(0, 200)
         )
       }
-      if (WEB_SEARCH_DEBUG && Array.isArray(response.sources) && response.sources.length > 0) {
+      if (
+        WEB_SEARCH_DEBUG &&
+        Array.isArray(response.sources) &&
+        response.sources.length > 0
+      ) {
         console.log(
           'Web search source sample:',
           JSON.stringify(response.sources[0] ?? null).substring(0, 200)
@@ -329,7 +345,9 @@ async function callOpenAIWebSearch(
   }
 }
 
-async function generateGoogleNewsSuggestions(query: string): Promise<string | null> {
+async function generateGoogleNewsSuggestions(
+  query: string
+): Promise<string | null> {
   console.log(`OpenAI Google News suggestions: ${query}`)
 
   try {
@@ -355,7 +373,9 @@ async function generateGoogleNewsSuggestions(query: string): Promise<string | nu
   }
 }
 
-async function discoverViaGoogleNews(query: string): Promise<WebSearchResult[]> {
+async function discoverViaGoogleNews(
+  query: string
+): Promise<WebSearchResult[]> {
   const suggestionText = await generateGoogleNewsSuggestions(query)
   const suggestionResults = await executeAISearchSuggestions(suggestionText)
 
@@ -892,9 +912,29 @@ export async function run(
 
         if (articleId) {
           await ensureClusterForArticle(articleId, result.title)
+
+          // Categorize the article using hybrid approach
+          try {
+            await categorizeAndStoreArticle(
+              articleId,
+              result.title,
+              result.snippet || undefined
+            )
+            console.log(
+              `✓ Added & categorized: ${result.title.substring(0, 60)}...`
+            )
+          } catch (error) {
+            console.error(
+              `  ❌ Failed to categorize article ${articleId}:`,
+              error
+            )
+            console.log(
+              `✓ Added (uncategorized): ${result.title.substring(0, 60)}...`
+            )
+          }
+
           inserted++
           totalInserted++
-          console.log(`✓ Added: ${result.title.substring(0, 60)}...`)
         }
       } else {
         console.log(`- Skipped duplicate: ${result.title.substring(0, 60)}...`)

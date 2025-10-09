@@ -810,8 +810,11 @@ async function ingestFromFeed(feedUrl: string, sourceId: number, limit = 20) {
         await categorizeAndStoreArticle(articleId, title, dek || undefined)
         console.log(`  📝 Categorized article: ${title.slice(0, 50)}...`)
       } catch (error) {
-        console.error(`  ❌ Failed to categorize article ${articleId}:`, error)
-        // Don't fail the whole ingestion if categorization fails
+        console.error(
+          `  ❌ CATEGORIZATION FAILED for article ${articleId}: ${error instanceof Error ? error.message : String(error)}`
+        )
+        console.error(`     Title: "${title}"`)
+        // Don't fail the whole ingestion if categorization fails, but make it visible
       }
     }
   }

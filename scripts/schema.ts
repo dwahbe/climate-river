@@ -144,8 +144,10 @@ export async function run() {
 
   // --- get_river_clusters function -------------------------------------------
   // Drop existing function first (it has different return type)
-  await query(`DROP FUNCTION IF EXISTS get_river_clusters(boolean,integer,integer,text);`)
-  
+  await query(
+    `DROP FUNCTION IF EXISTS get_river_clusters(boolean,integer,integer,text);`
+  )
+
   await query(`
     create or replace function get_river_clusters(
       p_is_latest boolean default false,
