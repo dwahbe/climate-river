@@ -1,10 +1,72 @@
 import Link from 'next/link'
 import * as DB from '@/lib/db'
 import LocalTime from '@/components/LocalTime'
+import ArticleStructuredData from '@/components/ArticleStructuredData'
+import type { Metadata } from 'next'
 
 // Cache for 5 minutes (300 seconds)
 export const revalidate = 300
 export const runtime = 'nodejs'
+
+export async function generateMetadata(props: {
+  params: Promise<{ id: string }>
+}): Promise<Metadata> {
+  const params = await props.params
+  const cid = Number(params.id)
+
+  const { rows } = await DB.query<{
+    lead_title: string
+    lead_dek: string | null
+    lead_source: string | null
+    size: number
+  }>(
+    `
+    SELECT
+      COALESCE(a.rewritten_title, a.title) AS lead_title,
+      a.dek AS lead_dek,
+      COALESCE(a.publisher_name, s.name) AS lead_source,
+      cs.size
+    FROM cluster_scores cs
+    JOIN articles a ON a.id = cs.lead_article_id
+    LEFT JOIN sources s ON s.id = a.source_id
+    WHERE cs.cluster_id = $1::bigint
+    LIMIT 1
+    `,
+    [cid]
+  )
+
+  const cluster = rows[0]
+  if (!cluster) {
+    return {
+      title: 'Story Not Found',
+      description: 'This climate news story could not be found.',
+    }
+  }
+
+  const title = cluster.lead_title
+  const description =
+    cluster.lead_dek ||
+    `Read ${cluster.size} article${cluster.size === 1 ? '' : 's'} about this climate news story from ${cluster.lead_source || 'various sources'}.`
+
+  return {
+    title,
+    description,
+    openGraph: {
+      title,
+      description,
+      url: `https://climateriver.org/river/${cid}`,
+      type: 'article',
+    },
+    twitter: {
+      title,
+      description,
+      card: 'summary_large_image',
+    },
+    alternates: {
+      canonical: `https://climateriver.org/river/${cid}`,
+    },
+  }
+}
 
 type Sub = {
   article_id: number
@@ -167,71 +229,81 @@ export default async function ClusterPage(props: {
   )}`
 
   return (
-    <div className="mx-auto max-w-3xl px-4 sm:px-6 py-3">
-      {/* Page chrome */}
-      <div className="flex items-center justify-between text-[12px] sm:text-sm text-zinc-600">
-        <Link href="/river" className="hover:underline">
-          ← Back to river
-        </Link>
-        <span>
-          {r.size} {r.size === 1 ? 'article' : 'articles'}
-        </span>
-      </div>
-
-      {/* Lead article */}
-      <article className="mt-4">
-        <div className="text-xs text-zinc-500 mb-2">
-          {r.lead_source ?? hostFrom(r.lead_url)}
+    <>
+      <ArticleStructuredData
+        headline={r.lead_title}
+        description={r.lead_dek || undefined}
+        datePublished={r.published_at}
+        author={r.lead_author || undefined}
+        publisher={r.lead_source || 'Climate River'}
+        url={`https://climateriver.org/river/${cid}`}
+      />
+      <div className="mx-auto max-w-3xl px-4 sm:px-6 py-3">
+        {/* Page chrome */}
+        <div className="flex items-center justify-between text-[12px] sm:text-sm text-zinc-600">
+          <Link href="/river" className="hover:underline">
+            ← Back to river
+          </Link>
+          <span>
+            {r.size} {r.size === 1 ? 'article' : 'articles'}
+          </span>
         </div>
 
-        <h1 className="text-xl font-semibold leading-tight mb-3 text-pretty">
-          <a
-            href={leadClickHref}
-            className="text-zinc-900 hover:underline decoration-zinc-300"
-          >
-            {r.lead_title}
-          </a>
-        </h1>
+        {/* Lead article */}
+        <article className="mt-4">
+          <div className="text-xs text-zinc-500 mb-2">
+            {r.lead_source ?? hostFrom(r.lead_url)}
+          </div>
 
-        {r.lead_dek && (
-          <p className="text-zinc-600 leading-relaxed mb-3 text-pretty">
-            {r.lead_dek}
-          </p>
+          <h1 className="text-xl font-semibold leading-tight mb-3 text-pretty">
+            <a
+              href={leadClickHref}
+              className="text-zinc-900 hover:underline decoration-zinc-300"
+            >
+              {r.lead_title}
+            </a>
+          </h1>
+
+          {r.lead_dek && (
+            <p className="text-zinc-600 leading-relaxed mb-3 text-pretty">
+              {r.lead_dek}
+            </p>
+          )}
+
+          <div className="text-xs text-zinc-500">
+            <LocalTime iso={r.published_at} />
+          </div>
+        </article>
+
+        {/* Related articles */}
+        {r.subs.length > 0 && (
+          <section className="mt-8">
+            <h2 className="text-sm font-medium text-zinc-500 mb-4">
+              Related articles
+            </h2>
+            <ul className="flex flex-col gap-4 list-none">
+              {r.subs.map((s) => {
+                const href = `/api/click?aid=${s.article_id}&url=${encodeURIComponent(
+                  s.url
+                )}`
+                return (
+                  <li key={s.article_id}>
+                    <div className="text-xs text-zinc-500 mb-1">
+                      {s.source ?? hostFrom(s.url)}
+                    </div>
+                    <a
+                      href={href}
+                      className="block text-zinc-900 hover:underline decoration-zinc-300 leading-snug text-pretty"
+                    >
+                      {s.title}
+                    </a>
+                  </li>
+                )
+              })}
+            </ul>
+          </section>
         )}
-
-        <div className="text-xs text-zinc-500">
-          <LocalTime iso={r.published_at} />
-        </div>
-      </article>
-
-      {/* Related articles */}
-      {r.subs.length > 0 && (
-        <section className="mt-8">
-          <h2 className="text-sm font-medium text-zinc-500 mb-4">
-            Related articles
-          </h2>
-          <ul className="flex flex-col gap-4 list-none">
-            {r.subs.map((s) => {
-              const href = `/api/click?aid=${s.article_id}&url=${encodeURIComponent(
-                s.url
-              )}`
-              return (
-                <li key={s.article_id}>
-                  <div className="text-xs text-zinc-500 mb-1">
-                    {s.source ?? hostFrom(s.url)}
-                  </div>
-                  <a
-                    href={href}
-                    className="block text-zinc-900 hover:underline decoration-zinc-300 leading-snug text-pretty"
-                  >
-                    {s.title}
-                  </a>
-                </li>
-              )
-            })}
-          </ul>
-        </section>
-      )}
-    </div>
+      </div>
+    </>
   )
 }

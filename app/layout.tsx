@@ -3,6 +3,7 @@ import Link from 'next/link'
 import { Analytics } from '@vercel/analytics/react'
 import LastUpdated from '@/components/LastUpdated'
 import HeaderLogoHover from '@/components/HeaderLogoHover'
+import OrganizationStructuredData from '@/components/OrganizationStructuredData'
 import { Inclusive_Sans } from 'next/font/google'
 
 const inclusive = Inclusive_Sans({
@@ -13,7 +14,52 @@ const inclusive = Inclusive_Sans({
 })
 
 export const metadata = {
-  title: 'Climate River',
+  metadataBase: new URL('https://climateriver.org'),
+  title: {
+    default: 'Climate River - Climate News Aggregator',
+    template: '%s | Climate River',
+  },
+  description:
+    'Stay informed with Climate River, a curated aggregator of the latest climate news from leading outlets. Organized by story, ranked for trust and timeliness.',
+  keywords: [
+    'climate change',
+    'climate news',
+    'environmental news',
+    'climate crisis',
+    'global warming',
+    'sustainability',
+    'climate policy',
+    'renewable energy',
+  ],
+  authors: [{ name: 'Dylan Wahbe', url: 'https://dylanwahbe.com' }],
+  creator: 'Dylan Wahbe',
+  openGraph: {
+    type: 'website',
+    locale: 'en_US',
+    url: 'https://climateriver.org',
+    title: 'Climate River - Climate News Aggregator',
+    description:
+      'Stay informed with Climate River, a curated aggregator of the latest climate news from leading outlets. Organized by story, ranked for trust and timeliness.',
+    siteName: 'Climate River',
+  },
+  twitter: {
+    card: 'summary_large_image',
+    title: 'Climate River - Climate News Aggregator',
+    description:
+      'Stay informed with Climate River, a curated aggregator of the latest climate news from leading outlets.',
+    creator: '@dylanwahbe',
+  },
+  robots: {
+    index: true,
+    follow: true,
+    googleBot: {
+      index: true,
+      follow: true,
+      'max-video-preview': -1,
+      'max-image-preview': 'large',
+      'max-snippet': -1,
+    },
+  },
   icons: {
     icon: '/icon.svg',
     shortcut: '/icon.svg',
@@ -28,6 +74,9 @@ export default async function RootLayout({
 }) {
   return (
     <html lang="en" className={inclusive.className}>
+      <head>
+        <OrganizationStructuredData />
+      </head>
       <body className="min-h-full bg-zinc-50 text-zinc-900 antialiased">
         <nav className="bg-white border-b border-zinc-100">
           <div className="mx-auto max-w-3xl px-4 sm:px-6">

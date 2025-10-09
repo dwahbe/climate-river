@@ -1,9 +1,30 @@
 import { getRiverData } from '@/lib/services/riverService'
 import RiverClusterList from '@/components/RiverClusterList'
+import type { Metadata } from 'next'
 
 // Cache for 5 minutes (300 seconds)
 export const revalidate = 300
 export const runtime = 'nodejs'
+
+export const metadata: Metadata = {
+  title: 'Top Climate News',
+  description:
+    'The latest climate news stories aggregated from trusted sources. Updated continuously with breaking climate news, policy updates, and environmental reports.',
+  openGraph: {
+    title: 'Top Climate News | Climate River',
+    description:
+      'The latest climate news stories aggregated from trusted sources. Updated continuously.',
+    url: 'https://climateriver.org',
+  },
+  twitter: {
+    title: 'Top Climate News | Climate River',
+    description:
+      'The latest climate news stories aggregated from trusted sources. Updated continuously.',
+  },
+  alternates: {
+    canonical: 'https://climateriver.org',
+  },
+}
 
 export default async function RiverPage() {
   const clusters = await getRiverData({

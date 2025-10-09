@@ -12,6 +12,7 @@ import ClimateRiverLogo from '@/components/ClimateRiverLogo'
 import { CATEGORIES, type CategorySlug } from '@/lib/tagger'
 import { CategoryIcon } from '@/components/categoryIcons'
 import { getRiverData } from '@/lib/services/riverService'
+import type { Metadata } from 'next'
 
 const CATEGORY_ICONS: Record<CategorySlug, LucideIcon> = {
   government: Landmark,
@@ -23,6 +24,25 @@ const CATEGORY_ICONS: Record<CategorySlug, LucideIcon> = {
 }
 
 export const runtime = 'nodejs'
+
+export const metadata: Metadata = {
+  title: 'Categories',
+  description:
+    'Explore climate news by category: Government policy and regulations, Activism and protests, Business and corporate action, Climate impacts and extreme weather, Clean technology and renewables, Research and scientific discoveries.',
+  openGraph: {
+    title: 'Climate News Categories',
+    description:
+      'Explore climate news organized by category: Government, Activism, Business, Impacts, Tech, and Research.',
+    url: 'https://climateriver.org/categories',
+  },
+  twitter: {
+    title: 'Climate News Categories',
+    description: 'Explore climate news organized by category.',
+  },
+  alternates: {
+    canonical: 'https://climateriver.org/categories',
+  },
+}
 
 function hostFrom(url: string) {
   try {

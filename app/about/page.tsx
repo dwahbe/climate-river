@@ -10,8 +10,29 @@ import {
 } from 'lucide-react'
 import ClimateRiverLogo from '@/components/ClimateRiverLogo'
 import { CATEGORIES, type CategorySlug } from '@/lib/tagger'
+import type { Metadata } from 'next'
 
 export const dynamic = 'force-static'
+
+export const metadata: Metadata = {
+  title: 'About',
+  description:
+    'Learn about Climate River, a climate news aggregator that brings focus to the latest climate news by organizing articles from leading outlets and ranking for trust and timeliness. Inspired by Techmeme.',
+  openGraph: {
+    title: 'About Climate River',
+    description:
+      'Learn about Climate River, a climate news aggregator that brings focus to the latest climate news by organizing articles from leading outlets.',
+    url: 'https://climateriver.org/about',
+  },
+  twitter: {
+    title: 'About Climate River',
+    description:
+      'Learn about Climate River, a climate news aggregator that brings focus to the latest climate news.',
+  },
+  alternates: {
+    canonical: 'https://climateriver.org/about',
+  },
+}
 
 const CATEGORY_ICONS: Record<CategorySlug, LucideIcon> = {
   government: Landmark,
