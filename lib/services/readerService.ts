@@ -171,8 +171,6 @@ async function fetchArticleContent(url: string): Promise<ReaderResult> {
       const result = await Defuddle(dom, url, {
         debug: false,
         markdown: true, // Use markdown for cleaner, more reliable extraction
-        // Defuddle will try multiple extraction strategies
-        minContentLength: 200, // Ensure we get substantial content
       })
 
       // Cleanup JSDOM to free memory

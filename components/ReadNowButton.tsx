@@ -13,13 +13,46 @@ type ReadNowButtonProps = {
 }
 
 /**
+ * Known paywall/difficult sites where reader mode typically fails
+ */
+const KNOWN_PAYWALL_DOMAINS = [
+  'nytimes.com',
+  'wsj.com',
+  'ft.com',
+  'economist.com',
+  'bloomberg.com',
+  'washingtonpost.com',
+  'newyorker.com',
+  'theathletic.com',
+  'foreignpolicy.com',
+]
+
+/**
+ * Check if URL is from a known paywall site
+ */
+function isKnownPaywall(url: string): boolean {
+  try {
+    const hostname = new URL(url).hostname.toLowerCase()
+    return KNOWN_PAYWALL_DOMAINS.some((domain) => hostname.includes(domain))
+  } catch {
+    return false
+  }
+}
+
+/**
  * Determines if reader content is available and usable
  * Hides button for paywalled, blocked, or minimal content articles
  */
 function shouldShowReaderButton(
+  articleUrl: string,
   contentStatus: string | null | undefined,
   contentWordCount: number | null | undefined
 ): boolean {
+  // Hide button for known paywall sites (don't even try)
+  if (isKnownPaywall(articleUrl)) {
+    return false
+  }
+
   // If we haven't tried fetching yet, show the button
   if (!contentStatus) return true
 
@@ -52,7 +85,7 @@ export default function ReadNowButton({
   const [isOpen, setIsOpen] = useState(false)
 
   // Don't render the button if content is unavailable
-  if (!shouldShowReaderButton(contentStatus, contentWordCount)) {
+  if (!shouldShowReaderButton(articleUrl, contentStatus, contentWordCount)) {
     return null
   }
 
