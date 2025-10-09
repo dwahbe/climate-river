@@ -192,11 +192,17 @@ export const CATEGORIES = [
       'extreme weather',
       'climate impact',
       'environmental damage',
+      'climate crisis',
+      'climate refugee',
+      'climate migration',
+      'climate displacement',
+      'displaced by climate',
     ],
     patterns: [
       /(hurricane|flood|drought|wildfire|heatwave|storm|tornado|cyclone)/i,
       /(sea level|glacier|ice sheet|arctic|coral|species|extinction)/i,
       /(ecosystem|biodiversity|agriculture|crops|water|food security)/i,
+      /(climate (crisis|refugee|migration|displacement)|displaced by climate)/i,
     ],
   },
   {

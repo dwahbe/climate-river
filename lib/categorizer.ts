@@ -109,7 +109,7 @@ export async function categorizeArticleHybrid(
 
   if (!articleEmbedding) {
     // Fallback to rule-based only if embedding generation fails
-    console.warn('Failed to generate article embedding, using rule-based only')
+    console.warn(`Failed to generate article embedding for "${title}", using rule-based only`)
     return ruleBasedScores
   }
 
@@ -123,17 +123,22 @@ export async function categorizeArticleHybrid(
     // Get semantic similarity
     const categoryEmbedding = await getCategoryEmbedding(category.slug)
     let semanticConfidence = 0
+    let hasSemanticScore = false
 
     if (categoryEmbedding) {
       const similarity = cosineSimilarity(articleEmbedding, categoryEmbedding)
       // Scale similarity to confidence with more gradual scaling
       // Maps 0.3-1.0 similarity to 0.0-1.0 confidence
       semanticConfidence = Math.max(0, Math.min(1.0, (similarity - 0.3) * 1.43))
+      hasSemanticScore = true
     }
 
     // Combine rule-based and semantic scores
-    // Weight: 40% rule-based, 60% semantic (semantic embeddings are more accurate)
-    const combinedConfidence = ruleConfidence * 0.4 + semanticConfidence * 0.6
+    // If semantic scoring failed, use rule-based only (don't penalize)
+    // Otherwise: Weight 40% rule-based, 60% semantic (semantic embeddings are more accurate)
+    const combinedConfidence = hasSemanticScore
+      ? ruleConfidence * 0.4 + semanticConfidence * 0.6
+      : ruleConfidence
 
     const reasons = [
       ...(ruleScore?.reasons || []),
