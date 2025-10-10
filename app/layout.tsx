@@ -61,9 +61,12 @@ export const metadata = {
     },
   },
   icons: {
-    icon: '/icon.svg',
-    shortcut: '/icon.svg',
-    apple: '/apple-icon.png',
+    icon: [
+      { url: '/icon.svg', type: 'image/svg+xml' },
+      { url: '/icon.svg?v=2', type: 'image/svg+xml' }, // Cache-busting version
+    ],
+    shortcut: '/icon.svg?v=2',
+    apple: '/apple-icon.png?v=2',
   },
 }
 
