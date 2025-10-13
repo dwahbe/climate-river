@@ -15,11 +15,20 @@ export const metadata: Metadata = {
     description:
       'Top climate news aggregated from leading outlets. Stories organized by topic, ranked for trust and timeliness. Updated continuously.',
     url: 'https://climateriver.org',
+    images: [
+      {
+        url: '/api/og',
+        width: 1200,
+        height: 630,
+        alt: 'Climate River - Top climate news headlines',
+      },
+    ],
   },
   twitter: {
     title: 'Top Climate News | Climate River',
     description:
       'Top climate news aggregated from leading outlets. Stories organized by topic, ranked for trust and timeliness.',
+    images: ['/api/og'],
   },
   alternates: {
     canonical: 'https://climateriver.org',

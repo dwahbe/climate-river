@@ -43,6 +43,14 @@ export const metadata = {
     description:
       'Climate River aggregates climate news from trusted sources like The Guardian, New York Times, and Reuters. Stories organized by topic, ranked for credibility and timeliness.',
     siteName: 'Climate River',
+    images: [
+      {
+        url: '/api/og',
+        width: 1200,
+        height: 630,
+        alt: 'Climate River - Top climate news headlines',
+      },
+    ],
   },
   twitter: {
     card: 'summary_large_image',
@@ -50,6 +58,7 @@ export const metadata = {
     description:
       'Climate news aggregated from The Guardian, NYT, Reuters, and more. Organized by story, ranked for trust.',
     creator: '@dylanwahbe',
+    images: ['/api/og'],
   },
   robots: {
     index: true,
