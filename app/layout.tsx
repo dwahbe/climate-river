@@ -20,16 +20,18 @@ export const metadata = {
     template: '%s | Climate River',
   },
   description:
-    'Stay informed with Climate River, a curated aggregator of the latest climate news from leading outlets. Organized by story, ranked for trust and timeliness.',
+    'Climate River aggregates climate news from The Guardian, New York Times, Reuters, and other trusted sources. Stories organized by topic, ranked for credibility and timeliness. Your focused source for climate change coverage.',
   keywords: [
-    'climate change',
-    'climate news',
+    'climate change news',
+    'climate news aggregator',
     'environmental news',
     'climate crisis',
-    'global warming',
-    'sustainability',
+    'global warming news',
     'climate policy',
-    'renewable energy',
+    'renewable energy news',
+    'climate journalism',
+    'sustainability news',
+    'climate change coverage',
   ],
   authors: [{ name: 'Dylan Wahbe', url: 'https://dylanwahbe.com' }],
   creator: 'Dylan Wahbe',
@@ -39,14 +41,14 @@ export const metadata = {
     url: 'https://climateriver.org',
     title: 'Climate River - Climate News Aggregator',
     description:
-      'Stay informed with Climate River, a curated aggregator of the latest climate news from leading outlets. Organized by story, ranked for trust and timeliness.',
+      'Climate River aggregates climate news from trusted sources like The Guardian, New York Times, and Reuters. Stories organized by topic, ranked for credibility and timeliness.',
     siteName: 'Climate River',
   },
   twitter: {
     card: 'summary_large_image',
     title: 'Climate River - Climate News Aggregator',
     description:
-      'Stay informed with Climate River, a curated aggregator of the latest climate news from leading outlets.',
+      'Climate news aggregated from The Guardian, NYT, Reuters, and more. Organized by story, ranked for trust.',
     creator: '@dylanwahbe',
   },
   robots: {

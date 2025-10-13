@@ -9,17 +9,17 @@ export const runtime = 'nodejs'
 export const metadata: Metadata = {
   title: 'Top Climate News',
   description:
-    'The latest climate news stories aggregated from trusted sources. Updated continuously with breaking climate news, policy updates, and environmental reports.',
+    'Top climate news aggregated from leading outlets like The Guardian, New York Times, and Reuters. Stories organized by topic, ranked for trust and timeliness. Updated continuously.',
   openGraph: {
     title: 'Top Climate News | Climate River',
     description:
-      'The latest climate news stories aggregated from trusted sources. Updated continuously.',
+      'Top climate news aggregated from leading outlets. Stories organized by topic, ranked for trust and timeliness. Updated continuously.',
     url: 'https://climateriver.org',
   },
   twitter: {
     title: 'Top Climate News | Climate River',
     description:
-      'The latest climate news stories aggregated from trusted sources. Updated continuously.',
+      'Top climate news aggregated from leading outlets. Stories organized by topic, ranked for trust and timeliness.',
   },
   alternates: {
     canonical: 'https://climateriver.org',

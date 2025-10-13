@@ -40,30 +40,49 @@ export async function generateMetadata(props: {
     return {
       title: 'Story Not Found',
       description: 'This climate news story could not be found.',
+      robots: {
+        index: false,
+        follow: false,
+      },
     }
   }
 
   const title = cluster.lead_title
-  const description =
-    cluster.lead_dek ||
-    `Read ${cluster.size} article${cluster.size === 1 ? '' : 's'} about this climate news story from ${cluster.lead_source || 'various sources'}.`
 
+  // Create SEO-optimized description that emphasizes aggregation and sources
+  const description =
+    cluster.size > 1
+      ? `Coverage of "${cluster.lead_title}" from ${cluster.size} trusted climate news sources. Compare reporting from ${cluster.lead_source || 'leading outlets'} and more on Climate River.`
+      : `Latest reporting on "${cluster.lead_title}" from ${cluster.lead_source || 'trusted climate news sources'}. Part of Climate River's curated climate news coverage.`
+
+  // SEO Strategy: NOINDEX all story pages
+  // Climate River should rank for aggregation/discovery terms, not individual stories
+  // When users search for specific stories, the original outlets should appear
+  // We want to be found via: "climate news", "climate news aggregator", etc.
   return {
     title,
     description,
     openGraph: {
-      title,
+      title: `${title} - Climate River`,
       description,
       url: `https://climateriver.org/river/${cid}`,
       type: 'article',
     },
     twitter: {
-      title,
+      title: `${title} - Climate River`,
       description,
       card: 'summary_large_image',
     },
     alternates: {
       canonical: `https://climateriver.org/river/${cid}`,
+    },
+    robots: {
+      index: false, // Don't compete with source outlets for story searches
+      follow: true, // Still follow links for crawling and link equity
+      googleBot: {
+        index: false,
+        follow: true,
+      },
     },
   }
 }

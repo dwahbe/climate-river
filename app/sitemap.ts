@@ -37,26 +37,10 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     priority: 0.8,
   }))
 
-  // Get recent cluster IDs (last 30 days)
-  const { rows } = await DB.query<{ cluster_id: number; published_at: string }>(
-    `
-    SELECT DISTINCT
-      cs.cluster_id,
-      a.published_at
-    FROM cluster_scores cs
-    JOIN articles a ON a.id = cs.lead_article_id
-    WHERE a.published_at > NOW() - INTERVAL '30 days'
-    ORDER BY a.published_at DESC
-    LIMIT 500
-    `
-  )
+  // SEO Strategy: Don't include story pages in sitemap
+  // Story pages are noindexed - Climate River ranks for aggregation, not individual stories
+  // Focus crawl budget on pages that matter: home, categories, about
+  // This follows the Techmeme approach: be the destination, not the story source
 
-  const clusterPages: MetadataRoute.Sitemap = rows.map((row) => ({
-    url: `${baseUrl}/river/${row.cluster_id}`,
-    lastModified: new Date(row.published_at),
-    changeFrequency: 'daily' as const,
-    priority: 0.6,
-  }))
-
-  return [...staticPages, ...categoryPages, ...clusterPages]
+  return [...staticPages, ...categoryPages]
 }
