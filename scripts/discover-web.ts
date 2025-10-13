@@ -663,15 +663,23 @@ function parseContentForArticles(content: string): WebSearchResult[] {
       if (nextUrl) {
         const urlMatch = nextUrl.match(/https?:\/\/[^\s\)\]]+/)
         if (urlMatch) {
-          results.push({
-            title: line.replace(/^[\d\.\s]*/, '').trim(),
-            url: urlMatch[0],
-            snippet:
-              nextLines.find((l) => !l.includes('http') && l.length > 10) ||
-              'Climate news article',
-            source: extractSourceFromUrl(urlMatch[0]),
-            publishedDate: new Date().toISOString(),
-          })
+          const potentialTitle = line.replace(/^[\d\.\s]*/, '').trim()
+          // Validate that title doesn't look like raw JSON (be specific to avoid false positives)
+          const looksLikeJson = /^["'](title|url|publishedDate|headline|link|description|snippet)["']\s*:/.test(potentialTitle) || 
+                                potentialTitle.includes('": "') ||
+                                (potentialTitle.startsWith('{') && potentialTitle.includes(':'))
+          
+          if (!looksLikeJson) {
+            results.push({
+              title: potentialTitle,
+              url: urlMatch[0],
+              snippet:
+                nextLines.find((l) => !l.includes('http') && l.length > 10) ||
+                'Climate news article',
+              source: extractSourceFromUrl(urlMatch[0]),
+              publishedDate: new Date().toISOString(),
+            })
+          }
         }
       }
     }
@@ -698,7 +706,12 @@ function parseContentForArticles(content: string): WebSearchResult[] {
         correspondingUrl = urls[results.length]
       }
 
-      if (correspondingUrl && title.length > 10) {
+      // Validate that title doesn't look like raw JSON (be specific to avoid false positives)
+      const looksLikeJson = /^["'](title|url|publishedDate|headline|link|description|snippet)["']\s*:/.test(title) || 
+                            title.includes('": "') ||
+                            (title.startsWith('{') && title.includes(':'))
+      
+      if (correspondingUrl && title.length > 10 && !looksLikeJson) {
         results.push({
           title: title,
           url: correspondingUrl,
