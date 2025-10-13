@@ -2,11 +2,13 @@ import { MetadataRoute } from 'next'
 
 export default function robots(): MetadataRoute.Robots {
   return {
-    rules: {
-      userAgent: '*',
-      allow: '/',
-      disallow: ['/api/', '/api/*'],
-    },
+    rules: [
+      {
+        userAgent: '*',
+        allow: ['/api/og'],
+        disallow: ['/api/'],
+      },
+    ],
     sitemap: 'https://climateriver.org/sitemap.xml',
   }
 }

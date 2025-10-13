@@ -15,8 +15,17 @@ export async function GET(request: NextRequest) {
       limit: 3,
     })
 
-    // Extract headlines - lead_title already includes rewritten title if available
-    const headlines = clusters.map((cluster) => cluster.lead_title)
+    // Extract headlines and sources - lead_title already includes rewritten title if available
+    const headlines = clusters.map((cluster) => ({
+      title: cluster.lead_title,
+      source: cluster.lead_source,
+    }))
+
+    // Fetch the logo
+    const logoUrl = new URL('/ClimateRiver.png', request.url)
+    const logoResponse = await fetch(logoUrl)
+    const logoData = await logoResponse.arrayBuffer()
+    const logoBase64 = Buffer.from(logoData).toString('base64')
 
     return new ImageResponse(
       (
@@ -26,40 +35,35 @@ export async function GET(request: NextRequest) {
             width: '100%',
             display: 'flex',
             flexDirection: 'column',
-            alignItems: 'flex-start',
-            justifyContent: 'space-between',
             backgroundColor: '#fafaf9',
-            padding: '60px 80px',
+            padding: '64px 80px',
             fontFamily: 'system-ui, sans-serif',
           }}
         >
-          {/* Header */}
+          {/* Small header with logo and name */}
           <div
             style={{
               display: 'flex',
-              flexDirection: 'column',
-              gap: '12px',
+              alignItems: 'center',
+              gap: '16px',
+              marginBottom: '32px',
             }}
           >
+            <img
+              src={`data:image/png;base64,${logoBase64}`}
+              width="32"
+              height="32"
+              style={{ flexShrink: 0 }}
+            />
             <div
               style={{
                 display: 'flex',
-                fontSize: 48,
-                fontWeight: 700,
-                color: '#18181b',
-                letterSpacing: '-0.02em',
+                fontSize: 20,
+                fontWeight: 600,
+                color: '#52525b',
               }}
             >
               Climate River
-            </div>
-            <div
-              style={{
-                display: 'flex',
-                fontSize: 24,
-                color: '#71717a',
-              }}
-            >
-              Top climate news right now
             </div>
           </div>
 
@@ -68,9 +72,8 @@ export async function GET(request: NextRequest) {
             style={{
               display: 'flex',
               flexDirection: 'column',
-              gap: '28px',
+              gap: '40px',
               width: '100%',
-              marginTop: '40px',
             }}
           >
             {headlines.slice(0, 3).map((headline, index) => (
@@ -78,18 +81,18 @@ export async function GET(request: NextRequest) {
                 key={index}
                 style={{
                   display: 'flex',
-                  gap: '20px',
+                  gap: '24px',
                   alignItems: 'flex-start',
                 }}
               >
                 <div
                   style={{
                     display: 'flex',
-                    fontSize: 28,
+                    fontSize: 42,
                     fontWeight: 700,
                     color: '#3b82f6',
                     flexShrink: 0,
-                    lineHeight: 1.3,
+                    lineHeight: 1.2,
                   }}
                 >
                   {index + 1}.
@@ -97,30 +100,38 @@ export async function GET(request: NextRequest) {
                 <div
                   style={{
                     display: 'flex',
-                    fontSize: 28,
-                    lineHeight: 1.3,
-                    color: '#18181b',
-                    fontWeight: 500,
+                    flexDirection: 'column',
+                    gap: '8px',
                   }}
                 >
-                  {headline.length > 120
-                    ? headline.substring(0, 120) + '...'
-                    : headline}
+                  <div
+                    style={{
+                      display: 'flex',
+                      fontSize: 42,
+                      lineHeight: 1.2,
+                      color: '#18181b',
+                      fontWeight: 600,
+                    }}
+                  >
+                    {headline.title.length > 100
+                      ? headline.title.substring(0, 100) + '...'
+                      : headline.title}
+                  </div>
+                  {headline.source && (
+                    <div
+                      style={{
+                        display: 'flex',
+                        fontSize: 20,
+                        color: '#71717a',
+                        fontWeight: 400,
+                      }}
+                    >
+                      {headline.source}
+                    </div>
+                  )}
                 </div>
               </div>
             ))}
-          </div>
-
-          {/* Footer */}
-          <div
-            style={{
-              display: 'flex',
-              fontSize: 20,
-              color: '#a1a1aa',
-              marginTop: '40px',
-            }}
-          >
-            climateriver.org
           </div>
         </div>
       ),
@@ -161,7 +172,7 @@ export async function GET(request: NextRequest) {
               display: 'flex',
               fontSize: 32,
               color: '#71717a',
-              marginTop: '20px',
+              marginTop: '24px',
             }}
           >
             Climate News Aggregator
