@@ -665,10 +665,13 @@ function parseContentForArticles(content: string): WebSearchResult[] {
         if (urlMatch) {
           const potentialTitle = line.replace(/^[\d\.\s]*/, '').trim()
           // Validate that title doesn't look like raw JSON (be specific to avoid false positives)
-          const looksLikeJson = /^["'](title|url|publishedDate|headline|link|description|snippet)["']\s*:/.test(potentialTitle) || 
-                                potentialTitle.includes('": "') ||
-                                (potentialTitle.startsWith('{') && potentialTitle.includes(':'))
-          
+          const looksLikeJson =
+            /^["'](title|url|publishedDate|headline|link|description|snippet)["']\s*:/.test(
+              potentialTitle
+            ) ||
+            potentialTitle.includes('": "') ||
+            (potentialTitle.startsWith('{') && potentialTitle.includes(':'))
+
           if (!looksLikeJson) {
             results.push({
               title: potentialTitle,
@@ -707,10 +710,13 @@ function parseContentForArticles(content: string): WebSearchResult[] {
       }
 
       // Validate that title doesn't look like raw JSON (be specific to avoid false positives)
-      const looksLikeJson = /^["'](title|url|publishedDate|headline|link|description|snippet)["']\s*:/.test(title) || 
-                            title.includes('": "') ||
-                            (title.startsWith('{') && title.includes(':'))
-      
+      const looksLikeJson =
+        /^["'](title|url|publishedDate|headline|link|description|snippet)["']\s*:/.test(
+          title
+        ) ||
+        title.includes('": "') ||
+        (title.startsWith('{') && title.includes(':'))
+
       if (correspondingUrl && title.length > 10 && !looksLikeJson) {
         results.push({
           title: title,
