@@ -68,7 +68,7 @@ export async function GET(req: Request) {
   )
   const rewriteLimit = Math.max(
     1,
-    Math.min(100, Number(url.searchParams.get('rewrite') || 30)) // Reduced from 120 to 30
+    Math.min(100, Number(url.searchParams.get('rewrite') || 60)) // Increased from 30 to 60
   )
 
   try {

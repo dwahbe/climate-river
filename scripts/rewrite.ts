@@ -233,8 +233,8 @@ function passesChecks(original: string, draft: string, hasContent: boolean) {
   if (!draft) return false
   const t = sanitizeHeadline(draft)
 
-  // Techmeme-style density: keep fairly dense but allow slightly shorter rewrites
-  const minLength = hasContent ? 70 : 60;
+  // Techmeme-style density: allow more flexibility for high-quality specificity
+  const minLength = hasContent ? 60 : 50;
   if (t.length < minLength || t.length > 170) {
     console.warn(
       `⚠️  Length check failed (${t.length} chars): "${t.slice(0, 50)}..."`
@@ -262,19 +262,19 @@ function passesChecks(original: string, draft: string, hasContent: boolean) {
     return false
   }
 
-  // Word count check - with content we expect MORE detail
+  // Word count check - allow shorter if more specific
   const originalWords = original.split(/\s+/).length
   const draftWords = t.split(/\s+/).length
 
   if (hasContent) {
-    // With content, we expect at least as many words or more
-    if (draftWords < originalWords) {
+    // With content, allow slightly shorter if more specific (90% threshold)
+    if (draftWords < originalWords * 0.9) {
       console.warn(`⚠️  Headline shorter than original despite having content`)
       return false
     }
   } else {
-    // Without content, allow some compression but not too much
-    if (draftWords < originalWords * 0.7) {
+    // Without content, allow reasonable compression
+    if (draftWords < originalWords * 0.6) {
       console.warn(`⚠️  Headline too compressed`)
       return false
     }
@@ -457,9 +457,17 @@ async function fetchBatch(limit = 40) {
           limit 5
         ) as cluster_items
       ) cluster_ctx on true
+      left join lateral (
+        select cs.score
+        from cluster_scores cs
+        where cs.lead_article_id = a.id
+        limit 1
+      ) score_map on true
       where a.rewritten_title is null
         and coalesce(a.published_at, now()) > now() - interval '21 days'
-      order by a.fetched_at desc
+      order by 
+        score_map.score desc nulls last,
+        a.fetched_at desc
       limit $1
     `,
     [limit]
