@@ -28,5 +28,7 @@ export function CategoryIcon({
   strokeWidth?: number
 }) {
   const Icon = CATEGORY_ICON_MAP[slug]
-  return <Icon className={className} strokeWidth={strokeWidth} aria-hidden="true" />
+  return (
+    <Icon className={className} strokeWidth={strokeWidth} aria-hidden="true" />
+  )
 }

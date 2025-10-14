@@ -2,8 +2,7 @@
 
 import React from 'react'
 
-interface ClimateRiverLogoProps
-  extends React.SVGAttributes<SVGSVGElement> {
+interface ClimateRiverLogoProps extends React.SVGAttributes<SVGSVGElement> {
   animated?: boolean
   size?: 'sm' | 'md' | 'lg' | 'xl'
   variant?: 'monochrome' | 'colored'
@@ -45,13 +44,7 @@ export default function ClimateRiverLogo({
       {/* Gradient definitions for colored variant */}
       {variant === 'colored' && (
         <defs>
-          <linearGradient
-            id={gradientId}
-            x1="0%"
-            y1="0%"
-            x2="100%"
-            y2="100%"
-          >
+          <linearGradient id={gradientId} x1="0%" y1="0%" x2="100%" y2="100%">
             <stop offset="0%" stopColor="#3B82F6" />
             <stop offset="20%" stopColor="#EC4899" />
             <stop offset="40%" stopColor="#06B6D4" />

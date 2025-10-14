@@ -1,6 +1,11 @@
 'use client'
 
-import { type CSSProperties, type PointerEvent, useCallback, useRef } from 'react'
+import {
+  type CSSProperties,
+  type PointerEvent,
+  useCallback,
+  useRef,
+} from 'react'
 import clsx from 'clsx'
 
 import ClimateRiverLogo from './ClimateRiverLogo'
@@ -53,30 +58,32 @@ export default function HeaderLogoHover({
     overlay.dataset.active = value ? 'true' : 'false'
   }, [])
 
-  const updatePointer = useCallback((event: PointerEvent<HTMLSpanElement>) => {
-    const overlay = overlayRef.current
+  const updatePointer = useCallback(
+    (event: PointerEvent<HTMLSpanElement>) => {
+      const overlay = overlayRef.current
 
-    if (!overlay) {
-      return
-    }
+      if (!overlay) {
+        return
+      }
 
-    const bounds =
-      containerRectRef.current ?? measureContainer()
+      const bounds = containerRectRef.current ?? measureContainer()
 
-    if (!bounds) {
-      return
-    }
+      if (!bounds) {
+        return
+      }
 
-    const { left, top, width, height } = bounds
-    if (width === 0 || height === 0) {
-      return
-    }
-    const relativeX = ((event.clientX - left) / width) * 100
-    const relativeY = ((event.clientY - top) / height) * 100
+      const { left, top, width, height } = bounds
+      if (width === 0 || height === 0) {
+        return
+      }
+      const relativeX = ((event.clientX - left) / width) * 100
+      const relativeY = ((event.clientY - top) / height) * 100
 
-    overlay.style.setProperty('--pointer-x', `${clampPercentage(relativeX)}%`)
-    overlay.style.setProperty('--pointer-y', `${clampPercentage(relativeY)}%`)
-  }, [measureContainer])
+      overlay.style.setProperty('--pointer-x', `${clampPercentage(relativeX)}%`)
+      overlay.style.setProperty('--pointer-y', `${clampPercentage(relativeY)}%`)
+    },
+    [measureContainer]
+  )
 
   const handlePointerEnter = useCallback(
     (event: PointerEvent<HTMLSpanElement>) => {
@@ -84,14 +91,14 @@ export default function HeaderLogoHover({
       containerRectRef.current = measureContainer()
       updatePointer(event)
     },
-    [measureContainer, setActiveState, updatePointer],
+    [measureContainer, setActiveState, updatePointer]
   )
 
   const handlePointerMove = useCallback(
     (event: PointerEvent<HTMLSpanElement>) => {
       updatePointer(event)
     },
-    [updatePointer],
+    [updatePointer]
   )
 
   const handlePointerLeave = useCallback(() => {
@@ -106,7 +113,7 @@ export default function HeaderLogoHover({
       className={clsx(
         'relative inline-flex select-none items-center justify-center',
         SIZE_MAP[size],
-        className,
+        className
       )}
       onPointerDown={handlePointerEnter}
       onPointerEnter={handlePointerEnter}
@@ -124,18 +131,20 @@ export default function HeaderLogoHover({
       <span
         ref={overlayRef}
         data-active="false"
-        style={{
-          '--pointer-x': '50%',
-          '--pointer-y': '50%',
-          maskImage: LOGO_MASK,
-          WebkitMaskImage: LOGO_MASK,
-        } as CSSProperties}
+        style={
+          {
+            '--pointer-x': '50%',
+            '--pointer-y': '50%',
+            maskImage: LOGO_MASK,
+            WebkitMaskImage: LOGO_MASK,
+          } as CSSProperties
+        }
         className={clsx(
           'pointer-events-none absolute inset-0 inline-flex items-center justify-center',
           '[--logo-reveal-inner:0%] [--logo-reveal-outer:0%]',
           '[transition:--logo-reveal-inner_150ms_ease-out,--logo-reveal-outer_150ms_ease-out]',
           'data-[active=true]:[--logo-reveal-inner:30%] data-[active=true]:[--logo-reveal-outer:55%]',
-          'group-focus-visible:[--logo-reveal-inner:110%] group-focus-visible:[--logo-reveal-outer:140%]',
+          'group-focus-visible:[--logo-reveal-inner:110%] group-focus-visible:[--logo-reveal-outer:140%]'
         )}
       >
         <ClimateRiverLogo
