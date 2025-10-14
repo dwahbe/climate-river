@@ -69,50 +69,46 @@ export default async function CategoriesPage() {
   )
 
   return (
-    <div className="mx-auto max-w-3xl px-4 sm:px-6 pt-1 sm:pt-1.5 pb-8 content">
+    <div className="mx-auto max-w-3xl px-4 sm:px-6 pt-1 sm:pt-1.5 pb-8 content overflow-x-hidden">
       <div className="flex items-center justify-between mb-4">
         <h1 className="text-xl font-semibold tracking-tight">Categories</h1>
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-2">
-            {CATEGORIES.map((category) => {
-              const Icon = CATEGORY_ICONS[category.slug]
-              if (!Icon) return null
+        <div className="flex items-center gap-2">
+          {CATEGORIES.map((category) => {
+            const Icon = CATEGORY_ICONS[category.slug]
+            if (!Icon) return null
 
-              const tooltipId = `categories-page-${category.slug}-tooltip`
+            const tooltipId = `categories-page-${category.slug}-tooltip`
 
-              return (
+            return (
+              <span
+                key={category.slug}
+                tabIndex={0}
+                className="relative group inline-flex items-center outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-zinc-300 focus-visible:rounded-full"
+                aria-label={`${category.name}: ${category.description}`}
+                aria-describedby={tooltipId}
+                role="img"
+              >
+                <Icon
+                  className="w-5 h-5 transition-transform duration-150 group-hover:scale-110 group-focus-visible:scale-110"
+                  style={{ color: category.color }}
+                  aria-hidden="true"
+                  focusable="false"
+                />
                 <span
-                  key={category.slug}
-                  tabIndex={0}
-                  className="relative group inline-flex items-center outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-zinc-300 focus-visible:rounded-full"
-                  aria-label={`${category.name}: ${category.description}`}
-                  aria-describedby={tooltipId}
-                  role="img"
+                  id={tooltipId}
+                  className="pointer-events-none absolute left-1/2 bottom-full z-10 mb-2 w-48 -translate-x-1/2 rounded-md bg-zinc-900 px-2 py-1 text-xs font-medium text-white opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-visible:opacity-100"
+                  role="tooltip"
                 >
-                  <Icon
-                    className="w-5 h-5 transition-transform duration-150 group-hover:scale-110 group-focus-visible:scale-110"
-                    style={{ color: category.color }}
-                    aria-hidden="true"
-                    focusable="false"
-                  />
-                  <span
-                    id={tooltipId}
-                    className="pointer-events-none absolute left-1/2 bottom-full z-10 mb-2 w-max max-w-xs -translate-x-1/2 rounded-md bg-zinc-900 px-2 py-1 text-xs font-medium text-white opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-visible:opacity-100"
-                    role="tooltip"
-                  >
-                    <span className="block">{category.name}</span>
-                    <span className="mt-0.5 block text-[0.675rem] font-normal text-zinc-100/80">
-                      {category.description}
-                    </span>
+                  <span className="block">{category.name}</span>
+                  <span className="mt-0.5 block text-[0.675rem] font-normal text-zinc-100/80">
+                    {category.description}
                   </span>
                 </span>
-              )
-            })}
-          </div>
-
-          <div className="w-px h-6 bg-zinc-300" />
-
-          <ClimateRiverLogo size="lg" variant="colored" animated={true} />
+              </span>
+            )
+          })}
+          {/* <div className="w-px h-6 bg-zinc-300" /> */}
+          {/* <ClimateRiverLogo size="lg" variant="colored" animated={true} /> */}
         </div>
       </div>
 
@@ -149,7 +145,7 @@ export default async function CategoriesPage() {
               </div>
               <Link
                 href={`/categories/${category.slug}`}
-                className="inline-flex items-center gap-1 text-sm font-medium text-sky-600 hover:text-sky-700 whitespace-nowrap"
+                className="inline-flex items-center gap-1 text-sm font-medium text-sky-600 hover:text-sky-700 flex-shrink-0"
               >
                 View top stories <span aria-hidden="true">→</span>
               </Link>
@@ -176,7 +172,7 @@ export default async function CategoriesPage() {
                         >
                           {cluster.lead_title}
                         </a>
-                        <p className="mt-1 text-[11px] uppercase tracking-[0.28em] text-zinc-400">
+                        <p className="mt-1 text-[11px] uppercase tracking-wide text-zinc-400 break-all">
                           {source}
                         </p>
                       </div>

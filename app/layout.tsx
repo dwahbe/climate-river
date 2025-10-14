@@ -91,7 +91,7 @@ export default async function RootLayout({
       <head>
         <OrganizationStructuredData />
       </head>
-      <body className="min-h-full bg-zinc-50 text-zinc-900 antialiased">
+      <body className="min-h-full bg-zinc-50 text-zinc-900 antialiased overflow-x-hidden">
         <nav className="bg-white border-b border-zinc-100">
           <div className="mx-auto max-w-3xl px-4 sm:px-6">
             {/* Two columns: left / right — all vertically centered */}
