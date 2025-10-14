@@ -77,33 +77,19 @@ export default async function CategoriesPage() {
             const Icon = CATEGORY_ICONS[category.slug]
             if (!Icon) return null
 
-            const tooltipId = `categories-page-${category.slug}-tooltip`
-
             return (
               <span
                 key={category.slug}
-                tabIndex={0}
-                className="relative group inline-flex items-center outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-zinc-300 focus-visible:rounded-full"
+                className="inline-flex items-center"
                 aria-label={`${category.name}: ${category.description}`}
-                aria-describedby={tooltipId}
                 role="img"
               >
                 <Icon
-                  className="w-5 h-5 transition-transform duration-150 group-hover:scale-110 group-focus-visible:scale-110"
+                  className="w-5 h-5"
                   style={{ color: category.color }}
                   aria-hidden="true"
                   focusable="false"
                 />
-                <span
-                  id={tooltipId}
-                  className="pointer-events-none absolute left-1/2 bottom-full z-10 mb-2 w-48 -translate-x-1/2 rounded-md bg-zinc-900 px-2 py-1 text-xs font-medium text-white opacity-0 transition-opacity duration-150 group-hover:opacity-100 group-focus-visible:opacity-100"
-                  role="tooltip"
-                >
-                  <span className="block">{category.name}</span>
-                  <span className="mt-0.5 block text-[0.675rem] font-normal text-zinc-100/80">
-                    {category.description}
-                  </span>
-                </span>
               </span>
             )
           })}
