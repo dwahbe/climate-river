@@ -8,6 +8,11 @@ export const runtime = 'edge'
 export const revalidate = 300
 
 export async function GET(request: NextRequest) {
+  // Fetch Inclusive Sans font from Google Fonts
+  const fontData = await fetch(
+    'https://fonts.gstatic.com/s/inclusivesans/v4/0nk8C9biPuwflXcJ46P4PGWE08T-gfZusL0kQqtfcBtN7g.ttf'
+  ).then((res) => res.arrayBuffer())
+
   try {
     // Fetch top 3 clusters
     const clusters = await getRiverData({
@@ -25,7 +30,8 @@ export async function GET(request: NextRequest) {
     const logoUrl = new URL('/ClimateRiver.png', request.url)
     const logoResponse = await fetch(logoUrl)
     const logoData = await logoResponse.arrayBuffer()
-    const logoBase64 = Buffer.from(logoData).toString('base64')
+    // Convert ArrayBuffer to base64 (Edge runtime compatible)
+    const logoBase64 = btoa(String.fromCharCode(...new Uint8Array(logoData)))
 
     return new ImageResponse(
       (
@@ -37,36 +43,10 @@ export async function GET(request: NextRequest) {
             flexDirection: 'column',
             backgroundColor: '#fafaf9',
             padding: '64px 80px',
-            fontFamily: 'system-ui, sans-serif',
+            fontFamily: 'Inclusive Sans',
+            justifyContent: 'space-between',
           }}
         >
-          {/* Small header with logo and name */}
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '16px',
-              marginBottom: '32px',
-            }}
-          >
-            <img
-              src={`data:image/png;base64,${logoBase64}`}
-              width="32"
-              height="32"
-              style={{ flexShrink: 0 }}
-            />
-            <div
-              style={{
-                display: 'flex',
-                fontSize: 20,
-                fontWeight: 600,
-                color: '#52525b',
-              }}
-            >
-              Climate River
-            </div>
-          </div>
-
           {/* Headlines */}
           <div
             style={{
@@ -113,8 +93,8 @@ export async function GET(request: NextRequest) {
                       fontWeight: 600,
                     }}
                   >
-                    {headline.title.length > 100
-                      ? headline.title.substring(0, 100) + '...'
+                    {headline.title.length > 90
+                      ? headline.title.substring(0, 90) + '...'
                       : headline.title}
                   </div>
                   {headline.source && (
@@ -133,15 +113,51 @@ export async function GET(request: NextRequest) {
               </div>
             ))}
           </div>
+
+          {/* Logo and name in bottom right */}
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '16px',
+              justifyContent: 'flex-end',
+            }}
+          >
+            <img
+              src={`data:image/png;base64,${logoBase64}`}
+              width="32"
+              height="32"
+              style={{ flexShrink: 0 }}
+            />
+            <div
+              style={{
+                display: 'flex',
+                fontSize: 20,
+                fontWeight: 600,
+                color: '#52525b',
+              }}
+            >
+              Climate River
+            </div>
+          </div>
         </div>
       ),
       {
         width: 1200,
         height: 630,
+        fonts: [
+          {
+            name: 'Inclusive Sans',
+            data: fontData,
+            style: 'normal',
+            weight: 400,
+          },
+        ],
       }
     )
   } catch (error) {
     console.error('Error generating OG image:', error)
+
     // Return a fallback image
     return new ImageResponse(
       (
@@ -154,7 +170,7 @@ export async function GET(request: NextRequest) {
             alignItems: 'center',
             justifyContent: 'center',
             backgroundColor: '#fafaf9',
-            fontFamily: 'system-ui, sans-serif',
+            fontFamily: 'Inclusive Sans',
           }}
         >
           <div
@@ -182,6 +198,14 @@ export async function GET(request: NextRequest) {
       {
         width: 1200,
         height: 630,
+        fonts: [
+          {
+            name: 'Inclusive Sans',
+            data: fontData,
+            style: 'normal',
+            weight: 400,
+          },
+        ],
       }
     )
   }
