@@ -90,6 +90,14 @@ export async function GET(req: Request) {
     })
     console.log('✅ Ingest completed:', ingestResult)
 
+    // 2.25) Categorize newly ingested articles
+    console.log('🏷️  Running categorize...')
+    const categorizeResult = await safeRun(import('@/scripts/categorize'), {
+      limit: 100, // Categorize up to 100 uncategorized articles
+      closePool: false,
+    })
+    console.log('✅ Categorize completed:', categorizeResult)
+
     // 2.5) Prefetch article content for newly ingested articles
     console.log('📖 Prefetching article content...')
     const prefetchResult = await safeRun(import('@/scripts/prefetch-content'), {
@@ -149,6 +157,7 @@ export async function GET(req: Request) {
       result: {
         discover: discoverResult,
         ingest: ingestResult,
+        categorize: categorizeResult,
         prefetch: prefetchResult,
         rescore: rescoreResult,
         rewrite: rewriteResult,

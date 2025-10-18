@@ -6,6 +6,9 @@ import { query, endPool } from '@/lib/db'
  * Safe to run repeatedly in local dev, Vercel preview, or production.
  */
 export async function run() {
+  // --- pgvector extension for semantic similarity ---------------------------
+  await query(`create extension if not exists vector;`)
+
   // --- sources --------------------------------------------------------------
   await query(`
     create table if not exists sources (
@@ -68,6 +71,11 @@ export async function run() {
   )
   await query(
     `alter table if exists articles add column if not exists content_fetched_at timestamptz;`
+  )
+
+  // Add embedding column for semantic similarity (vector dimension 1536 for text-embedding-3-small)
+  await query(
+    `alter table if exists articles add column if not exists embedding vector(1536);`
   )
 
   // Add rewritten title columns
@@ -141,6 +149,52 @@ export async function run() {
   await query(
     `create index if not exists idx_article_clusters_article_id on article_clusters(article_id);`
   )
+
+  // --- categories (new 6-category system) ------------------------------------
+  await query(`
+    create table if not exists categories (
+      id serial primary key,
+      slug text unique not null,
+      name text not null,
+      description text,
+      color text
+    );
+  `)
+
+  await query(`
+    create table if not exists article_categories (
+      article_id bigint references articles(id) on delete cascade,
+      category_id int references categories(id) on delete cascade,
+      confidence real default 0.0,
+      is_primary boolean default false,
+      primary key (article_id, category_id)
+    );
+  `)
+
+  // Add is_primary column if it doesn't exist (for existing tables)
+  await query(`
+    alter table if exists article_categories 
+    add column if not exists is_primary boolean default false;
+  `)
+
+  await query(
+    `create index if not exists idx_article_categories_category_id on article_categories(category_id);`
+  )
+  await query(
+    `create index if not exists idx_article_categories_article_id on article_categories(article_id);`
+  )
+
+  // Insert the 6 categories from lib/tagger.ts
+  await query(`
+    insert into categories (slug, name, description, color) values
+      ('government', 'Government', 'Government policy, regulations, and climate laws', '#3B82F6'),
+      ('justice', 'Activism', 'Climate protests, rallies, strikes, and direct action by grassroots movements and activist organizations', '#EC4899'),
+      ('business', 'Business', 'Corporate climate action, finance, and market trends', '#06B6D4'),
+      ('impacts', 'Impacts', 'Climate effects, extreme weather, and environmental consequences', '#EF4444'),
+      ('tech', 'Tech', 'Clean technology, renewables, and climate solutions', '#10B981'),
+      ('research', 'Research & Innovation', 'Climate research, studies, and scientific discoveries', '#8B5CF6')
+    on conflict (slug) do nothing;
+  `)
 
   // --- get_river_clusters function -------------------------------------------
   // Drop existing function first (it has different return type)
