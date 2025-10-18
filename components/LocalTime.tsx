@@ -12,7 +12,7 @@ export default function LocalTime({ iso }: { iso: string }) {
     [d]
   )
   return (
-    <time dateTime={iso} title={iso}>
+    <time dateTime={iso} title={iso} suppressHydrationWarning>
       {pretty}
     </time>
   )
