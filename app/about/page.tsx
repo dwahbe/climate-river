@@ -137,7 +137,7 @@ export default function AboutPage() {
         </a>
         .
       </p>
-      <details className="group mt-8 mb-8 rounded-xl p-2 border border-[#096] border-spacing-1 open:bg-zinc-50 transition-colors grid">
+      {/* <details className="group mt-8 mb-8 rounded-xl p-2 border border-[#096] border-spacing-1 open:bg-zinc-50 transition-colors grid">
         <summary className="font-sans font-medium group-open:text-zinc-900 rounded-b-lg transition-colors cursor-pointer pl-1 flex items-center gap-2 outline-offset-8 group-open:outline-zinc-300 overflow-clip">
           <svg
             className="text-zinc-600 -rotate-45 group-open:rotate-0 transition-transform"
@@ -166,7 +166,7 @@ export default function AboutPage() {
             technological solutions to ameliorate it.
           </p>
         </div>
-      </details>
+      </details> */}
     </div>
   )
 }
