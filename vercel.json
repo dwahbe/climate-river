@@ -1,7 +1,7 @@
 {
   "framework": "nextjs",
   "crons": [
-    { "path": "/api/cron/light", "schedule": "0 6-23/2 * * *" },
+    { "path": "/api/cron/light", "schedule": "0 12,16,18,22,0,4 * * *" },
     { "path": "/api/cron/daily", "schedule": "0 1,13,20 * * *" }
   ]
 }
