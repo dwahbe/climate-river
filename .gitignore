@@ -35,10 +35,9 @@ pnpm-debug.log*
 .env.production
 .env.test
 
-# ── Lockfiles (we use pnpm; keep pnpm-lock.yaml tracked) ─────
-package-lock.json
+# ── Lockfiles (we use npm; keep package-lock.json tracked) ─────
+pnpm-lock.yaml
 yarn.lock
-# NOTE: do NOT ignore pnpm-lock.yaml
 
 # ── Vercel / hosting ─────────────────────────────────────────
 .vercel
