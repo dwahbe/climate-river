@@ -4,8 +4,12 @@ import type { Metadata } from 'next'
 
 // Cache for 5 minutes (300 seconds)
 export const revalidate = 300
+// Next.js reads `runtime` to decide the execution environment for this route:
+// https://nextjs.org/docs/app/building-your-application/rendering/edge-and-nodejs-runtimes
 export const runtime = 'nodejs'
 
+// Static metadata consumed by Next.js for SEO and social tags:
+// https://nextjs.org/docs/app/building-your-application/optimizing/metadata#static-metadata
 export const metadata: Metadata = {
   title: 'Top Climate News',
   description:

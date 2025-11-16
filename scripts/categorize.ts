@@ -2,12 +2,14 @@
 import { query, endPool } from '@/lib/db'
 import { categorizeAndStoreArticle } from '@/lib/categorizer'
 
-export async function run(opts: { limit?: number; closePool?: boolean } = {}) {
+export async function run(
+  opts: { limit?: number; closePool?: boolean; recategorizeAll?: boolean } = {}
+) {
   const start = Date.now()
   console.log('🏷️  Starting bulk categorization...')
 
   // Get all articles that need categorization
-  // Either articles with no categories, or all articles if limit is specified
+  // Either articles with no categories, or all articles if recategorizeAll is true
   const limit = opts.limit || 1000 // Default to 1000 articles
 
   const { rows } = await query<{
@@ -15,19 +17,29 @@ export async function run(opts: { limit?: number; closePool?: boolean } = {}) {
     title: string
     dek: string | null
   }>(
-    `
-    SELECT a.id, a.title, a.dek
-    FROM articles a
-    LEFT JOIN article_categories ac ON ac.article_id = a.id
-    WHERE ac.article_id IS NULL
-      AND a.published_at >= now() - interval '30 days'
-    ORDER BY a.published_at DESC
-    LIMIT $1
-  `,
+    opts.recategorizeAll
+      ? `
+        SELECT a.id, a.title, a.dek
+        FROM articles a
+        WHERE a.published_at >= now() - interval '30 days'
+        ORDER BY a.published_at DESC
+        LIMIT $1
+      `
+      : `
+        SELECT a.id, a.title, a.dek
+        FROM articles a
+        LEFT JOIN article_categories ac ON ac.article_id = a.id
+        WHERE ac.article_id IS NULL
+          AND a.published_at >= now() - interval '30 days'
+        ORDER BY a.published_at DESC
+        LIMIT $1
+      `,
     [limit]
   )
 
-  console.log(`📊 Found ${rows.length} articles to categorize`)
+  console.log(
+    `📊 Found ${rows.length} articles to ${opts.recategorizeAll ? 're-' : ''}categorize`
+  )
 
   let processed = 0
   let succeeded = 0

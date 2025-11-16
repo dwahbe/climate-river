@@ -326,9 +326,85 @@ export function getCategoryBySlug(slug: string) {
 }
 
 /**
+ * Check if an article is climate-relevant by requiring at least one climate-related term.
+ * This prevents non-climate political/business news from slipping through.
+ */
+export function isClimateRelevant(article: ArticleLike): boolean {
+  const text = `${article.title} ${article.summary || ''}`.toLowerCase()
+
+  // Comprehensive climate term patterns covering all major climate topics
+  // Includes: energy, emissions, weather impacts, ecosystems, policy, activism, tech
+  const climateTerms = [
+    // Core climate terms
+    /\b(climate|carbon|emission|greenhouse|warming|global warming)\b/i,
+    
+    // Energy & renewables
+    /\b(renewable|fossil|solar|wind|energy|hydroelectric|geothermal|biomass)\b/i,
+    /\b(ev|evs|electric[- ]vehicles?|electric[- ]cars?|plug-in|battery[- ]electric|tesla)\b/i,
+    /\b(battery|batteries|charging station|charging network|grid storage|long-duration storage)\b/i,
+    /\b(hydrogen|ammonia|electrolyzer|fuel cell)\b/i,
+    /\b(nuclear|reactor|reactors|fusion|fission|small modular reactor)\b/i,
+    
+    // Fossil fuels
+    /\b(oil|gas|methane|petroleum|petrochemical|refinery|refineries|diesel|jet fuel|kerosene)\b/i,
+    /\b(coal|mining|miners|mine|strip mine|mountaintop removal)\b/i,
+    /\b(fracking|drilling|offshore rig|rigs|pipeline|pipelines|liquefied natural gas|lng)\b/i,
+    
+    // Weather & climate impacts
+    /\b(flood|floods|flooding|drought|droughts|storm surge|hurricane|typhoon|cyclone|tornado)\b/i,
+    /\b(wildfire|wildfires|fire danger|fire weather|smoke plume|smoke plumes|bushfire)\b/i,
+    /\b(heatwave|heat wave|heatwaves|heat waves|heat dome|heat domes|heat index|extreme heat)\b/i,
+    /\b(extreme weather|climate crisis|climate emergency|climate disaster)\b/i,
+    
+    // Ecosystems & biodiversity
+    /\b(sea level|rising seas|coastal flooding|ocean warming|ocean acidification)\b/i,
+    /\b(glacier|glaciers|ice sheet|ice sheets|arctic|antarctic|polar|permafrost)\b/i,
+    /\b(coral|coral reef|coral bleaching|marine life|ocean)\b/i,
+    /\b(deforestation|forest|forests|rainforest|amazon|logging|trees)\b/i,
+    /\b(ecosystem|ecosystems|biodiversity|species extinction|habitat loss)\b/i,
+    /\b(agriculture|agricultural|crop|crops|farming|farmers|food security|food supply)\b/i,
+    
+    // Environmental & pollution
+    /\b(environmental|environment|pollution|pollutants|air quality|water quality|soot|smog)\b/i,
+    
+    // Technology & innovation
+    /\b(carbon capture|ccus|ccs|direct air capture|carbon removal|carbon sequestration)\b/i,
+    /\b(clean energy|clean tech|cleantech|green tech|green energy)\b/i,
+    /\b(smart grid|microgrid|transmission line|utility scale)\b/i,
+    
+    // Policy & regulation
+    /\b(epa|environmental protection|ferc|sec.*climate|climate policy|climate law)\b/i,
+    /\b(carbon tax|carbon pricing|emissions? standard|emissions? trading|cap and trade)\b/i,
+    /\b(paris agreement|cop\d+|ipcc|unfccc|net zero|net-zero)\b/i,
+    
+    // Activism & organizations
+    /\b(climate strike|climate protest|climate march|climate rally|climate activist)\b/i,
+    /\b(extinction rebellion|fridays for future|sunrise movement|just stop oil)\b/i,
+    /\b(greenpeace|sierra club|friends of the earth|350\.org|earthjustice)\b/i,
+    /\b(world wildlife fund|wwf|union of concerned scientists)\b/i,
+    
+    // Finance & business
+    /\b(esg.*climate|climate.*esg|green finance|climate finance|sustainable finance)\b/i,
+    /\b(carbon credit|carbon market|carbon offset|climate risk)\b/i,
+    /\b(divest.*fossil|stranded asset|climate disclosure)\b/i,
+  ]
+
+  return climateTerms.some((pattern) => pattern.test(text))
+}
+
+/**
  * Categorize an article based on title and summary using rule-based scoring
  */
 export function categorizeArticle(article: ArticleLike): CategoryScore[] {
+  // CRITICAL: First check if article is climate-relevant
+  // This prevents non-climate articles from being categorized and appearing in the river
+  if (!isClimateRelevant(article)) {
+    console.log(
+      `⚠️  Article filtered out (not climate-relevant): "${article.title.substring(0, 60)}..."`
+    )
+    return []
+  }
+
   const { title, summary } = article
   const text = `${title} ${summary || ''}`.toLowerCase()
   const scores: CategoryScore[] = []
