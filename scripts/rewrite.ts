@@ -38,7 +38,7 @@ function extractContentSnippet(
   if (!text) return null
 
   // Strip HTML tags if present
-  let cleaned = text.replace(/<[^>]+>/g, ' ')
+  let cleaned = text.replace(/<[^>]+>/g, ' ') // TODO: Use a HTML parser to strip tags
   cleaned = cleaned.replace(/\s+/g, ' ').trim()
 
   // 🛡️ SAFETY CHECK 1: Minimum viable length
@@ -76,7 +76,7 @@ function extractContentSnippet(
     return null
   }
 
-  // Extract first few sentences (usually the lede)
+  // Extract first few sentences (usually the lead)
   const sentences = cleaned.split(/[.!?]+\s+/)
   let snippet = ''
 
@@ -158,7 +158,9 @@ function buildPrompt(input: {
     lines.push('')
     lines.push('OTHER COVERAGE (cluster context):')
     for (const related of input.clusterContext.slice(0, 3)) {
-      const sourceLabel = related.source ? `${related.source}:` : 'Related article:'
+      const sourceLabel = related.source
+        ? `${related.source}:`
+        : 'Related article:'
       lines.push(`- ${sourceLabel} ${related.title}`)
     }
   }
@@ -234,7 +236,7 @@ function passesChecks(original: string, draft: string, hasContent: boolean) {
   const t = sanitizeHeadline(draft)
 
   // Techmeme-style density: allow more flexibility for high-quality specificity
-  const minLength = hasContent ? 60 : 50;
+  const minLength = hasContent ? 60 : 50
   if (t.length < minLength || t.length > 170) {
     console.warn(
       `⚠️  Length check failed (${t.length} chars): "${t.slice(0, 50)}..."`
@@ -244,9 +246,7 @@ function passesChecks(original: string, draft: string, hasContent: boolean) {
 
   // Require some quantifiable detail: digits or explicit magnitude words
   if (!containsQuantifier(t)) {
-    console.warn(
-      `⚠️  No quantifier in headline: "${t.slice(0, 50)}..."`
-    )
+    console.warn(`⚠️  No quantifier in headline: "${t.slice(0, 50)}..."`)
     return false
   }
 
@@ -363,7 +363,9 @@ async function generateWithOpenAI(
     ]
 
     if (input.clusterContext && input.clusterContext.length > 0) {
-      notesParts.push(`with_cluster:${Math.min(input.clusterContext.length, 5)}`)
+      notesParts.push(
+        `with_cluster:${Math.min(input.clusterContext.length, 5)}`
+      )
     } else {
       notesParts.push('no_cluster')
     }
