@@ -79,10 +79,15 @@ function getPool() {
   return _pool
 }
 
-export async function query<T = any>(text: string, params?: any[]) {
+export async function query<T = Record<string, unknown>>(
+  text: string,
+  params?: ReadonlyArray<unknown>
+) {
   const client = await getPool().connect()
   try {
-    const res = await client.query(text, params)
+    const res = params
+      ? await client.query(text, params as any[])
+      : await client.query(text)
     return { rows: res.rows as T[], rowCount: res.rowCount ?? 0 }
   } finally {
     client.release()

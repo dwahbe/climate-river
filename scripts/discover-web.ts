@@ -107,7 +107,10 @@ function parseEnvInt(name: string, defaultValue: number): number {
   return Number.isFinite(parsed) ? parsed : defaultValue
 }
 
-function estimateWebSearchCost(usage: any, toolCalls: number): number {
+function estimateWebSearchCost(
+  usage: WebBrowseStats['usage'] | null | undefined,
+  toolCalls: number
+): number {
   if (!usage && !toolCalls) return 0
 
   const inputTokens =
@@ -517,117 +520,11 @@ function cleanGoogleNewsTitle(title: string): string {
   return title.replace(/\s-\s[^-]+$/, '').trim()
 }
 
-function extractResponsesAPIResults(
-  openaiResponse: any,
-  query: string
-): WebSearchResult[] {
-  try {
-    // Parse the Responses API format - it has different possible fields
-    let content = ''
-
-    if (openaiResponse.text) {
-      content = openaiResponse.text
-    } else if (openaiResponse.output && Array.isArray(openaiResponse.output)) {
-      // Output is an array of objects, combine their text content
-      console.log('Output array length:', openaiResponse.output.length)
-      console.log(
-        'First output item keys:',
-        openaiResponse.output[0]
-          ? Object.keys(openaiResponse.output[0])
-          : 'none'
-      )
-
-      content = openaiResponse.output
-        .map((item: any) => {
-          if (typeof item === 'string') return item
-          if (item.text) return item.text
-          if (item.content) return item.content
-          if (item.value) return item.value
-          return JSON.stringify(item)
-        })
-        .join('\n')
-    } else if (
-      openaiResponse.output &&
-      typeof openaiResponse.output === 'string'
-    ) {
-      content = openaiResponse.output
-    } else {
-      console.log('No usable content found in response')
-      console.log('Available fields:', Object.keys(openaiResponse))
-      console.log('Output type:', typeof openaiResponse.output)
-      console.log('Text type:', typeof openaiResponse.text)
-      return []
-    }
-
-    console.log('Content preview:', String(content).substring(0, 300))
-
-    // Ensure content is a string
-    const contentStr = String(content)
-
-    if (!contentStr || contentStr.length < 20) {
-      console.log('Content too short, no articles found')
-      return []
-    }
-
-    // Extract articles from the structured output
-    const results = parseContentForArticles(contentStr)
-
-    console.log(`Found ${results.length} articles from OpenAI web search`)
-    if (results.length > 0) {
-      console.log('First result:', results[0])
-    }
-
-    return results
-  } catch (error) {
-    console.error('Error parsing Responses API results:', error)
-    return []
-  }
-}
-
-function extractWebSearchResults(openaiResponse: any): WebSearchResult[] {
-  try {
-    const message = openaiResponse.choices?.[0]?.message
-    const toolCalls = message?.tool_calls || []
-
-    const results: WebSearchResult[] = []
-
-    // Look for web search tool calls and extract results
-    for (const toolCall of toolCalls) {
-      if (toolCall.type === 'web_search') {
-        const searchResults = toolCall.web_search?.results || []
-
-        for (const result of searchResults) {
-          if (result.url && result.title) {
-            results.push({
-              title: result.title,
-              url: result.url,
-              snippet: result.snippet || result.content || '',
-              publishedDate: result.published_date || result.date,
-              source: extractSourceFromUrl(result.url),
-            })
-          }
-        }
-      }
-    }
-
-    // If no tool calls with results, try to parse from the response content
-    if (results.length === 0 && message?.content) {
-      const fallbackResults = parseContentForArticles(message.content)
-      results.push(...fallbackResults)
-    }
-
-    return results
-  } catch (error) {
-    console.error('Error parsing web search results:', error)
-    return []
-  }
-}
-
 function parseContentForArticles(content: string): WebSearchResult[] {
   const results: WebSearchResult[] = []
 
   // Look for URLs in the content
-  const urlRegex = /https?:\/\/[^\s\)\]]+/g
+  const urlRegex = /https?:\/\/[^\s)\]]+/g
   const urls = content.match(urlRegex) || []
 
   // Split content into meaningful chunks
@@ -647,11 +544,11 @@ function parseContentForArticles(content: string): WebSearchResult[] {
     }
 
     // Pattern 1: "Title - Source" format
-    let titleSourceMatch = line.match(/^[\d\.\s]*(.+?)\s*[-–]\s*(.+)$/)
+    let titleSourceMatch = line.match(/^[\d.\s]*(.+?)\s*[-–]\s*(.+)$/)
 
     // Pattern 2: "Title (Source)" format
     if (!titleSourceMatch) {
-      titleSourceMatch = line.match(/^[\d\.\s]*(.+?)\s*\((.+?)\)\s*$/)
+      titleSourceMatch = line.match(/^[\d.\s]*(.+?)\s*\((.+?)\)\s*$/)
     }
 
     // Pattern 3: Look for lines that might be titles followed by URLs
@@ -661,9 +558,9 @@ function parseContentForArticles(content: string): WebSearchResult[] {
       const nextUrl = nextLines.find((l) => l.includes('http'))
 
       if (nextUrl) {
-        const urlMatch = nextUrl.match(/https?:\/\/[^\s\)\]]+/)
+        const urlMatch = nextUrl.match(/https?:\/\/[^\s)\]]+/)
         if (urlMatch) {
-          const potentialTitle = line.replace(/^[\d\.\s]*/, '').trim()
+          const potentialTitle = line.replace(/^[\d.\s]*/, '').trim()
           // Validate that title doesn't look like raw JSON (be specific to avoid false positives)
           const looksLikeJson =
             /^["'](title|url|publishedDate|headline|link|description|snippet)["']\s*:/.test(
@@ -815,9 +712,10 @@ async function insertWebDiscoveredArticle(
 
 async function getOrCreateWebDiscoverySource(): Promise<number> {
   // Check if we have a "Web Discovery" source
-  const existing = await query('SELECT id FROM sources WHERE slug = $1', [
-    'web-discovery',
-  ])
+  const existing = await query<{ id: number }>(
+    'SELECT id FROM sources WHERE slug = $1',
+    ['web-discovery']
+  )
 
   if (existing.rows.length > 0) {
     return existing.rows[0].id

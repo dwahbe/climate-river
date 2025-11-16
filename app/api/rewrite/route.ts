@@ -17,8 +17,10 @@ async function authorized(req: Request) {
   return isCron || (!!expected && (qToken === expected || bearer === expected));
 }
 
+type ScriptRunner = (options?: Record<string, unknown>) => Promise<unknown> | unknown;
+
 async function runRewrite(limit?: number) {
-  const mod: any = await import("@/scripts/rewrite");
+  const mod: { run?: ScriptRunner; default?: ScriptRunner } = await import("@/scripts/rewrite");
   if (typeof mod.run === "function") return mod.run({ limit });
   if (typeof mod.default === "function") return mod.default({ limit });
   throw new Error("scripts/rewrite.ts must export run()");
@@ -45,9 +47,10 @@ async function handle(req: Request) {
   try {
     const result = await runRewrite(limit);
     return NextResponse.json({ ok: true, took_ms: Date.now() - t0, result });
-  } catch (e: any) {
+  } catch (e: unknown) {
+    const message = e instanceof Error ? e.message : String(e);
     return NextResponse.json(
-      { ok: false, error: e?.message || String(e) },
+      { ok: false, error: message },
       { status: 500 },
     );
   }

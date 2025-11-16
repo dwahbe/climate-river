@@ -7,6 +7,19 @@ import { embed } from 'ai'
 import { openai } from '@ai-sdk/openai'
 
 // ---------- Parser configured once (captures <source>, rich content) ----------
+type RssSourceField =
+  | string
+  | {
+      ['#']?: string
+      _?: string
+      text?: string
+      value?: string
+      $?: {
+        url?: string
+      }
+      url?: string
+    }
+
 type RssItem = {
   title?: string
   link?: string
@@ -18,7 +31,7 @@ type RssItem = {
   summary?: string
   // customFields we map in:
   contentEncoded?: string
-  source?: any
+  source?: RssSourceField | RssSourceField[]
   creator?: string
   author?: string
 }
@@ -96,17 +109,25 @@ function extractPublisherFromGoogleItem(item: RssItem): {
   name?: string
   homepage?: string
 } {
-  const src = (item as any)?.source
-  // rss-parser usually shapes <source> as { _: 'Publisher', $: { url: '...' } }
+  const src = item.source
   const first = Array.isArray(src) ? src[0] : src
-  if (first) {
-    const name =
-      (typeof first === 'string'
-        ? first
-        : (first['#'] ?? first._ ?? first.text ?? first.value)) || undefined
+  if (typeof first === 'string') {
+    const trimmed = first.trim()
+    if (trimmed) return { name: trimmed }
+  } else if (first && typeof first === 'object') {
+    const rawName =
+      (typeof first['#'] === 'string' && first['#']) ||
+      (typeof first._ === 'string' && first._) ||
+      (typeof first.text === 'string' && first.text) ||
+      (typeof first.value === 'string' && first.value) ||
+      undefined
     const homepage =
-      (typeof first === 'object' && (first.$?.url ?? first.url)) || undefined
-    if (name || homepage) return { name: String(name).trim(), homepage }
+      (typeof first.$?.url === 'string' && first.$.url) ||
+      (typeof first.url === 'string' && first.url) ||
+      undefined
+    if (rawName || homepage) {
+      return { name: rawName?.trim(), homepage }
+    }
   }
 
   // Fallback: title suffix like "Title — Publisher"
@@ -139,7 +160,7 @@ function pick(...vals: Array<string | undefined | null>) {
 }
 function oneLine(raw: string, max = 200) {
   const txt = stripHtml(raw)
-  const m = txt.match(/(.{40,}?[\.!\?])\s/) // first sentence-ish if long enough
+  const m = txt.match(/(.{40,}?[.!?])\s/) // first sentence-ish if long enough
   const cut = m?.[1] ?? txt
   return cut.length > max ? cut.slice(0, max - 1).trimEnd() + '…' : cut
 }
@@ -161,21 +182,6 @@ type SourceDef = {
   feed: string
   weight: number
   slug: string
-}
-
-function slugify(input: string) {
-  return (input || '')
-    .toLowerCase()
-    .normalize('NFKD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/(^-|-$)/g, '')
-    .slice(0, 64)
-}
-function shortHash(s: string) {
-  let h = 5381
-  for (let i = 0; i < s.length; i++) h = ((h << 5) + h) ^ s.charCodeAt(i)
-  return (h >>> 0).toString(36)
 }
 function canonical(url: string) {
   try {
@@ -423,149 +429,6 @@ async function insertArticle(
   return row.rows[0]?.id
 }
 
-async function ensureClusterForArticle(articleId: number, title: string) {
-  const key = clusterKey(title)
-  if (!key) return
-
-  // CRITICAL FIX: Check if this article is already in ANY cluster
-  const articleAlreadyClustered = await query<{ cluster_id: number }>(
-    `SELECT cluster_id FROM article_clusters WHERE article_id = $1`,
-    [articleId]
-  )
-
-  if (articleAlreadyClustered.rows.length > 0) {
-    // Article already has a cluster - don't add it to another one
-    console.log(
-      `Article ${articleId} already in cluster ${articleAlreadyClustered.rows[0].cluster_id}, skipping`
-    )
-    return
-  }
-
-  // Check for exact key match first
-  const exactCluster = await query<{ cluster_id: number }>(
-    `SELECT ac.cluster_id 
-     FROM article_clusters ac 
-     JOIN clusters c ON ac.cluster_id = c.id 
-     WHERE c.key = $1`,
-    [key]
-  )
-
-  if (exactCluster.rows.length > 0) {
-    // Use existing exact match cluster
-    await query(
-      `insert into article_clusters (article_id, cluster_id)
-       values ($1,$2) on conflict do nothing`,
-      [articleId, exactCluster.rows[0].cluster_id]
-    )
-    return
-  }
-
-  // If no exact match, check for similar clusters using weighted similarity
-  const keyWords = key.split('-')
-  if (keyWords.length >= 3) {
-    // Define common/generic words that shouldn't drive clustering
-    const genericWords = new Set([
-      'climate',
-      'energy',
-      'environmental',
-      'green',
-      'carbon',
-      'emissions',
-      'global',
-      'warming',
-      'change',
-      'crisis',
-      'policy',
-      'new',
-      'latest',
-      'report',
-      'study',
-      'research',
-      'data',
-      'government',
-      'plan',
-      'program',
-      'project',
-      'company',
-      'companies',
-      'industry',
-      'market',
-      'business',
-      'world',
-      'year',
-      'years',
-      'million',
-      'billion',
-      'percent',
-      'says',
-      'will',
-      'could',
-      'may',
-      'might',
-      'now',
-      'after',
-      'before',
-      'during',
-    ])
-
-    const similarClusters = await query<{ cluster_id: number; key: string }>(
-      `SELECT ac.cluster_id, c.key
-       FROM article_clusters ac 
-       JOIN clusters c ON ac.cluster_id = c.id 
-       WHERE c.created_at >= now() - interval '7 days'
-       GROUP BY ac.cluster_id, c.key`,
-      []
-    )
-
-    for (const cluster of similarClusters.rows) {
-      const clusterWords = cluster.key.split('-')
-      const sharedWords = keyWords.filter((word) => clusterWords.includes(word))
-
-      // Calculate weighted similarity score
-      let similarityScore = 0
-      let specificMatches = 0
-
-      for (const word of sharedWords) {
-        if (genericWords.has(word)) {
-          similarityScore += 0.5 // Low weight for generic words
-        } else {
-          similarityScore += 2.0 // High weight for specific words
-          specificMatches++
-        }
-      }
-
-      // Require: At least 2 specific (non-generic) words + total score >= 4.0
-      // This prevents clustering on generic terms like "climate crisis policy"
-      if (specificMatches >= 2 && similarityScore >= 4.0) {
-        console.log(
-          `Article ${articleId} matched cluster ${cluster.cluster_id} with score ${similarityScore.toFixed(1)} (${specificMatches} specific): ${sharedWords.join(', ')}`
-        )
-        await query(
-          `insert into article_clusters (article_id, cluster_id)
-           values ($1,$2) on conflict do nothing`,
-          [articleId, cluster.cluster_id]
-        )
-        return
-      }
-    }
-  }
-
-  // No similar cluster found, create new cluster
-  const cluster = await query<{ id: number }>(
-    `insert into clusters (key) values ($1)
-     on conflict (key) do update set key = excluded.key
-     returning id`,
-    [key]
-  )
-
-  // Add article to cluster
-  await query(
-    `insert into article_clusters (article_id, cluster_id)
-     values ($1,$2) on conflict do nothing`,
-    [articleId, cluster.rows[0].id]
-  )
-}
-
 // Update cluster scores when new articles are added
 async function updateClusterScore(clusterId: number) {
   try {
@@ -759,8 +622,9 @@ async function ingestFromFeed(feedUrl: string, sourceId: number, limit = 20) {
   let feed
   try {
     feed = await parser.parseURL(feedUrl)
-  } catch (e: any) {
-    console.warn(`Feed error for ${feedUrl}: ${e?.message || e}`)
+  } catch (e: unknown) {
+    const message = e instanceof Error ? e.message : String(e)
+    console.warn(`Feed error for ${feedUrl}: ${message}`)
     return { scanned: 0, inserted: 0 }
   }
 
@@ -857,17 +721,18 @@ export async function run(opts: { limit?: number; closePool?: boolean } = {}) {
         perFeedLimit
       )
       return { name: s.name, scanned, inserted }
-    } catch (e: any) {
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : String(e)
       return {
         name: s.name,
         scanned: 0,
         inserted: 0,
-        error: e?.message || String(e),
+        error: message,
       }
     }
   })
 
-  const total = results.reduce((sum, r: any) => sum + (r.inserted || 0), 0)
+  const total = results.reduce((sum, r) => sum + (r.inserted || 0), 0)
   console.log('Ingest results:', results)
   console.log(
     `Done. Inserted ${total} in ${Math.round((Date.now() - start) / 1000)}s.`

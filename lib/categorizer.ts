@@ -238,7 +238,7 @@ export async function getArticlesByCategory(
   minConfidence: number = 0.3
 ): Promise<Array<{ article_id: number; confidence: number }>> {
   try {
-    const result = await query(
+    const result = await query<{ article_id: number; confidence: number }>(
       'SELECT * FROM get_articles_by_category($1, $2, $3)',
       [categorySlug, minConfidence, limit]
     )
@@ -262,7 +262,12 @@ export async function getCategoryStats(): Promise<
   }>
 > {
   try {
-    const result = await query(`
+    const result = await query<{
+      slug: string
+      name: string
+      article_count: number
+      avg_confidence: number
+    }>(`
       SELECT 
         c.slug,
         c.name,

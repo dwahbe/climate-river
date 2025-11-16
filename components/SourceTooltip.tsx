@@ -30,25 +30,6 @@ export default function SourceTooltip({
   // Don't show tooltip on mobile/touch devices
   const [isTouchDevice, setIsTouchDevice] = useState(false)
 
-  useEffect(() => {
-    setIsTouchDevice('ontouchstart' in window || navigator.maxTouchPoints > 0)
-
-    // Add scroll listener to update tooltip position
-    const handleScroll = () => {
-      if (isVisible) {
-        updateTooltipPosition()
-      }
-    }
-
-    window.addEventListener('scroll', handleScroll, { passive: true })
-    window.addEventListener('resize', handleScroll, { passive: true })
-
-    return () => {
-      window.removeEventListener('scroll', handleScroll)
-      window.removeEventListener('resize', handleScroll)
-    }
-  }, [isVisible])
-
   // Memoize updateTooltipPosition to avoid recreating it on every render
   const updateTooltipPosition = useCallback(() => {
     if (triggerRef.current) {
@@ -74,6 +55,32 @@ export default function SourceTooltip({
       setIsVisible(true)
     }
   }, [])
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const hasTouch =
+        'ontouchstart' in window ||
+        (typeof navigator !== 'undefined' && navigator.maxTouchPoints > 0)
+      // Determine touch capability after mount to avoid hydration mismatches.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setIsTouchDevice(hasTouch)
+    }
+
+    // Add scroll listener to update tooltip position
+    const handleScroll = () => {
+      if (isVisible) {
+        updateTooltipPosition()
+      }
+    }
+
+    window.addEventListener('scroll', handleScroll, { passive: true })
+    window.addEventListener('resize', handleScroll, { passive: true })
+
+    return () => {
+      window.removeEventListener('scroll', handleScroll)
+      window.removeEventListener('resize', handleScroll)
+    }
+  }, [isVisible, updateTooltipPosition])
 
   const handleMouseEnter = () => {
     if (isTouchDevice || !articles || articles.length === 0) return
@@ -134,6 +141,7 @@ export default function SourceTooltip({
         onMouseEnter={handleMouseEnter}
         onMouseLeave={handleMouseLeave}
         className="inline cursor-default"
+        aria-label={sourceName}
       >
         {children}
       </div>
@@ -149,8 +157,14 @@ export default function SourceTooltip({
             top: position.y,
             transform: 'translateX(-50%)', // Center horizontally
           }}
+          aria-live="polite"
+          role="status"
         >
-          <div className="space-y-3">
+          <div className="space-y-2">
+            <div className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+              {sourceName}
+            </div>
+            <div className="space-y-3">
             {articles.map((article) => (
               <div key={article.article_id} className="space-y-1">
                 <a
@@ -166,6 +180,7 @@ export default function SourceTooltip({
                 )}
               </div>
             ))}
+            </div>
           </div>
         </div>
       )}

@@ -21,8 +21,6 @@ type Row = {
   cluster_context: ClusterContextItem[] | null
 }
 
-const MAX_CHARS = 160
-
 /* ------------------------- Content Extraction with Safety Checks ------------------------- */
 
 /**
@@ -179,7 +177,7 @@ function sanitizeHeadline(s: string) {
     .replace(/\s+/g, ' ') // collapse spaces
     .trim()
   // Remove trailing periods and other decorative punctuation
-  t = t.replace(/[.|•–—\-]+$/g, '').trim()
+  t = t.replace(/[-.|•–—]+$/g, '').trim()
   return t
 }
 
@@ -375,10 +373,11 @@ async function generateWithOpenAI(
       model,
       notes: `success:${notesParts.join(':')}`,
     }
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('❌ Error generating text with AI SDK:', error)
+    const message = error instanceof Error ? error.message : 'unknown_error'
     const failureParts = [
-      `failed:${error?.message || 'unknown_error'}`,
+      `failed:${message}`,
       input.clusterContext && input.clusterContext.length > 0
         ? `with_cluster:${Math.min(input.clusterContext.length, 5)}`
         : 'no_cluster',

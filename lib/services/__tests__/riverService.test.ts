@@ -1,7 +1,7 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { normalizeRiverClusters } from '../riverService'
+import { normalizeRiverClusters } from '../riverService.ts'
 import type { Cluster } from '../../models/cluster'
 
 const baseCluster: Cluster = {

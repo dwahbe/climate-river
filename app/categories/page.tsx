@@ -8,7 +8,6 @@ import {
   Zap,
   Microscope,
 } from 'lucide-react'
-import ClimateRiverLogo from '@/components/ClimateRiverLogo'
 import { CATEGORIES, type CategorySlug } from '@/lib/tagger'
 import { CategoryIcon } from '@/components/categoryIcons'
 import { getRiverData } from '@/lib/services/riverService'

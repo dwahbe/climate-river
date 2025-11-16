@@ -1,15 +1,4 @@
 // app/about/page.tsx
-import type { LucideIcon } from 'lucide-react'
-import {
-  Landmark,
-  Megaphone,
-  Factory,
-  AlertTriangle,
-  Zap,
-  Microscope,
-} from 'lucide-react'
-import ClimateRiverLogo from '@/components/ClimateRiverLogo'
-import { CATEGORIES, type CategorySlug } from '@/lib/tagger'
 import type { Metadata } from 'next'
 
 export const dynamic = 'force-static'
@@ -32,15 +21,6 @@ export const metadata: Metadata = {
   alternates: {
     canonical: 'https://climateriver.org/about',
   },
-}
-
-const CATEGORY_ICONS: Record<CategorySlug, LucideIcon> = {
-  government: Landmark,
-  justice: Megaphone,
-  business: Factory,
-  impacts: AlertTriangle,
-  tech: Zap,
-  research: Microscope,
 }
 
 export default function AboutPage() {

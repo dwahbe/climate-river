@@ -71,6 +71,20 @@ export type ReaderError = {
 
 export type ReaderResult = ReaderSuccess | ReaderError
 
+const READER_ERROR_STATUS_SET = new Set<ReaderError['status']>([
+  'paywall',
+  'timeout',
+  'blocked',
+  'not_found',
+  'error',
+])
+
+function isReaderErrorStatus(
+  status: string | null
+): status is ReaderError['status'] {
+  return !!status && READER_ERROR_STATUS_SET.has(status as ReaderError['status'])
+}
+
 // Paywall detection patterns
 const PAYWALL_INDICATORS = [
   /subscribe to read/i,
@@ -248,12 +262,12 @@ async function fetchArticleContent(url: string): Promise<ReaderResult> {
     )
 
     return result
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('❌ Reader fetch error:', error)
     return {
       success: false,
       status: 'error',
-      error: error.message || 'Failed to fetch article',
+      error: error instanceof Error ? error.message : 'Failed to fetch article',
     }
   }
 }
@@ -325,9 +339,12 @@ export async function getArticleContent(
       }
     } else {
       // Cached error state
+      const cachedStatus = isReaderErrorStatus(article.content_status)
+        ? article.content_status
+        : 'error'
       return {
         success: false,
-        status: article.content_status as any,
+        status: cachedStatus,
         error: article.content_error || 'Previously failed to fetch',
         fromCache: true,
       }
@@ -388,7 +405,7 @@ export async function prefetchArticles(
   )
 
   const queue = [...articleIds]
-  const active: Promise<any>[] = []
+  const active: Array<Promise<void>> = []
 
   while (queue.length > 0 || active.length > 0) {
     // Fill up to concurrency limit

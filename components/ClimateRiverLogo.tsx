@@ -119,7 +119,7 @@ z"
 
       {/* Animation styles */}
       {animated && (
-        <style jsx>{`
+        <style>{`
           @keyframes flow {
             0% {
               transform: scale(1) rotate(0deg);

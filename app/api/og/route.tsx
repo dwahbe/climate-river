@@ -123,6 +123,7 @@ export async function GET(request: NextRequest) {
               justifyContent: 'flex-end',
             }}
           >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src={`data:image/png;base64,${logoBase64}`}
               width="32"

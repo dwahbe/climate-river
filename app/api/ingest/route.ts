@@ -6,11 +6,15 @@ import { NextResponse } from "next/server";
 import { headers } from "next/headers";
 
 /** --- Types for dynamic imports (keeps TS happy without ts-expect-error) --- */
+type ScriptResult = Record<string, unknown>;
 type IngestMod = {
-  run: (opts?: { limit?: number; closePool?: boolean }) => Promise<any>;
+  run: (opts?: { limit?: number; closePool?: boolean }) => Promise<ScriptResult>;
 };
 type DiscoverMod = {
-  run: (opts?: { limitPerQuery?: number; closePool?: boolean }) => Promise<any>;
+  run: (opts?: {
+    limitPerQuery?: number;
+    closePool?: boolean;
+  }) => Promise<ScriptResult>;
 };
 
 /** --- Auth helper --- */
@@ -67,7 +71,7 @@ async function handle(req: Request) {
   if (isCron && ingestLimit === undefined) ingestLimit = 25;
 
   const t0 = Date.now();
-  const result: Record<string, any> = {};
+  const result: Record<string, unknown> = {};
 
   try {
     // Ingest pass
@@ -81,9 +85,10 @@ async function handle(req: Request) {
       try {
         const { run } = (await import("@/scripts/discover")) as DiscoverMod;
         result.discover = await run({ limitPerQuery: discoverLimit });
-      } catch (e: any) {
+      } catch (e: unknown) {
         // If discover module isn't present or fails, return a soft error but keep 200
-        result.discover = { ok: false, error: e?.message || String(e) };
+        const message = e instanceof Error ? e.message : String(e);
+        result.discover = { ok: false, error: message };
       }
     }
 
@@ -94,9 +99,10 @@ async function handle(req: Request) {
       params: { ingestLimit, wantDiscover, discoverLimit },
       result,
     });
-  } catch (e: any) {
+  } catch (e: unknown) {
+    const message = e instanceof Error ? e.message : String(e);
     return NextResponse.json(
-      { ok: false, error: e?.message || String(e) },
+      { ok: false, error: message },
       { status: 500 },
     );
   }

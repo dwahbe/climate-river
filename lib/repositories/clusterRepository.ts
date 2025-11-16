@@ -2,6 +2,27 @@
 import { createServerClient } from '@/lib/supabase/client'
 import type { Cluster, RiverFilters } from '@/lib/models/cluster'
 
+type SupabaseClusterRow = {
+  cluster_id: number
+  size: number
+  score: number
+  articles: {
+    id: number
+    title: string
+    rewritten_title: string | null
+    canonical_url: string
+    dek: string | null
+    author: string | null
+    published_at: string
+    publisher_name: string | null
+    publisher_homepage: string | null
+    sources?: {
+      name: string | null
+      homepage_url: string | null
+    } | null
+  } | null
+}
+
 /**
  * Fetch clusters for the river homepage
  * Uses the get_river_clusters Postgres function for optimal performance
@@ -37,9 +58,13 @@ export async function getClustersForRiver(
     }
 
     // The function returns JSON, parse if needed
-    const clusters = Array.isArray(data) ? data : (data as any)
+    const clusters = Array.isArray(data)
+      ? (data as Cluster[])
+      : data
+        ? ([data] as Cluster[])
+        : []
 
-    return clusters || []
+    return clusters
   } catch (error) {
     console.error('Repository error fetching clusters:', error)
     throw error
@@ -94,13 +119,14 @@ export async function getClusterById(
     }
 
     // Transform the data to match Cluster type
-    const article = (data as any).articles
+    const row = data as unknown as SupabaseClusterRow
+    const article = row.articles
     if (!article) return null
 
     return {
-      cluster_id: data.cluster_id,
-      size: data.size,
-      score: data.score,
+      cluster_id: row.cluster_id,
+      size: row.size,
+      score: row.score,
       lead_article_id: article.id,
       lead_title: article.rewritten_title || article.title,
       lead_was_rewritten: !!article.rewritten_title,

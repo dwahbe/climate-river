@@ -2,7 +2,7 @@
 'use client'
 
 import Link from 'next/link'
-import { usePathname, useSearchParams } from 'next/navigation'
+import { usePathname } from 'next/navigation'
 import { useEffect, useRef } from 'react'
 import { CATEGORIES, type CategorySlug } from '@/lib/tagger'
 import clsx from 'clsx'
@@ -21,8 +21,6 @@ export default function RiverControls({
 
   const isTop = !currentView || currentView === 'top'
   const isLatest = currentView === 'latest'
-  const isCategory = !!selectedCategory
-
   // Create hrefs for all tabs
   const hrefTop = pathname
   const hrefLatest = `${pathname}?view=latest`

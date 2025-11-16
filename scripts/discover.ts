@@ -3,14 +3,6 @@ import Parser from 'rss-parser'
 import dayjs from 'dayjs'
 import { query, endPool } from '@/lib/db'
 
-type SourceDef = {
-  name: string
-  homepage_url: string
-  feed_url: string // we use a stable pseudo value like discover://host
-  weight?: number
-  slug: string
-}
-
 type RssItem = {
   title?: string
   link?: string
@@ -107,7 +99,9 @@ function resolveGoogleNewsLink(link: string) {
       const real = u.searchParams.get('url')
       if (real) return real
     }
-  } catch {}
+  } catch {
+    // Ignore malformed URLs and fall back to the original link
+  }
   return link
 }
 
@@ -269,8 +263,9 @@ async function ingestQuery(q: string, limitPerQuery = 25) {
   let feed
   try {
     feed = await parser.parseURL(url)
-  } catch (e: any) {
-    console.warn(`Discover feed error for "${q}": ${e?.message || e}`)
+  } catch (e: unknown) {
+    const message = e instanceof Error ? e.message : String(e)
+    console.warn(`Discover feed error for "${q}": ${message}`)
     return { scanned: 0, inserted: 0 }
   }
 

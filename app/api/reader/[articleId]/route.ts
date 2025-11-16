@@ -73,13 +73,15 @@ export async function GET(request: Request, { params }: Params) {
         elapsed,
       },
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error("Reader API error:", error);
+    const message =
+      error instanceof Error ? error.message : "Internal server error";
     return NextResponse.json(
       {
         success: false,
         status: "error",
-        error: error.message || "Internal server error",
+        error: message,
       },
       { status: 500 },
     );

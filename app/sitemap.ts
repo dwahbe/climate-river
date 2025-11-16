@@ -1,5 +1,4 @@
 import { MetadataRoute } from 'next'
-import * as DB from '@/lib/db'
 import { CATEGORIES } from '@/lib/tagger'
 
 export const revalidate = 3600 // Revalidate every hour
