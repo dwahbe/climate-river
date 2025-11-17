@@ -83,8 +83,56 @@ export async function run(
 
 // CLI
 if (import.meta.url === `file://${process.argv[1]}`) {
-  run({ closePool: true }).catch((err) => {
+  const cliOpts = parseCliArgs(process.argv.slice(2))
+  run({ ...cliOpts, closePool: true }).catch((err) => {
     console.error(err)
     endPool().finally(() => process.exit(1))
   })
+}
+
+type CliOptions = {
+  limit?: number
+  recategorizeAll?: boolean
+}
+
+function parseCliArgs(argv: string[]): CliOptions {
+  const opts: CliOptions = {}
+
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i]
+
+    if (arg === '--limit' || arg === '-l') {
+      const next = argv[i + 1]
+      if (!next) {
+        console.warn('⚠️  --limit flag provided without a value; ignoring')
+        continue
+      }
+      const parsed = Number(next)
+      if (Number.isFinite(parsed)) {
+        opts.limit = Math.max(1, Math.floor(parsed))
+      } else {
+        console.warn(`⚠️  Invalid --limit value "${next}"; ignoring`)
+      }
+      i++
+      continue
+    }
+
+    const limitMatch = arg.match(/^--limit=(.+)$/)
+    if (limitMatch) {
+      const parsed = Number(limitMatch[1])
+      if (Number.isFinite(parsed)) {
+        opts.limit = Math.max(1, Math.floor(parsed))
+      } else {
+        console.warn(`⚠️  Invalid --limit value "${limitMatch[1]}"; ignoring`)
+      }
+      continue
+    }
+
+    if (arg === '--recategorize-all' || arg === '--recat-all') {
+      opts.recategorizeAll = true
+      continue
+    }
+  }
+
+  return opts
 }

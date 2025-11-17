@@ -1,5 +1,6 @@
 // scripts/rewrite.ts
 import { query, endPool } from '@/lib/db'
+import { isClimateRelevant } from '@/lib/tagger'
 import { generateText } from 'ai'
 import { openai } from '@ai-sdk/openai'
 
@@ -632,6 +633,15 @@ async function fetchBatch(limit = 40) {
       ) score_map on true
       where a.rewritten_title is null
         and coalesce(a.published_at, now()) > now() - interval '21 days'
+        and exists (
+          select 1
+          from article_categories ac
+          where ac.article_id = a.id
+        )
+        and (
+          a.rewrite_notes is null
+          or a.rewrite_notes not like 'skipped:not_climate%'
+        )
       order by 
         score_map.score desc nulls last,
         a.fetched_at desc
@@ -697,6 +707,45 @@ async function processOne(r: Row) {
     r.content_html,
     ...clusterTitles,
   ])
+
+  const aggregatedClusterTitles =
+    clusterTitles.length > 0 ? clusterTitles.join(' ') : ''
+  const climateSummaryParts = [
+    r.dek,
+    contentSnippet,
+    previewExcerpt,
+    r.content_text,
+    r.content_html,
+    aggregatedClusterTitles,
+  ].filter(
+    (part): part is string => typeof part === 'string' && part.trim().length > 0
+  )
+
+  const isClimate = isClimateRelevant({
+    title: r.title,
+    summary:
+      climateSummaryParts.length > 0
+        ? climateSummaryParts.join(' ')
+        : undefined,
+  })
+
+  if (!isClimate) {
+    const notes = 'skipped:not_climate'
+    await query(
+      `update articles
+         set rewrite_model = $1,
+             rewrite_notes = $2
+       where id = $3`,
+      ['skipped', notes, r.id]
+    )
+    console.log(
+      `🚫 [${r.id}] Skipped rewrite (non-climate detected): "${r.title.slice(
+        0,
+        80
+      )}..."`
+    )
+    return { ok: 0, failed: 1 }
+  }
 
   const llm = await generateWithOpenAI({
     title: r.title,

@@ -3,6 +3,7 @@ import { query, endPool } from '@/lib/db'
 import { generateText } from 'ai'
 import { openai } from '@ai-sdk/openai'
 import { categorizeAndStoreArticle } from '@/lib/categorizer'
+import { CURATED_CLIMATE_OUTLETS } from '@/config/climateOutlets'
 
 // Breaking news queries - optimized for frequent runs to catch urgent stories
 const BREAKING_NEWS_QUERIES = [
@@ -71,6 +72,13 @@ type EnhancedSearchResult = {
   browseStats: WebBrowseStats | null
 }
 
+type WebSearchOverrides = {
+  systemPrompt?: string
+  userPrompt?: string
+  resultLimit?: number
+  allowedDomains?: string[]
+}
+
 const GOOGLE_SUGGESTION_MODEL =
   process.env.GOOGLE_SUGGESTION_MODEL || 'gpt-4o-mini'
 const GOOGLE_SUGGESTION_MAX_OUTPUT_TOKENS = parseEnvInt(
@@ -95,6 +103,18 @@ const WEB_SEARCH_ALLOWED_DOMAINS = process.env.WEB_SEARCH_ALLOWED_DOMAINS
       .filter(Boolean)
   : undefined
 const WEB_SEARCH_DEBUG = process.env.WEB_SEARCH_DEBUG === '1'
+const DISCOVERY_PAUSE_MS = 2000
+const DEFAULT_OUTLET_FRESHNESS_HOURS = 96
+const HOST_BLOCKLIST = new Set([
+  'news.google.com',
+  'www.news.google.com',
+  'news.yahoo.com',
+  'www.news.yahoo.com',
+  'msn.com',
+  'www.msn.com',
+])
+
+const sourceCache = new Map<string, number>()
 
 const OPENAI_WEB_SEARCH_INPUT_PER_M = 2.5
 const OPENAI_WEB_SEARCH_OUTPUT_PER_M = 10
@@ -154,6 +174,34 @@ function dedupeWebResults(results: WebSearchResult[]): WebSearchResult[] {
     seen.add(key)
     return true
   })
+}
+
+function slugifyHost(host: string): string {
+  return host
+    .trim()
+    .toLowerCase()
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/(^-|-$)/g, '')
+}
+
+function hostFromUrl(url: string | undefined): string | null {
+  if (!url) return null
+  try {
+    const parsed = new URL(url)
+    return parsed.hostname.replace(/^www\./, '').toLowerCase()
+  } catch {
+    return null
+  }
+}
+
+function humanizeHost(host: string): string {
+  return host
+    .split('.')
+    .filter((segment, idx, arr) => idx === 0 || idx === arr.length - 1 || arr.length <= 2)
+    .map((segment) => segment.charAt(0).toUpperCase() + segment.slice(1))
+    .join(' ')
 }
 
 function parseWebSearchJson(
@@ -226,7 +274,8 @@ function parseWebSearchJson(
 }
 
 async function callOpenAIWebSearch(
-  query: string
+  query: string,
+  overrides?: WebSearchOverrides
 ): Promise<{ results: WebSearchResult[]; stats: WebBrowseStats | null }> {
   if (!WEB_SEARCH_ENABLED) {
     return { results: [], stats: null }
@@ -235,9 +284,21 @@ async function callOpenAIWebSearch(
   try {
     console.log(`🔎 OpenAI web search: ${query}`)
 
+    const requestedLimit = overrides?.resultLimit ?? WEB_SEARCH_RESULT_LIMIT
+    const systemMessage =
+      overrides?.systemPrompt ??
+      `You are a climate and environment news researcher. Use the web search tool to locate the most recent, high-quality coverage about the user's query. Return ONLY a JSON array where each item has: title, url, snippet, publishedDate (ISO if known), and source (publication name or domain). Do not include additional text outside the JSON.`
+    const userMessage =
+      overrides?.userPrompt ??
+      `Find up to ${requestedLimit} timely climate or environment-related articles for: "${query}". Favor reporting from reputable outlets within the past 72 hours.`
+    const allowedDomains =
+      overrides?.allowedDomains && overrides.allowedDomains.length > 0
+        ? overrides.allowedDomains
+        : WEB_SEARCH_ALLOWED_DOMAINS
+
     const toolArgs =
-      WEB_SEARCH_ALLOWED_DOMAINS && WEB_SEARCH_ALLOWED_DOMAINS.length > 0
-        ? { filters: { allowedDomains: WEB_SEARCH_ALLOWED_DOMAINS } }
+      allowedDomains && allowedDomains.length > 0
+        ? { filters: { allowedDomains } }
         : {}
 
     const response = await generateText({
@@ -245,11 +306,11 @@ async function callOpenAIWebSearch(
       messages: [
         {
           role: 'system',
-          content: `You are a climate and environment news researcher. Use the web search tool to locate the most recent, high-quality coverage about the user's query. Return ONLY a JSON array where each item has: title, url, snippet, publishedDate (ISO if known), and source (publication name or domain). Do not include additional text outside the JSON.`,
+          content: systemMessage,
         },
         {
           role: 'user',
-          content: `Find up to ${WEB_SEARCH_RESULT_LIMIT} timely climate or environment-related articles for: "${query}". Favor reporting from reputable outlets within the past 72 hours.`,
+          content: userMessage,
         },
       ],
       tools: {
@@ -315,7 +376,7 @@ async function callOpenAIWebSearch(
       }
     }
 
-    results = dedupeWebResults(results).slice(0, WEB_SEARCH_RESULT_LIMIT)
+    results = dedupeWebResults(results).slice(0, requestedLimit)
 
     const toolCalls =
       Array.isArray(response.toolResults) && response.toolResults.length > 0
@@ -676,9 +737,92 @@ async function isDuplicate(title: string, url: string): Promise<boolean> {
   return false
 }
 
+async function getOrCreateSourceForResult(
+  result: WebSearchResult,
+  fallbackSourceId: number
+): Promise<{
+  sourceId: number
+  publisherName?: string | null
+  publisherHomepage?: string | null
+}> {
+  const host = hostFromUrl(result.url)
+
+  if (!host || HOST_BLOCKLIST.has(host)) {
+    return {
+      sourceId: fallbackSourceId,
+      publisherName: result.source?.trim() || null,
+      publisherHomepage: null,
+    }
+  }
+
+  const cached = sourceCache.get(host)
+  if (cached) {
+    return {
+      sourceId: cached,
+      publisherName: result.source?.trim() || humanizeHost(host),
+      publisherHomepage: `https://${host}`,
+    }
+  }
+
+  const slug = slugifyHost(host)
+  const feedUrl = `web://${host}`
+  const homepage = `https://${host}`
+  const publisherName = result.source?.trim() || humanizeHost(host)
+
+  const existing = await query<{ id: number }>(
+    `
+      SELECT id
+      FROM sources
+      WHERE slug = $1
+         OR feed_url = $2
+         OR lower(coalesce(homepage_url, '')) LIKE $3
+      ORDER BY weight DESC
+      LIMIT 1
+    `,
+    [slug, feedUrl, `%${host}%`]
+  )
+
+  let sourceId = existing.rows[0]?.id
+
+  if (!sourceId) {
+    const inserted = await query<{ id: number }>(
+      `
+        INSERT INTO sources (name, homepage_url, feed_url, weight, slug)
+        VALUES ($1, $2, $3, $4, $5)
+        ON CONFLICT (feed_url) DO UPDATE
+          SET name = EXCLUDED.name,
+              homepage_url = EXCLUDED.homepage_url,
+              weight = EXCLUDED.weight,
+              slug = EXCLUDED.slug
+        RETURNING id
+      `,
+      [publisherName, homepage, feedUrl, 4, slug]
+    )
+    sourceId = inserted.rows[0]?.id
+  }
+
+  if (!sourceId) {
+    return {
+      sourceId: fallbackSourceId,
+      publisherName,
+      publisherHomepage: homepage,
+    }
+  }
+
+  sourceCache.set(host, sourceId)
+
+  return {
+    sourceId,
+    publisherName,
+    publisherHomepage: homepage,
+  }
+}
+
 async function insertWebDiscoveredArticle(
   result: WebSearchResult,
-  sourceId: number
+  sourceId: number,
+  publisherName?: string | null,
+  publisherHomepage?: string | null
 ): Promise<number | null> {
   try {
     const { rows } = await query<{ id: number }>(
@@ -689,9 +833,11 @@ async function insertWebDiscoveredArticle(
         canonical_url, 
         dek,
         published_at,
-        fetched_at
+        fetched_at,
+        publisher_name,
+        publisher_homepage
       )
-      VALUES ($1, $2, $3, $4, $5, NOW())
+      VALUES ($1, $2, $3, $4, $5, NOW(), $6, $7)
       RETURNING id
     `,
       [
@@ -700,6 +846,8 @@ async function insertWebDiscoveredArticle(
         result.url,
         result.snippet,
         result.publishedDate ? new Date(result.publishedDate) : new Date(),
+        publisherName ?? null,
+        publisherHomepage ?? null,
       ]
     )
 
@@ -770,111 +918,293 @@ async function ensureClusterForArticle(articleId: number, title: string) {
   )
 }
 
+type DiscoverySegmentStats = {
+  inserted: number
+  scanned: number
+  queriesRun: number
+  browseCost: number
+  browseToolCalls: number
+  duration: number
+}
+
+async function tryInsertDiscoveredArticle(
+  result: WebSearchResult,
+  fallbackSourceId: number
+): Promise<boolean> {
+  const duplicate = await isDuplicate(result.title, result.url)
+
+  if (duplicate) {
+    console.log(`- Skipped duplicate: ${result.title.substring(0, 60)}...`)
+    return false
+  }
+
+  const {
+    sourceId,
+    publisherName,
+    publisherHomepage,
+  } = await getOrCreateSourceForResult(result, fallbackSourceId)
+
+  const articleId = await insertWebDiscoveredArticle(
+    result,
+    sourceId,
+    publisherName,
+    publisherHomepage
+  )
+
+  if (!articleId) {
+    return false
+  }
+
+  await ensureClusterForArticle(articleId, result.title)
+
+  try {
+    await categorizeAndStoreArticle(
+      articleId,
+      result.title,
+      result.snippet || undefined
+    )
+    console.log(`✓ Added & categorized: ${result.title.substring(0, 60)}...`)
+  } catch (error) {
+    console.error(`  ❌ Failed to categorize article ${articleId}:`, error)
+    console.log(`✓ Added (uncategorized): ${result.title.substring(0, 60)}...`)
+  }
+
+  return true
+}
+
+function chunkArray<T>(items: T[], size: number): T[][] {
+  const chunkSize = Math.max(1, size)
+  const chunks: T[][] = []
+  for (let i = 0; i < items.length; i += chunkSize) {
+    chunks.push(items.slice(i, i + chunkSize))
+  }
+  return chunks
+}
+
+function delay(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+async function runBroadDiscoverySegment({
+  fallbackSourceId,
+  breakingNewsMode,
+  limitPerQuery,
+  maxQueries,
+  articleCap,
+}: {
+  fallbackSourceId: number
+  breakingNewsMode: boolean
+  limitPerQuery: number
+  maxQueries: number
+  articleCap: number
+}): Promise<DiscoverySegmentStats> {
+  const segmentStart = Date.now()
+  const querySet = breakingNewsMode ? BREAKING_NEWS_QUERIES : SEARCH_QUERIES
+  const selectedQueries = querySet.slice(0, Math.max(1, maxQueries))
+
+  let inserted = 0
+  let scanned = 0
+  let queriesRun = 0
+  let browseCost = 0
+  let browseToolCalls = 0
+
+  for (const query of selectedQueries) {
+    if (inserted >= articleCap) break
+
+    console.log(`Searching (broad tier): ${query}`)
+
+    const { results, browseStats } = await callOpenAIEnhancedSearch(query)
+    if (browseStats) {
+      browseCost += browseStats.estimatedCost
+      browseToolCalls += browseStats.toolCalls
+    }
+
+    scanned += results.length
+    queriesRun++
+
+    for (const result of results.slice(0, limitPerQuery)) {
+      if (inserted >= articleCap) break
+      const added = await tryInsertDiscoveredArticle(result, fallbackSourceId)
+      if (added) {
+        inserted++
+      }
+    }
+
+    if (inserted >= articleCap) break
+    await delay(DISCOVERY_PAUSE_MS)
+  }
+
+  return {
+    inserted,
+    scanned,
+    queriesRun,
+    browseCost,
+    browseToolCalls,
+    duration: Math.round((Date.now() - segmentStart) / 1000),
+  }
+}
+
+async function runOutletDiscoverySegment({
+  fallbackSourceId,
+  limitPerChunk,
+  chunkSize,
+  articleCap,
+  freshHours,
+}: {
+  fallbackSourceId: number
+  limitPerChunk: number
+  chunkSize: number
+  articleCap: number
+  freshHours: number
+}): Promise<DiscoverySegmentStats> {
+  if (CURATED_CLIMATE_OUTLETS.length === 0 || articleCap <= 0) {
+    return {
+      inserted: 0,
+      scanned: 0,
+      queriesRun: 0,
+      browseCost: 0,
+      browseToolCalls: 0,
+      duration: 0,
+    }
+  }
+
+  const segmentStart = Date.now()
+  const chunks = chunkArray(CURATED_CLIMATE_OUTLETS, chunkSize)
+
+  let inserted = 0
+  let scanned = 0
+  let queriesRun = 0
+  let browseCost = 0
+  let browseToolCalls = 0
+
+  for (const chunk of chunks) {
+    if (chunk.length === 0 || inserted >= articleCap) {
+      break
+    }
+
+    const outletNames = chunk.map((outlet) => outlet.promptHint || outlet.name)
+    const allowedDomains = chunk.map((outlet) => outlet.domain)
+    const chunkLabel =
+      outletNames.slice(0, 2).join(', ') +
+      (outletNames.length > 2 ? ` +${outletNames.length - 2} more` : '')
+
+    console.log(`Searching (curated outlets): ${chunkLabel}`)
+
+    const targetedSystemPrompt =
+      'You are curating climate coverage from pre-approved outlets. Always use the web search tool and only return links from the allowed domains.'
+    const targetedUserPrompt = `Provide up to ${limitPerChunk} of the most recent (${freshHours}-hour) climate or environment stories from the following outlets: ${outletNames.join(', ')}. Only include articles from these outlets or their official climate-focused sections, and return a JSON array with title, url, snippet, publishedDate, and source for each item.`
+
+    const { results, stats } = await callOpenAIWebSearch(
+      `Recent climate coverage: ${chunkLabel}`,
+      {
+        systemPrompt: targetedSystemPrompt,
+        userPrompt: targetedUserPrompt,
+        allowedDomains,
+        resultLimit: limitPerChunk,
+      }
+    )
+
+    queriesRun++
+
+    if (stats) {
+      browseCost += stats.estimatedCost
+      browseToolCalls += stats.toolCalls
+    }
+
+    scanned += results.length
+
+    for (const result of results) {
+      if (inserted >= articleCap) break
+      const added = await tryInsertDiscoveredArticle(result, fallbackSourceId)
+      if (added) {
+        inserted++
+      }
+    }
+
+    if (inserted >= articleCap) break
+    await delay(DISCOVERY_PAUSE_MS)
+  }
+
+  return {
+    inserted,
+    scanned,
+    queriesRun,
+    browseCost,
+    browseToolCalls,
+    duration: Math.round((Date.now() - segmentStart) / 1000),
+  }
+}
+
 export async function run(
   opts: {
     limitPerQuery?: number
     maxQueries?: number
     breakingNewsMode?: boolean
     closePool?: boolean
+    broadArticleCap?: number
+    outletArticleCap?: number
+    outletChunkSize?: number
+    outletLimitPerChunk?: number
+    outletFreshHours?: number
   } = {}
 ) {
   const startTime = Date.now()
-  const limitPerQuery = opts.limitPerQuery || 3 // Increased defaults
-  const maxQueries = opts.maxQueries || 5 // Increased defaults
-  const breakingNewsMode = opts.breakingNewsMode || false
+  const breakingNewsMode = opts.breakingNewsMode ?? false
+  const broadLimitPerQuery = Math.max(3, opts.limitPerQuery ?? 5)
+  const broadMaxQueries = Math.max(1, opts.maxQueries ?? 6)
+  const broadArticleCap = opts.broadArticleCap ?? (breakingNewsMode ? 20 : 45)
+  const outletArticleCap =
+    opts.outletArticleCap ?? (breakingNewsMode ? 20 : 45)
+  const outletChunkSize = Math.max(1, opts.outletChunkSize ?? 6)
+  const outletLimitPerChunk = Math.max(3, opts.outletLimitPerChunk ?? 6)
+  const outletFreshHours =
+    opts.outletFreshHours ?? DEFAULT_OUTLET_FRESHNESS_HOURS
 
-  // Updated limits for better coverage
-  const maxTotalArticles = breakingNewsMode ? 10 : 40
-
-  // Select appropriate query set
-  const querySet = breakingNewsMode ? BREAKING_NEWS_QUERIES : SEARCH_QUERIES
   const mode = breakingNewsMode ? 'breaking news' : 'comprehensive'
+  console.log(`Starting ${mode} web discovery with a tiered search plan...`)
 
-  console.log(`Starting ${mode} web discovery with ${maxQueries} queries...`)
+  const fallbackSourceId = await getOrCreateWebDiscoverySource()
 
-  const sourceId = await getOrCreateWebDiscoverySource()
-  let totalInserted = 0
-  let totalScanned = 0
-  let totalBrowseCost = 0
-  let totalBrowseToolCalls = 0
+  const broadStats = await runBroadDiscoverySegment({
+    fallbackSourceId,
+    breakingNewsMode,
+    limitPerQuery: broadLimitPerQuery,
+    maxQueries: broadMaxQueries,
+    articleCap: broadArticleCap,
+  })
 
-  const selectedQueries = querySet.slice(0, maxQueries)
+  console.log(
+    `Broad tier complete: ${broadStats.inserted} new articles from ${broadStats.scanned} results`
+  )
 
-  for (const query of selectedQueries) {
-    console.log(`Searching: ${query}`)
+  const outletStats = await runOutletDiscoverySegment({
+    fallbackSourceId,
+    limitPerChunk: outletLimitPerChunk,
+    chunkSize: outletChunkSize,
+    articleCap: outletArticleCap,
+    freshHours: outletFreshHours,
+  })
 
-    const { results, browseStats } = await callOpenAIEnhancedSearch(query)
-    if (browseStats) {
-      totalBrowseCost += browseStats.estimatedCost
-      totalBrowseToolCalls += browseStats.toolCalls
-    }
-
-    totalScanned += results.length
-
-    let inserted = 0
-
-    for (const result of results.slice(0, limitPerQuery)) {
-      // Hard stop if we've hit our total article limit
-      if (totalInserted >= maxTotalArticles) {
-        console.log(
-          `🛑 Hit max article limit (${maxTotalArticles}), stopping discovery`
-        )
-        break
-      }
-
-      const duplicate = await isDuplicate(result.title, result.url)
-
-      if (!duplicate) {
-        const articleId = await insertWebDiscoveredArticle(result, sourceId)
-
-        if (articleId) {
-          await ensureClusterForArticle(articleId, result.title)
-
-          // Categorize the article using hybrid approach
-          try {
-            await categorizeAndStoreArticle(
-              articleId,
-              result.title,
-              result.snippet || undefined
-            )
-            console.log(
-              `✓ Added & categorized: ${result.title.substring(0, 60)}...`
-            )
-          } catch (error) {
-            console.error(
-              `  ❌ Failed to categorize article ${articleId}:`,
-              error
-            )
-            console.log(
-              `✓ Added (uncategorized): ${result.title.substring(0, 60)}...`
-            )
-          }
-
-          inserted++
-          totalInserted++
-        }
-      } else {
-        console.log(`- Skipped duplicate: ${result.title.substring(0, 60)}...`)
-      }
-    }
-
-    // Stop outer loop if we hit the limit
-    if (totalInserted >= maxTotalArticles) {
-      console.log(
-        `🛑 Reached total article limit (${maxTotalArticles}), ending discovery`
-      )
-      break
-    }
-
-    console.log(`Query "${query}": ${inserted} new articles`)
-
-    // Small delay between queries to be respectful
-    await new Promise((resolve) => setTimeout(resolve, 2000))
+  if (outletStats.queriesRun > 0) {
+    console.log(
+      `Curated outlet tier complete: ${outletStats.inserted} new articles from ${outletStats.scanned} results`
+    )
+  } else {
+    console.log(
+      'Curated outlet tier skipped (no outlets configured or article cap set to 0)'
+    )
   }
+
+  const totalInserted = broadStats.inserted + outletStats.inserted
+  const totalScanned = broadStats.scanned + outletStats.scanned
+  const totalBrowseCost = broadStats.browseCost + outletStats.browseCost
+  const totalBrowseToolCalls =
+    broadStats.browseToolCalls + outletStats.browseToolCalls
+  const totalQueries = broadStats.queriesRun + outletStats.queriesRun
 
   const duration = Math.round((Date.now() - startTime) / 1000)
   console.log(
-    `Web discovery completed: ${totalInserted} new articles from ${totalScanned} results in ${duration}s`
+    `Web discovery completed: ${totalInserted} new articles (${broadStats.inserted} broad / ${outletStats.inserted} curated) from ${totalScanned} results in ${duration}s`
   )
 
   if (totalBrowseCost > 0) {
@@ -893,7 +1223,7 @@ export async function run(
     totalInserted,
     totalScanned,
     duration,
-    queriesRun: selectedQueries.length,
+    queriesRun: totalQueries,
     estimatedBrowseCost: totalBrowseCost,
     browseToolCalls: totalBrowseToolCalls,
   }

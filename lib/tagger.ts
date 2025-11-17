@@ -364,6 +364,7 @@ export function isClimateRelevant(article: ArticleLike): boolean {
     /\b(ecosystem|ecosystems|biodiversity|species extinction|habitat loss|endangered species)\b/i,
     /\b(agriculture|agricultural|crop|crops|farming|farmers|food security|food supply|harvest)\b/i,
     /\b(water crisis|water stress|precipitation|rainfall|snowpack)\b/i,
+    /\b(colorado river|colorado river basin|river compact|water (?:allocation|allocations|allotment|sharing))\b/i,
 
     // Environmental & pollution
     /\b(environmental|environment|pollution|pollutants|air quality|water quality|soot|smog)\b/i,

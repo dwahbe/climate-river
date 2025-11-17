@@ -30,19 +30,36 @@ export async function run(opts: { closePool?: boolean } = {}) {
     `
     WITH art AS (
       SELECT
-        ac.cluster_id,
-        a.id                          AS article_id,
-        a.published_at,
-        a.dek,
-        a.author,
-        a.canonical_url,
-        COALESCE(s.weight, 3)         AS src_weight,
-        -- penalties (ints, not booleans)
-        (a.canonical_url LIKE 'https://news.google.com%')::int                             AS is_gn,
-        (a.canonical_url ~ '(prnewswire|businesswire)\\.com')::int                          AS is_wire
-      FROM article_clusters ac
-      JOIN articles a ON a.id = ac.article_id
-      LEFT JOIN sources s ON s.id = a.source_id
+        cluster_id,
+        article_id,
+        published_at,
+        dek,
+        author,
+        canonical_url,
+        src_weight,
+        is_gn,
+        is_wire
+      FROM (
+        SELECT
+          ac.cluster_id,
+          a.id AS article_id,
+          a.published_at,
+          a.dek,
+          a.author,
+          a.canonical_url,
+          COALESCE(s.weight, 3)         AS src_weight,
+          -- penalties (ints, not booleans)
+          (a.canonical_url LIKE 'https://news.google.com%')::int                             AS is_gn,
+          (a.canonical_url ~ '(prnewswire|businesswire)\\.com')::int                          AS is_wire,
+          ROW_NUMBER() OVER (
+            PARTITION BY a.id
+            ORDER BY ac.cluster_id
+          ) AS article_cluster_rank
+        FROM article_clusters ac
+        JOIN articles a ON a.id = ac.article_id
+        LEFT JOIN sources s ON s.id = a.source_id
+      ) ranked
+      WHERE article_cluster_rank = 1
     ),
     art_scored AS (
       SELECT
@@ -108,16 +125,37 @@ export async function run(opts: { closePool?: boolean } = {}) {
           WHERE af.cluster_id = c.cluster_id) AS pool_strength
       FROM clust c
     ),
-    final AS (
+    final_base AS (
       SELECT
         cluster_id,
+        size,
         -- Optimized blend: 45% freshness, 27% velocity, 18% coverage, 5% avg_weight, 5% pool
         -- Data-driven weights that prioritize recency while maintaining quality signals
         (0.18 * coverage) + (0.05 * avg_w) + (0.27 * LN(1 + v6)) + (0.45 * fresh)
           + 0.05 * LN(1 + pool_strength) AS score,
-        lead_article_id,
-        (SELECT size FROM clust c2 WHERE c2.cluster_id = clust_scored.cluster_id) AS size
+        lead_article_id
       FROM clust_scored
+    ),
+    final_ranked AS (
+      SELECT
+        final_base.*,
+        ROW_NUMBER() OVER (
+          PARTITION BY final_base.lead_article_id
+          ORDER BY final_base.score DESC NULLS LAST, final_base.cluster_id
+        ) AS lead_rank
+      FROM final_base
+    ),
+    final AS (
+      SELECT
+        cluster_id,
+        size,
+        score,
+        CASE
+          WHEN lead_article_id IS NULL THEN NULL
+          WHEN lead_rank = 1 THEN lead_article_id
+          ELSE NULL
+        END AS lead_article_id
+      FROM final_ranked
     )
     INSERT INTO cluster_scores (cluster_id, size, score, lead_article_id)
     SELECT cluster_id, size, score, lead_article_id FROM final
