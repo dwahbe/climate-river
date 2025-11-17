@@ -1,7 +1,7 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { normalizeRiverClusters } from '../riverService.ts'
+import { normalizeRiverClusters } from '../riverService'
 import type { Cluster } from '../../models/cluster'
 
 const baseCluster: Cluster = {
@@ -106,7 +106,9 @@ describe('normalizeRiverClusters', () => {
     assert.equal(bloomberg!.article_id, 202)
     assert.equal(bloomberg!.article_count, 2)
 
-    const reuters = normalized.subs.find((sub) => (sub.source ?? '').includes('Reuters'))
+    const reuters = normalized.subs.find((sub) =>
+      (sub.source ?? '').includes('Reuters')
+    )
     assert.ok(reuters)
     assert.equal(reuters!.article_id, 204)
     assert.equal(reuters!.article_count, 2)

@@ -24,7 +24,7 @@ export async function run(opts: { dryRun?: boolean; closePool?: boolean } = {}) 
       a.id, 
       a.title, 
       a.dek,
-      COUNT(ac.category_id) as category_count
+      COUNT(ac.category_id)::int as category_count
     FROM articles a
     INNER JOIN article_categories ac ON ac.article_id = a.id
     WHERE a.published_at >= now() - interval '30 days'
@@ -120,5 +120,6 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     endPool().finally(() => process.exit(1))
   })
 }
+
 
 
