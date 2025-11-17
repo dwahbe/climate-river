@@ -199,7 +199,10 @@ function hostFromUrl(url: string | undefined): string | null {
 function humanizeHost(host: string): string {
   return host
     .split('.')
-    .filter((segment, idx, arr) => idx === 0 || idx === arr.length - 1 || arr.length <= 2)
+    .filter(
+      (segment, idx, arr) =>
+        idx === 0 || idx === arr.length - 1 || arr.length <= 2
+    )
     .map((segment) => segment.charAt(0).toUpperCase() + segment.slice(1))
     .join(' ')
 }
@@ -717,16 +720,12 @@ async function isDuplicate(title: string, url: string): Promise<boolean> {
   }
 
   // Check for similar title (basic duplicate detection)
-  const titleWords = title
-    .toLowerCase()
-    .split(' ')
-    .filter((w) => w.length > 3)
-  const titlePattern = titleWords.slice(0, 5).join('|') // First 5 significant words
+  const normalizedTitle = title.trim().toLowerCase()
 
-  if (titlePattern) {
+  if (normalizedTitle) {
     const existingByTitle = await query(
-      "SELECT id FROM articles WHERE LOWER(title) ~ $1 AND fetched_at > NOW() - INTERVAL '7 days'",
-      [titlePattern]
+      "SELECT id FROM articles WHERE LOWER(title) = $1 AND fetched_at > NOW() - INTERVAL '48 hours'",
+      [normalizedTitle]
     )
 
     if (existingByTitle.rows.length > 0) {
@@ -938,11 +937,8 @@ async function tryInsertDiscoveredArticle(
     return false
   }
 
-  const {
-    sourceId,
-    publisherName,
-    publisherHomepage,
-  } = await getOrCreateSourceForResult(result, fallbackSourceId)
+  const { sourceId, publisherName, publisherHomepage } =
+    await getOrCreateSourceForResult(result, fallbackSourceId)
 
   const articleId = await insertWebDiscoveredArticle(
     result,
@@ -1153,8 +1149,7 @@ export async function run(
   const broadLimitPerQuery = Math.max(3, opts.limitPerQuery ?? 5)
   const broadMaxQueries = Math.max(1, opts.maxQueries ?? 6)
   const broadArticleCap = opts.broadArticleCap ?? (breakingNewsMode ? 20 : 45)
-  const outletArticleCap =
-    opts.outletArticleCap ?? (breakingNewsMode ? 20 : 45)
+  const outletArticleCap = opts.outletArticleCap ?? (breakingNewsMode ? 20 : 45)
   const outletChunkSize = Math.max(1, opts.outletChunkSize ?? 6)
   const outletLimitPerChunk = Math.max(3, opts.outletLimitPerChunk ?? 6)
   const outletFreshHours =
