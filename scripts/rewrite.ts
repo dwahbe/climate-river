@@ -96,6 +96,7 @@ function buildPrompt(input: {
   title: string
   dek?: string | null
   contentSnippet?: string | null
+  previewExcerpt?: string | null
   clusterContext?: ClusterContextItem[]
 }) {
   const lines = [
@@ -104,12 +105,15 @@ function buildPrompt(input: {
     'STRUCTURE (Techmeme style):',
     '- Lead with WHO (agency/company/court/institution)',
     '- Follow with strong action verb (announces, blocks, requires, finds, cuts, raises)',
-    '- Add specific WHAT with numbers and details',
+    '- Add specific WHAT with details; only cite numbers that were provided',
     '- End with WHY/IMPACT in natural clause',
     '- Use commas to separate clauses, not complex sentence structures',
     '',
     'SPECIFICITY REQUIRED:',
-    '- Always include numbers: "$X billion", "X GW", "X% reduction", "X tons CO2"',
+    '- ONLY include numbers or quantitative claims that appear in the supplied material (title, summary, excerpt, preview article, or cluster context)',
+    '- If no quantitative details exist, keep the rewrite qualitative but still concrete',
+    '- Do not invent stats, measurements, dates, or sources; omit missing data instead of guessing',
+    '- Preview excerpts (when provided) are the verified article text—quote them faithfully',
     '- Name specific entities: "EPA", "Ørsted", "Federal Appeals Court", not "regulators" or "companies"',
     '- Include timeframes: "by 2030", "from 2025-2028", "starting Q1 2026"',
     '- Product/policy names: Exact titles, not generic descriptions',
@@ -135,6 +139,7 @@ function buildPrompt(input: {
     '- Present tense, active voice',
     '- 120-160 characters ideal (Techmeme density)',
     '- No period at end',
+    '- Repeat quantitative figures exactly as provided; no rounding or new units',
     '- No hype words: "revolutionary", "game-changer", "unprecedented", "major breakthrough"',
     '- No vague phrases: "significant", "important" (show don\'t tell with numbers)',
     '- No questions, puns, or editorial voice',
@@ -152,9 +157,18 @@ function buildPrompt(input: {
     lines.push(`Article excerpt: ${input.contentSnippet}`)
   }
 
+  if (input.previewExcerpt) {
+    lines.push(
+      `Preview article excerpt (from Climate River reader): ${input.previewExcerpt}`
+    )
+  }
+
   if (input.clusterContext && input.clusterContext.length > 0) {
     lines.push('')
     lines.push('OTHER COVERAGE (cluster context):')
+    lines.push(
+      '  (Treat these as verified related reports; reuse their exact figures if relevant)'
+    )
     for (const related of input.clusterContext.slice(0, 3)) {
       const sourceLabel = related.source
         ? `${related.source}:`
@@ -227,11 +241,127 @@ function containsQuantifier(headline: string) {
   return QUANTIFIER_REGEXES.some((regex) => regex.test(headline))
 }
 
+const NUMBER_WORD_MAP: Record<string, string> = {
+  zero: '0',
+  one: '1',
+  two: '2',
+  three: '3',
+  four: '4',
+  five: '5',
+  six: '6',
+  seven: '7',
+  eight: '8',
+  nine: '9',
+  ten: '10',
+  eleven: '11',
+  twelve: '12',
+  thirteen: '13',
+  fourteen: '14',
+  fifteen: '15',
+  sixteen: '16',
+  seventeen: '17',
+  eighteen: '18',
+  nineteen: '19',
+  twenty: '20',
+  thirty: '30',
+  forty: '40',
+  fifty: '50',
+  sixty: '60',
+  seventy: '70',
+  eighty: '80',
+  ninety: '90',
+}
+
+const SPELLED_NUMBER_REGEX = new RegExp(
+  `\\b(${Object.keys(NUMBER_WORD_MAP).join('|')})\\b`,
+  'gi'
+)
+
+const NUMERIC_TOKEN_REGEX =
+  /\d[\d,]*(?:\.\d+)?(?:\s?(?:%|percent))?/gi
+
+function normalizeNumericToken(token: string): string | null {
+  if (!token) return null
+  let normalized = token.toLowerCase().trim()
+  if (!normalized) return null
+  normalized = normalized.replace(/,/g, '')
+  normalized = normalized.replace(/percent$/i, '%')
+  normalized = normalized.replace(/\s+/g, '')
+  normalized = normalized.replace(/[^0-9.%]/g, '')
+  normalized = normalized.replace(/\.(?=.*\.)/g, '')
+  normalized = normalized.replace(/\.$/, '')
+  if (!/\d/.test(normalized)) return null
+  return normalized
+}
+
+function extractNumericTokens(text: string | null | undefined): string[] {
+  if (!text) return []
+  const matches = text.match(NUMERIC_TOKEN_REGEX)
+  if (!matches) return []
+  return matches
+    .map((token) => normalizeNumericToken(token))
+    .filter((token): token is string => Boolean(token))
+}
+
+function extractSpelledNumberTokens(text: string | null | undefined): string[] {
+  if (!text) return []
+  const tokens: string[] = []
+  SPELLED_NUMBER_REGEX.lastIndex = 0
+  let match: RegExpExecArray | null
+  while ((match = SPELLED_NUMBER_REGEX.exec(text)) !== null) {
+    const mapped = NUMBER_WORD_MAP[match[1].toLowerCase()]
+    if (mapped) tokens.push(mapped)
+  }
+  return tokens
+}
+
+type QuantContext = {
+  hasQuantEvidence: boolean
+  numbers: Set<string>
+}
+
+type ValidationContext = {
+  hasContent: boolean
+  sourceQuant: QuantContext
+}
+
+function buildSourceQuantContext(
+  parts: Array<string | null | undefined>
+): QuantContext {
+  const filtered = parts.filter(
+    (p): p is string => typeof p === 'string' && p.trim().length > 0
+  )
+  if (filtered.length === 0) {
+    return { hasQuantEvidence: false, numbers: new Set() }
+  }
+  const MAX_SEGMENT_LENGTH = 12000
+  const combined = filtered
+    .map((segment) =>
+      segment.length > MAX_SEGMENT_LENGTH
+        ? segment.slice(0, MAX_SEGMENT_LENGTH)
+        : segment
+    )
+    .join(' ')
+  const numbers = new Set([
+    ...extractNumericTokens(combined),
+    ...extractSpelledNumberTokens(combined),
+  ])
+  return {
+    hasQuantEvidence: containsQuantifier(combined),
+    numbers,
+  }
+}
+
 /* ------------------------- Enhanced Validation ------------------------- */
 
-function passesChecks(original: string, draft: string, hasContent: boolean) {
+function passesChecks(
+  original: string,
+  draft: string,
+  context: ValidationContext
+) {
   if (!draft) return false
   const t = sanitizeHeadline(draft)
+  const { hasContent, sourceQuant } = context
 
   // Techmeme-style density: allow more flexibility for high-quality specificity
   const minLength = hasContent ? 60 : 50
@@ -242,9 +372,14 @@ function passesChecks(original: string, draft: string, hasContent: boolean) {
     return false
   }
 
-  // Require some quantifiable detail: digits or explicit magnitude words
-  if (!containsQuantifier(t)) {
-    console.warn(`⚠️  No quantifier in headline: "${t.slice(0, 50)}..."`)
+  // Require quantifier only when source provides quantitative backing
+  if (sourceQuant.hasQuantEvidence && !containsQuantifier(t)) {
+    console.warn(
+      `⚠️  Source has quantitative detail but rewrite lacks it: "${t.slice(
+        0,
+        50
+      )}..."`
+    )
     return false
   }
 
@@ -274,6 +409,30 @@ function passesChecks(original: string, draft: string, hasContent: boolean) {
     // Without content, allow reasonable compression
     if (draftWords < originalWords * 0.6) {
       console.warn(`⚠️  Headline too compressed`)
+      return false
+    }
+  }
+
+  // Ensure numeric claims exist in source material
+  const draftNumbers = extractNumericTokens(t)
+  if (draftNumbers.length > 0) {
+    if (sourceQuant.numbers.size === 0) {
+      console.warn(
+        `⚠️  Numeric detail missing in source but present in rewrite: ${draftNumbers.join(
+          ', '
+        )}`
+      )
+      return false
+    }
+    const missingNumbers = draftNumbers.filter(
+      (num) => !sourceQuant.numbers.has(num)
+    )
+    if (missingNumbers.length > 0) {
+      console.warn(
+        `⚠️  Numeric mismatch: ${missingNumbers.join(
+          ', '
+        )} not found in source material`
+      )
       return false
     }
   }
@@ -335,6 +494,7 @@ async function generateWithOpenAI(
     title: string
     dek?: string | null
     contentSnippet?: string | null
+    previewExcerpt?: string | null
     clusterContext?: ClusterContextItem[]
   },
   abortMs = 20000,
@@ -359,6 +519,12 @@ async function generateWithOpenAI(
         ? `with_content:${input.contentSnippet.length}chars`
         : 'title_only',
     ]
+
+    if (input.previewExcerpt) {
+      notesParts.push(`with_preview:${input.previewExcerpt.length}chars`)
+    } else {
+      notesParts.push('no_preview')
+    }
 
     if (input.clusterContext && input.clusterContext.length > 0) {
       notesParts.push(
@@ -483,6 +649,13 @@ async function processOne(r: Row) {
       ? extractContentSnippet(r.content_text, r.content_html)
       : null
 
+  const previewExcerpt =
+    r.content_status === 'success' &&
+    typeof r.content_html === 'string' &&
+    r.content_html.trim().length > 0
+      ? extractContentSnippet(null, r.content_html, 1500)
+      : null
+
   const clusterContext: ClusterContextItem[] = Array.isArray(r.cluster_context)
     ? (() => {
         const seen = new Set<string>()
@@ -513,15 +686,33 @@ async function processOne(r: Row) {
     contentNote = ':content_rejected' // Had content but failed quality checks
   }
 
+  const clusterTitles = clusterContext.map((item) => item.title).filter(Boolean)
+
+  const sourceQuant = buildSourceQuantContext([
+    r.title,
+    r.dek,
+    contentSnippet,
+    previewExcerpt,
+    r.content_text,
+    r.content_html,
+    ...clusterTitles,
+  ])
+
   const llm = await generateWithOpenAI({
     title: r.title,
     dek: r.dek,
     contentSnippet,
+    previewExcerpt,
     clusterContext,
   })
   const draft = llm.text || ''
 
-  if (passesChecks(r.title, draft, !!contentSnippet)) {
+  if (
+    passesChecks(r.title, draft, {
+      hasContent: !!contentSnippet,
+      sourceQuant,
+    })
+  ) {
     const notes = llm.notes + contentNote
 
     await query(
