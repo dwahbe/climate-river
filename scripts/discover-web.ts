@@ -3,49 +3,11 @@ import { query, endPool } from '@/lib/db'
 import { generateText } from 'ai'
 import { openai } from '@ai-sdk/openai'
 import { categorizeAndStoreArticle } from '@/lib/categorizer'
-import { CURATED_CLIMATE_OUTLETS } from '@/config/climateOutlets'
-
-// Breaking news queries - optimized for frequent runs to catch urgent stories
-const BREAKING_NEWS_QUERIES = [
-  'climate emergency breaking news today',
-  'extreme weather event happening now',
-  'huge climate protest happening now',
-  'climate policy announcement today',
-  'wildfire flood hurricane current',
-]
-
-// Comprehensive search queries for daily deep discovery
-const SEARCH_QUERIES = [
-  // Breaking news & emergencies
-  'climate emergency declaration 2025',
-  'extreme weather event today breaking',
-  'environmental disaster recent news',
-
-  // Policy & regulation
-  'climate policy announcement new legislation',
-  'carbon tax regulation government decision',
-  'renewable energy mandate policy',
-
-  // Technology breakthroughs
-  'carbon capture technology breakthrough',
-  'renewable energy efficiency milestone',
-  'battery storage innovation announcement',
-
-  // Corporate & finance
-  'climate investment funding announcement',
-  'ESG sustainability corporate news',
-  'green bond climate finance deal',
-
-  // Science & research
-  'climate study research paper findings',
-  'IPCC climate report release',
-  'temperature record climate data',
-
-  // Lawsuits & legal
-  'climate lawsuit verdict decision',
-  'environmental court ruling',
-  'fossil fuel legal action',
-]
+import { Buffer } from 'node:buffer'
+import {
+  CURATED_CLIMATE_OUTLETS,
+  type ClimateOutlet,
+} from '@/config/climateOutlets'
 
 type WebSearchResult = {
   title: string
@@ -115,6 +77,29 @@ const HOST_BLOCKLIST = new Set([
 ])
 
 const sourceCache = new Map<string, number>()
+
+const OUTLET_BATCH_DOMAIN_GROUPS: string[][] = [
+  ['nytimes.com', 'washingtonpost.com', 'theguardian.com', 'apnews.com'],
+  ['reuters.com', 'bloomberg.com', 'ft.com', 'politico.com'],
+  [
+    'insideclimatenews.org',
+    'climatechangenews.com',
+    'carbonbrief.org',
+    'canarymedia.com',
+    'heatmap.news',
+  ],
+  ['nationalgeographic.com', 'scientificamerican.com', 'nature.com', 'vox.com'],
+  ['restofworld.org', 'mongabay.com', 'downtoearth.org.in', 'grist.org'],
+  ['eenews.net', 'wri.org', 'iea.org', 'weforum.org'],
+  ['amnesty.org', 'news.un.org', 'climate.gov', 'earthobservatory.nasa.gov'],
+  ['carbon-pulse.com', 'ember-climate.org', 'energymonitor.ai', 'rmi.org'],
+  [
+    'project-syndicate.org',
+    'theatlantic.com',
+    'bbc.com',
+    'nationalgeographic.com',
+  ],
+]
 
 const OPENAI_WEB_SEARCH_INPUT_PER_M = 2.5
 const OPENAI_WEB_SEARCH_OUTPUT_PER_M = 10
@@ -207,16 +192,38 @@ function humanizeHost(host: string): string {
     .join(' ')
 }
 
+function extractJsonArrayBlock(content: string): string | null {
+  if (!content) return null
+
+  const fenced = content.match(/```json([\s\S]*?)```/i)
+  if (fenced && fenced[1]) {
+    return fenced[1].replace(/^\s+/, '').replace(/\s+$/, '')
+  }
+
+  const inline = content.match(/\[[\s\S]*\]/)
+  return inline ? inline[0] : null
+}
+
+function cleanText(value: string | null | undefined): string {
+  if (!value) return ''
+  return value
+    .replace(/\*\*/g, '')
+    .replace(/__+/g, '')
+    .replace(/`/g, '')
+    .replace(/\[(.*?)\]\((.*?)\)/g, '$1') // markdown links
+    .replace(/<[^>]+>/g, '')
+    .trim()
+}
+
 function parseWebSearchJson(
   content: string | null | undefined,
   query: string
 ): WebSearchResult[] {
-  if (!content) return []
-  const jsonMatch = content.match(/\[[\s\S]*\]/)
-  if (!jsonMatch) return []
+  const jsonBlock = extractJsonArrayBlock(content ?? '')
+  if (!jsonBlock) return []
 
   try {
-    const parsed = JSON.parse(jsonMatch[0])
+    const parsed = JSON.parse(jsonBlock)
     if (!Array.isArray(parsed)) return []
 
     const results: WebSearchResult[] = []
@@ -224,9 +231,9 @@ function parseWebSearchJson(
       if (!item) continue
       const title =
         typeof item.title === 'string'
-          ? item.title.trim()
+          ? cleanText(item.title)
           : typeof item.headline === 'string'
-            ? item.headline.trim()
+            ? cleanText(item.headline)
             : ''
       const url =
         typeof item.url === 'string'
@@ -237,14 +244,16 @@ function parseWebSearchJson(
       if (!title || !url) continue
 
       const snippet =
-        typeof item.snippet === 'string' && item.snippet.trim().length > 0
-          ? item.snippet.trim()
-          : typeof item.summary === 'string' && item.summary.trim().length > 0
-            ? item.summary.trim()
-            : typeof item.description === 'string' &&
-                item.description.trim().length > 0
-              ? item.description.trim()
-              : `Latest climate coverage for "${query}"`
+        cleanText(
+          typeof item.snippet === 'string' && item.snippet.trim().length > 0
+            ? item.snippet
+            : typeof item.summary === 'string' && item.summary.trim().length > 0
+              ? item.summary
+              : typeof item.description === 'string' &&
+                  item.description.trim().length > 0
+                ? item.description
+                : ''
+        ) || `Latest climate coverage for "${query}"`
 
       const published =
         typeof item.publishedDate === 'string'
@@ -255,10 +264,13 @@ function parseWebSearchJson(
               ? item.date
               : undefined
 
-      const source =
+      let source =
         typeof item.source === 'string' && item.source.trim().length > 0
-          ? item.source.trim()
-          : extractSourceFromUrl(url)
+          ? cleanText(item.source)
+          : ''
+      if (!source) {
+        source = extractSourceFromUrl(url)
+      }
 
       results.push({
         title,
@@ -558,18 +570,48 @@ async function searchGoogleNewsRSS(query: string): Promise<WebSearchResult[]> {
   }
 }
 
+const GOOGLE_TRACKING_PARAMS = new Set([
+  'utm_source',
+  'utm_medium',
+  'utm_campaign',
+  'utm_term',
+  'utm_content',
+  'ved',
+  'usg',
+  'oc',
+  'si',
+  'gclid',
+  'fbclid',
+])
+
 function extractRealUrl(googleUrl: string): string {
   try {
-    // Google News URLs are often redirects, try to extract the real URL
     const url = new URL(googleUrl)
+    if (!url.hostname.includes('news.google.com')) {
+      return googleUrl
+    }
 
-    // If it's a Google News URL, try to extract the real URL from the path
-    if (url.hostname.includes('news.google.com')) {
-      // This is a simplified extraction - in practice you might need more robust parsing
-      const pathParts = url.pathname.split('/')
-      const articlePart = pathParts.find((part) => part.includes('http'))
-      if (articlePart) {
-        return decodeURIComponent(articlePart)
+    const candidateSegments = [
+      url.searchParams.get('url'),
+      url.searchParams.get('q'),
+      url.searchParams.get('u'),
+    ].filter((segment): segment is string => Boolean(segment))
+
+    const pathSegments = url.pathname
+      .split('/')
+      .filter(Boolean)
+      .map((segment) => {
+        try {
+          return decodeURIComponent(segment)
+        } catch {
+          return segment
+        }
+      })
+
+    for (const candidate of [...candidateSegments, ...pathSegments]) {
+      const resolved = resolveGoogleNewsCandidate(candidate)
+      if (resolved) {
+        return resolved
       }
     }
 
@@ -577,6 +619,70 @@ function extractRealUrl(googleUrl: string): string {
   } catch {
     return googleUrl
   }
+}
+
+function resolveGoogleNewsCandidate(
+  candidate: string | undefined
+): string | null {
+  if (!candidate) return null
+  const trimmed = candidate.trim()
+  if (!trimmed) return null
+
+  if (trimmed.startsWith('http')) {
+    return stripTrackingParams(trimmed)
+  }
+
+  const decoded = maybeDecodeBase64Url(trimmed)
+  if (decoded?.startsWith('http')) {
+    return stripTrackingParams(decoded)
+  }
+
+  return null
+}
+
+function maybeDecodeBase64Url(value: string): string | null {
+  if (!/^[A-Za-z0-9+/=_-]+$/.test(value)) {
+    return null
+  }
+
+  const normalized = value.replace(/-/g, '+').replace(/_/g, '/')
+  const padding = normalized.length % 4
+  const padded = normalized + '='.repeat((4 - padding) % 4)
+
+  try {
+    return Buffer.from(padded, 'base64').toString('utf8')
+  } catch {
+    return null
+  }
+}
+
+function stripTrackingParams(rawUrl: string): string {
+  try {
+    const parsed = new URL(rawUrl)
+    for (const param of GOOGLE_TRACKING_PARAMS) {
+      parsed.searchParams.delete(param)
+    }
+    parsed.hash = ''
+    return parsed.toString()
+  } catch {
+    return rawUrl
+  }
+}
+
+function normalizePublishedDate(
+  value: string | Date | null | undefined
+): Date | null {
+  if (!value) return null
+  const date = value instanceof Date ? value : new Date(value)
+  return Number.isNaN(date.getTime()) ? null : date
+}
+
+function isResultFresh(result: WebSearchResult, cutoffMs: number): boolean {
+  const publishedAt = normalizePublishedDate(result.publishedDate)
+  if (!publishedAt) {
+    return false
+  }
+  return publishedAt.getTime() >= cutoffMs
 }
 
 function cleanGoogleNewsTitle(title: string): string {
@@ -844,7 +950,7 @@ async function insertWebDiscoveredArticle(
         result.title,
         result.url,
         result.snippet,
-        result.publishedDate ? new Date(result.publishedDate) : new Date(),
+        normalizePublishedDate(result.publishedDate) ?? new Date(),
         publisherName ?? null,
         publisherHomepage ?? null,
       ]
@@ -968,6 +1074,10 @@ async function tryInsertDiscoveredArticle(
   return true
 }
 
+function delay(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
 function chunkArray<T>(items: T[], size: number): T[][] {
   const chunkSize = Math.max(1, size)
   const chunks: T[][] = []
@@ -977,79 +1087,53 @@ function chunkArray<T>(items: T[], size: number): T[][] {
   return chunks
 }
 
-function delay(ms: number) {
-  return new Promise((resolve) => setTimeout(resolve, ms))
-}
+function buildOutletBatches(batchSize: number): ClimateOutlet[][] {
+  const byDomain = new Map(
+    CURATED_CLIMATE_OUTLETS.map((outlet) => [outlet.domain, outlet])
+  )
+  const assigned = new Set<string>()
+  const batches: ClimateOutlet[][] = []
 
-async function runBroadDiscoverySegment({
-  fallbackSourceId,
-  breakingNewsMode,
-  limitPerQuery,
-  maxQueries,
-  articleCap,
-}: {
-  fallbackSourceId: number
-  breakingNewsMode: boolean
-  limitPerQuery: number
-  maxQueries: number
-  articleCap: number
-}): Promise<DiscoverySegmentStats> {
-  const segmentStart = Date.now()
-  const querySet = breakingNewsMode ? BREAKING_NEWS_QUERIES : SEARCH_QUERIES
-  const selectedQueries = querySet.slice(0, Math.max(1, maxQueries))
+  for (const domains of OUTLET_BATCH_DOMAIN_GROUPS) {
+    const batch = domains
+      .map((domain) => {
+        const outlet = byDomain.get(domain)
+        if (outlet && !assigned.has(domain)) {
+          assigned.add(domain)
+          return outlet
+        }
+        return null
+      })
+      .filter((outlet): outlet is ClimateOutlet => Boolean(outlet))
 
-  let inserted = 0
-  let scanned = 0
-  let queriesRun = 0
-  let browseCost = 0
-  let browseToolCalls = 0
-
-  for (const query of selectedQueries) {
-    if (inserted >= articleCap) break
-
-    console.log(`Searching (broad tier): ${query}`)
-
-    const { results, browseStats } = await callOpenAIEnhancedSearch(query)
-    if (browseStats) {
-      browseCost += browseStats.estimatedCost
-      browseToolCalls += browseStats.toolCalls
+    if (batch.length > 0) {
+      batches.push(batch)
     }
-
-    scanned += results.length
-    queriesRun++
-
-    for (const result of results.slice(0, limitPerQuery)) {
-      if (inserted >= articleCap) break
-      const added = await tryInsertDiscoveredArticle(result, fallbackSourceId)
-      if (added) {
-        inserted++
-      }
-    }
-
-    if (inserted >= articleCap) break
-    await delay(DISCOVERY_PAUSE_MS)
   }
 
-  return {
-    inserted,
-    scanned,
-    queriesRun,
-    browseCost,
-    browseToolCalls,
-    duration: Math.round((Date.now() - segmentStart) / 1000),
+  const leftovers = CURATED_CLIMATE_OUTLETS.filter(
+    (outlet) => !assigned.has(outlet.domain)
+  )
+
+  for (const chunk of chunkArray(leftovers, batchSize)) {
+    if (chunk.length > 0) {
+      batches.push(chunk)
+    }
   }
+
+  return batches
 }
 
 async function runOutletDiscoverySegment({
   fallbackSourceId,
-  limitPerChunk,
-  chunkSize,
+  limitPerBatch,
+  batchSize,
   articleCap,
   freshHours,
 }: {
   fallbackSourceId: number
-  limitPerChunk: number
-  chunkSize: number
+  limitPerBatch: number
+  batchSize: number
   articleCap: number
   freshHours: number
 }): Promise<DiscoverySegmentStats> {
@@ -1065,7 +1149,9 @@ async function runOutletDiscoverySegment({
   }
 
   const segmentStart = Date.now()
-  const chunks = chunkArray(CURATED_CLIMATE_OUTLETS, chunkSize)
+  const outletBatches = buildOutletBatches(batchSize)
+  const freshnessCutoffMs =
+    freshHours > 0 ? Date.now() - freshHours * 60 * 60 * 1000 : null
 
   let inserted = 0
   let scanned = 0
@@ -1073,30 +1159,27 @@ async function runOutletDiscoverySegment({
   let browseCost = 0
   let browseToolCalls = 0
 
-  for (const chunk of chunks) {
-    if (chunk.length === 0 || inserted >= articleCap) {
+  for (const batch of outletBatches) {
+    if (inserted >= articleCap) {
       break
     }
 
-    const outletNames = chunk.map((outlet) => outlet.promptHint || outlet.name)
-    const allowedDomains = chunk.map((outlet) => outlet.domain)
-    const chunkLabel =
-      outletNames.slice(0, 2).join(', ') +
-      (outletNames.length > 2 ? ` +${outletNames.length - 2} more` : '')
+    const outletNames = batch.map((outlet) => outlet.promptHint || outlet.name)
+    const domains = batch.map((outlet) => outlet.domain)
 
-    console.log(`Searching (curated outlets): ${chunkLabel}`)
+    console.log(`Searching (site-specific batch): ${outletNames.join(', ')}`)
 
     const targetedSystemPrompt =
-      'You are curating climate coverage from pre-approved outlets. Always use the web search tool and only return links from the allowed domains.'
-    const targetedUserPrompt = `Provide up to ${limitPerChunk} of the most recent (${freshHours}-hour) climate or environment stories from the following outlets: ${outletNames.join(', ')}. Only include articles from these outlets or their official climate-focused sections, and return a JSON array with title, url, snippet, publishedDate, and source for each item.`
+      'You are curating climate coverage from a small list of pre-approved outlets. Always use the web search tool with site-specific queries and only return links from the allowed domains.'
+    const targetedUserPrompt = `Provide up to ${limitPerBatch} of the most recent (${freshHours}-hour) climate or environment stories covering these outlets: ${outletNames.join(', ')}. Use site-specific queries (e.g., site:domain) and include at least one link per outlet when possible. Only include URLs that belong to these domains or their official climate sections, and return a JSON array with title, url, snippet, publishedDate, and source for each item.`
 
     const { results, stats } = await callOpenAIWebSearch(
-      `Recent climate coverage: ${chunkLabel}`,
+      `Latest climate coverage across: ${domains.join(', ')}`,
       {
         systemPrompt: targetedSystemPrompt,
         userPrompt: targetedUserPrompt,
-        allowedDomains,
-        resultLimit: limitPerChunk,
+        allowedDomains: domains,
+        resultLimit: limitPerBatch,
       }
     )
 
@@ -1111,6 +1194,12 @@ async function runOutletDiscoverySegment({
 
     for (const result of results) {
       if (inserted >= articleCap) break
+      if (freshnessCutoffMs && !isResultFresh(result, freshnessCutoffMs)) {
+        console.log(
+          `- Skipped stale (${result.publishedDate ?? 'unknown'}): ${result.title.substring(0, 80)}`
+        )
+        continue
+      }
       const added = await tryInsertDiscoveredArticle(result, fallbackSourceId)
       if (added) {
         inserted++
@@ -1133,49 +1222,28 @@ async function runOutletDiscoverySegment({
 
 export async function run(
   opts: {
-    limitPerQuery?: number
-    maxQueries?: number
-    breakingNewsMode?: boolean
     closePool?: boolean
-    broadArticleCap?: number
     outletArticleCap?: number
-    outletChunkSize?: number
-    outletLimitPerChunk?: number
+    outletLimitPerBatch?: number
+    outletBatchSize?: number
     outletFreshHours?: number
   } = {}
 ) {
   const startTime = Date.now()
-  const breakingNewsMode = opts.breakingNewsMode ?? false
-  const broadLimitPerQuery = Math.max(3, opts.limitPerQuery ?? 5)
-  const broadMaxQueries = Math.max(1, opts.maxQueries ?? 6)
-  const broadArticleCap = opts.broadArticleCap ?? (breakingNewsMode ? 20 : 45)
-  const outletArticleCap = opts.outletArticleCap ?? (breakingNewsMode ? 20 : 45)
-  const outletChunkSize = Math.max(1, opts.outletChunkSize ?? 6)
-  const outletLimitPerChunk = Math.max(3, opts.outletLimitPerChunk ?? 6)
+  const outletArticleCap = opts.outletArticleCap ?? 70
+  const outletLimitPerBatch = Math.max(4, opts.outletLimitPerBatch ?? 12)
+  const outletBatchSize = Math.max(2, opts.outletBatchSize ?? 4)
   const outletFreshHours =
     opts.outletFreshHours ?? DEFAULT_OUTLET_FRESHNESS_HOURS
 
-  const mode = breakingNewsMode ? 'breaking news' : 'comprehensive'
-  console.log(`Starting ${mode} web discovery with a tiered search plan...`)
+  console.log('Starting site-specific web discovery (batched)...')
 
   const fallbackSourceId = await getOrCreateWebDiscoverySource()
 
-  const broadStats = await runBroadDiscoverySegment({
-    fallbackSourceId,
-    breakingNewsMode,
-    limitPerQuery: broadLimitPerQuery,
-    maxQueries: broadMaxQueries,
-    articleCap: broadArticleCap,
-  })
-
-  console.log(
-    `Broad tier complete: ${broadStats.inserted} new articles from ${broadStats.scanned} results`
-  )
-
   const outletStats = await runOutletDiscoverySegment({
     fallbackSourceId,
-    limitPerChunk: outletLimitPerChunk,
-    chunkSize: outletChunkSize,
+    limitPerBatch: outletLimitPerBatch,
+    batchSize: outletBatchSize,
     articleCap: outletArticleCap,
     freshHours: outletFreshHours,
   })
@@ -1190,16 +1258,15 @@ export async function run(
     )
   }
 
-  const totalInserted = broadStats.inserted + outletStats.inserted
-  const totalScanned = broadStats.scanned + outletStats.scanned
-  const totalBrowseCost = broadStats.browseCost + outletStats.browseCost
-  const totalBrowseToolCalls =
-    broadStats.browseToolCalls + outletStats.browseToolCalls
-  const totalQueries = broadStats.queriesRun + outletStats.queriesRun
+  const totalInserted = outletStats.inserted
+  const totalScanned = outletStats.scanned
+  const totalBrowseCost = outletStats.browseCost
+  const totalBrowseToolCalls = outletStats.browseToolCalls
+  const totalQueries = outletStats.queriesRun
 
   const duration = Math.round((Date.now() - startTime) / 1000)
   console.log(
-    `Web discovery completed: ${totalInserted} new articles (${broadStats.inserted} broad / ${outletStats.inserted} curated) from ${totalScanned} results in ${duration}s`
+    `Web discovery completed: ${totalInserted} new articles from ${totalScanned} results in ${duration}s`
   )
 
   if (totalBrowseCost > 0) {
