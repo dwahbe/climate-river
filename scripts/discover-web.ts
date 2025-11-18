@@ -102,6 +102,10 @@ const OUTLET_BATCH_DOMAIN_GROUPS: string[][] = [
   ],
 ]
 
+const GOOGLE_SUGGESTION_OUTLET_EXAMPLES = CURATED_CLIMATE_OUTLETS.slice(0, 10)
+  .map((outlet) => outlet.name)
+  .join(', ')
+
 const OPENAI_WEB_SEARCH_INPUT_PER_M = 2.5
 const OPENAI_WEB_SEARCH_OUTPUT_PER_M = 10
 const OPENAI_WEB_SEARCH_TOOL_CALL_COST = 0.015
@@ -303,10 +307,10 @@ async function callOpenAIWebSearch(
     const requestedLimit = overrides?.resultLimit ?? WEB_SEARCH_RESULT_LIMIT
     const systemMessage =
       overrides?.systemPrompt ??
-      `You are a climate and environment news researcher. Use the web search tool to locate the most recent, high-quality coverage about the user's query. Return ONLY a JSON array where each item has: title, url, snippet, publishedDate (ISO if known), and source (publication name or domain). Do not include additional text outside the JSON.`
+      `You are ClimateRiver's climate desk scout. Before responding you must call openai.tools.webSearch with focused, site-specific queries (use site:domain, topic keywords, geography filters) while keeping tool calls to the minimum needed for full coverage. Only surface original journalism published within the past 72 hours from reputable climate or energy outlets. Reject syndicated copies, press releases, newsletters, video transcripts, or aggregator redirects (Google News, Yahoo, MSN). Verify that every URL's hostname matches any allowedDomains list provided and drop items without a verifiable timestamp. Respond ONLY with a JSON array sorted newest to oldest, where each item has title, url, snippet (climate angle), publishedDate in ISO 8601, and source (short outlet name). No prose outside the JSON.`
     const userMessage =
       overrides?.userPrompt ??
-      `Find up to ${requestedLimit} timely climate or environment-related articles for: "${query}". Favor reporting from reputable outlets within the past 72 hours.`
+      `Find up to ${requestedLimit} vetted climate or environment-related articles for: "${query}". Require publish dates within the past 72 hours, prioritize investigative/policy/science/finance impact, and ensure each entry includes a trustworthy ISO timestamp. If fewer than ${requestedLimit} items qualify, only return the smaller set. Sort newest to oldest before responding.`
     const allowedDomains =
       overrides?.allowedDomains && overrides.allowedDomains.length > 0
         ? overrides.allowedDomains
@@ -385,10 +389,38 @@ async function callOpenAIWebSearch(
           JSON.stringify(response.sources[0] ?? null).substring(0, 200)
         )
       }
-      const fallback = parseContentForArticles(response.text || '')
-      if (fallback.length > 0) {
-        console.log('Falling back to parsed content for web search results')
-        results = fallback
+      let toolDerived: WebSearchResult[] = []
+      if (response.toolResults) {
+        toolDerived = extractArticlesFromToolResults(
+          response.toolResults,
+          query
+        )
+      }
+      if (toolDerived.length === 0 && response.toolCalls) {
+        toolDerived = extractArticlesFromToolResults(response.toolCalls, query)
+      }
+      if (toolDerived.length > 0) {
+        console.log(
+          `Recovered ${toolDerived.length} articles from tool outputs fallback`
+        )
+        results = toolDerived
+      } else {
+        const sourceDerived = extractArticlesFromSources(
+          response.sources,
+          query
+        )
+        if (sourceDerived.length > 0) {
+          console.log(
+            `Recovered ${sourceDerived.length} articles from source metadata fallback`
+          )
+          results = sourceDerived
+        } else {
+          const fallback = parseContentForArticles(response.text || '')
+          if (fallback.length > 0) {
+            console.log('Falling back to parsed content for web search results')
+            results = fallback
+          }
+        }
       }
     }
 
@@ -476,11 +508,11 @@ async function generateGoogleNewsSuggestions(
       messages: [
         {
           role: 'system',
-          content: `You are assisting with building Google News RSS queries for climate reporting. Return only a JSON array. Each element must contain "searchTerm" (string suitable for Google News), "reasoning" (short justification), and "expectedSources" (array of publication names). Do not include any additional prose outside the JSON.`,
+          content: `You build advanced Google News RSS queries for climate reporting. Return only a JSON array. Each element must contain "searchTerm" (Google News-ready string), "reasoning" (short justification), and "expectedSources" (array). Every searchTerm must use boolean operators and/or quoted phrases, include a recency constraint such as when:1d/when:3d, and when helpful reference curated climate outlets (e.g., ${GOOGLE_SUGGESTION_OUTLET_EXAMPLES}) via site:domain or source keywords. Avoid generic requests like "climate change news". No prose outside the JSON.`,
         },
         {
           role: 'user',
-          content: `Provide 2-4 optimized Google News search phrases to surface fresh climate or environment coverage for: "${query}". Prioritize the past 48 hours.`,
+          content: `Provide 2-4 advanced Google News search strings to surface fresh climate or environment coverage for: "${query}". Combine climate subtopics (policy, finance, science, justice) with geography or sector cues, apply recency filters (e.g., when:1d), and bias toward reputable climate outlets. Avoid generic or repetitive phrases.`,
         },
       ],
       maxOutputTokens: GOOGLE_SUGGESTION_MAX_OUTPUT_TOKENS,
@@ -805,6 +837,133 @@ function parseContentForArticles(content: string): WebSearchResult[] {
     seen.add(result.url)
     return true
   })
+}
+
+function parseUnknownContentForArticles(
+  content: unknown,
+  query: string
+): WebSearchResult[] {
+  if (content == null) {
+    return []
+  }
+
+  if (typeof content === 'string' && content.trim().length > 0) {
+    const structured = parseWebSearchJson(content, query)
+    if (structured.length > 0) {
+      return structured
+    }
+    return parseContentForArticles(content)
+  }
+
+  try {
+    const serialized = JSON.stringify(content)
+    if (serialized && serialized.length > 2) {
+      const structured = parseWebSearchJson(serialized, query)
+      if (structured.length > 0) {
+        return structured
+      }
+      return parseContentForArticles(serialized)
+    }
+  } catch (error) {
+    if (WEB_SEARCH_DEBUG) {
+      console.log('Unable to stringify tool result output:', error)
+    }
+  }
+
+  return []
+}
+
+function extractArticlesFromToolResults(
+  toolResults: unknown,
+  query: string
+): WebSearchResult[] {
+  if (!Array.isArray(toolResults)) {
+    return []
+  }
+
+  const aggregated: WebSearchResult[] = []
+
+  for (const toolResult of toolResults) {
+    if (!toolResult || typeof toolResult !== 'object') continue
+
+    const toolName =
+      typeof (toolResult as { toolName?: unknown }).toolName === 'string'
+        ? ((toolResult as { toolName?: string }).toolName ?? '')
+        : ''
+
+    if (
+      toolName &&
+      toolName !== 'web_search' &&
+      toolName !== 'webSearch' &&
+      toolName !== 'web_search_preview'
+    ) {
+      continue
+    }
+
+    const payloads = [
+      (toolResult as { output?: unknown }).output,
+      (toolResult as { result?: unknown }).result,
+      (toolResult as { data?: unknown }).data,
+    ]
+
+    for (const payload of payloads) {
+      const parsed = parseUnknownContentForArticles(payload, query)
+      if (parsed.length > 0) {
+        aggregated.push(...parsed)
+        break
+      }
+    }
+  }
+
+  return aggregated
+}
+
+function extractArticlesFromSources(
+  sources: unknown,
+  query: string
+): WebSearchResult[] {
+  if (!Array.isArray(sources)) {
+    return []
+  }
+
+  const results: WebSearchResult[] = []
+
+  for (const source of sources) {
+    if (!source || typeof source !== 'object') continue
+
+    const sourceType =
+      typeof (source as { sourceType?: unknown }).sourceType === 'string'
+        ? ((source as { sourceType?: string }).sourceType ?? '')
+        : ''
+
+    if (sourceType && sourceType !== 'url') {
+      continue
+    }
+
+    const url =
+      typeof (source as { url?: unknown }).url === 'string'
+        ? ((source as { url?: string }).url ?? '')
+        : ''
+
+    if (!url) continue
+
+    const title =
+      typeof (source as { title?: unknown }).title === 'string'
+        ? cleanText((source as { title?: string }).title ?? '')
+        : ''
+
+    results.push({
+      title: title || `Referenced source for "${query}"`,
+      url,
+      snippet: title
+        ? `Source cited for "${title}"`
+        : `Source referenced for "${query}"`,
+      publishedDate: undefined,
+      source: extractSourceFromUrl(url),
+    })
+  }
+
+  return results
 }
 
 function extractSourceFromUrl(url: string): string {
@@ -1180,13 +1339,15 @@ async function runOutletDiscoverySegment({
     }
 
     const outletNames = batch.map((outlet) => outlet.promptHint || outlet.name)
+    const outletDescriptors = batch.map((outlet) =>
+      outlet.promptHint ? `${outlet.name} (${outlet.promptHint})` : outlet.name
+    )
     const domains = batch.map((outlet) => outlet.domain)
 
     console.log(`Searching (site-specific batch): ${outletNames.join(', ')}`)
 
-    const targetedSystemPrompt =
-      'You are curating climate coverage from a small list of pre-approved outlets. Always use the web search tool with site-specific queries and only return links from the allowed domains.'
-    const targetedUserPrompt = `Provide up to ${limitPerBatch} of the most recent (${freshHours}-hour) climate or environment stories covering these outlets: ${outletNames.join(', ')}. Use site-specific queries (e.g., site:domain) and include at least one link per outlet when possible. Only include URLs that belong to these domains or their official climate sections, and return a JSON array with title, url, snippet, publishedDate, and source for each item.`
+    const targetedSystemPrompt = `You are ClimateRiver's climate outlet curator. For each outlet you must issue at least one precise site:domain query that reflects the outlet's specialty while keeping total tool calls as low as possible. Only keep original articles published in the past ${freshHours} hours. Reject syndicated content, opinion newsletters, or aggregator redirections. Double-check that every URL's hostname belongs to the allowed domain list and drop any entry without a confirmed ISO timestamp. Respond with a JSON array sorted newest to oldest containing title, url, snippet (why the story matters), publishedDate (ISO), and source.`
+    const targetedUserPrompt = `Provide up to ${limitPerBatch} combined articles across these outlets: ${outletDescriptors.join('; ')}. Use site-specific queries (e.g., site:domain "topic") tailored to each prompt hint, and when possible include at least one qualifying link per outlet. Only include URLs from ${domains.join(', ')} or their official climate sections, ensure every item was published within the last ${freshHours} hours, and omit any link that fails those tests. Return only the JSON array sorted newest to oldest.`
 
     const { results, browseStats } = await callOpenAIEnhancedSearch(
       `Latest climate coverage across: ${domains.join(', ')}`,
