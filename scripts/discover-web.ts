@@ -205,14 +205,26 @@ function humanizeHost(host: string): string {
     .join(' ')
 }
 
+function normalizeDomain(domain: string): string {
+  return domain
+    .replace(/^www\./, '')
+    .trim()
+    .toLowerCase()
+}
+
+function domainMatches(host: string, normalizedDomain: string): boolean {
+  if (!host || !normalizedDomain) return false
+  return host === normalizedDomain || host.endsWith(`.${normalizedDomain}`)
+}
+
 function isAllowedDomain(url: string, allowedDomains: string[]): boolean {
   if (!url || allowedDomains.length === 0) return false
   const host = hostFromUrl(url)
   if (!host) return false
-  return allowedDomains.some((domain) => {
-    const normalized = domain.replace(/^www\./, '').toLowerCase()
-    return host === normalized || host.endsWith(`.${normalized}`)
-  })
+  const normalizedHost = normalizeDomain(host)
+  return allowedDomains.some((domain) =>
+    domainMatches(normalizedHost, normalizeDomain(domain))
+  )
 }
 
 function looksLikeApologyResult(result: WebSearchResult): boolean {
@@ -221,6 +233,31 @@ function looksLikeApologyResult(result: WebSearchResult): boolean {
     .trim()
   if (!haystack) return false
   return APOLOGY_PATTERNS.some((pattern) => pattern.test(haystack))
+}
+
+function updateDomainHitCounts(
+  hitCounts: Map<string, number>,
+  results: WebSearchResult[],
+  normalizedDomains: string[]
+) {
+  if (normalizedDomains.length === 0) {
+    return
+  }
+
+  for (const result of results) {
+    const host = hostFromUrl(result.url)
+    if (!host) continue
+    const normalizedHost = normalizeDomain(host)
+    for (const normalizedDomain of normalizedDomains) {
+      if (domainMatches(normalizedHost, normalizedDomain)) {
+        hitCounts.set(
+          normalizedDomain,
+          (hitCounts.get(normalizedDomain) ?? 0) + 1
+        )
+        break
+      }
+    }
+  }
 }
 
 function extractJsonArrayBlock(content: string): string | null {
@@ -1380,6 +1417,7 @@ async function runOutletDiscoverySegment({
   let queriesRun = 0
   let browseCost = 0
   let browseToolCalls = 0
+  const outletFallbackAttempts = new Set<string>()
 
   for (const batch of outletBatches) {
     if (inserted >= articleCap) {
@@ -1391,21 +1429,27 @@ async function runOutletDiscoverySegment({
       outlet.promptHint ? `${outlet.name} (${outlet.promptHint})` : outlet.name
     )
     const domains = batch.map((outlet) => outlet.domain)
+    const normalizedDomainEntries = batch.map((outlet) => ({
+      outlet,
+      raw: outlet.domain,
+      normalized: normalizeDomain(outlet.domain),
+    }))
 
     console.log(`Searching (site-specific batch): ${outletNames.join(', ')}`)
 
     const targetedSystemPrompt = `You are ClimateRiver's climate outlet curator. For each outlet you must issue at least one precise site:domain query that reflects the outlet's specialty while keeping total tool calls as low as possible. Only keep original articles published in the past ${freshHours} hours. Reject syndicated content, opinion newsletters, or aggregator redirections. Double-check that every URL's hostname belongs to the allowed domain list and drop any entry without a confirmed ISO timestamp. Respond with a JSON array sorted newest to oldest containing title, url, snippet (why the story matters), publishedDate (ISO), and source.`
     const targetedUserPrompt = `Provide up to ${limitPerBatch} combined articles across these outlets: ${outletDescriptors.join('; ')}. Use site-specific queries (e.g., site:domain "topic") tailored to each prompt hint, and when possible include at least one qualifying link per outlet. Only include URLs from ${domains.join(', ')} or their official climate sections, ensure every item was published within the last ${freshHours} hours, and omit any link that fails those tests. Return only the JSON array sorted newest to oldest.`
 
-    const { results, browseStats } = await callOpenAIEnhancedSearch(
-      `Latest climate coverage across: ${domains.join(', ')}`,
-      {
-        systemPrompt: targetedSystemPrompt,
-        userPrompt: targetedUserPrompt,
-        allowedDomains: domains,
-        resultLimit: limitPerBatch,
-      }
-    )
+    const { results: initialResults, browseStats } =
+      await callOpenAIEnhancedSearch(
+        `Latest climate coverage across: ${domains.join(', ')}`,
+        {
+          systemPrompt: targetedSystemPrompt,
+          userPrompt: targetedUserPrompt,
+          allowedDomains: domains,
+          resultLimit: limitPerBatch,
+        }
+      )
 
     queriesRun++
 
@@ -1414,9 +1458,71 @@ async function runOutletDiscoverySegment({
       browseToolCalls += browseStats.toolCalls
     }
 
-    scanned += results.length
+    let batchResults = [...initialResults]
 
-    for (const result of results) {
+    const domainHitCounts = new Map<string, number>()
+    updateDomainHitCounts(
+      domainHitCounts,
+      batchResults,
+      normalizedDomainEntries.map((entry) => entry.normalized)
+    )
+
+    const missingDomainEntries = normalizedDomainEntries.filter(
+      (entry) => (domainHitCounts.get(entry.normalized) ?? 0) === 0
+    )
+
+    for (const entry of missingDomainEntries) {
+      if (inserted >= articleCap) break
+      if (outletFallbackAttempts.has(entry.normalized)) {
+        continue
+      }
+      outletFallbackAttempts.add(entry.normalized)
+
+      const fallbackResultLimit = Math.min(4, limitPerBatch)
+      const fallbackSystemPrompt = `You are ClimateRiver's climate outlet curator focusing exclusively on ${entry.outlet.name}. Use the web search tool with site:${entry.raw} queries, confirm every link belongs to ${entry.raw}, keep total tool calls minimal, and only return articles published within the last ${freshHours} hours. Reject summaries, newsletters, or paywall notices. Respond only with JSON (title, url, snippet, publishedDate ISO, source) sorted newest to oldest.`
+      const fallbackUserPrompt = `Provide up to ${fallbackResultLimit} original climate or energy stories from ${entry.outlet.name} (${entry.outlet.promptHint ?? 'climate desk'}) published within the last ${freshHours} hours. Only include URLs from ${entry.raw} or its official subdomains and omit any item without a trustworthy timestamp.`
+
+      console.log(
+        `🔁 Running fallback search for ${entry.outlet.name} (${entry.raw})`
+      )
+      const { results: fallbackResults, browseStats: fallbackBrowse } =
+        await callOpenAIEnhancedSearch(
+          `Latest climate coverage from: ${entry.raw}`,
+          {
+            systemPrompt: fallbackSystemPrompt,
+            userPrompt: fallbackUserPrompt,
+            allowedDomains: [entry.raw],
+            resultLimit: fallbackResultLimit,
+          }
+        )
+
+      queriesRun++
+
+      if (fallbackBrowse) {
+        browseCost += fallbackBrowse.estimatedCost
+        browseToolCalls += fallbackBrowse.toolCalls
+      }
+
+      if (fallbackResults.length === 0) {
+        console.log(
+          `⚠️  Fallback search returned no results for ${entry.outlet.name}`
+        )
+        continue
+      }
+
+      console.log(
+        `✅ Fallback recovered ${fallbackResults.length} result(s) for ${entry.outlet.name}`
+      )
+      batchResults.push(...fallbackResults)
+      updateDomainHitCounts(domainHitCounts, fallbackResults, [
+        entry.normalized,
+      ])
+    }
+
+    batchResults = dedupeWebResults(batchResults)
+    scanned += batchResults.length
+
+    for (const result of batchResults) {
       if (inserted >= articleCap) break
       if (freshnessCutoffMs && !isResultFresh(result, freshnessCutoffMs)) {
         console.log(
