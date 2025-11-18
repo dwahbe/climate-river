@@ -3,6 +3,7 @@ import { query, endPool } from '@/lib/db'
 import { generateText } from 'ai'
 import { openai } from '@ai-sdk/openai'
 import { categorizeAndStoreArticle } from '@/lib/categorizer'
+import { isClimateRelevant } from '@/lib/tagger'
 import { Buffer } from 'node:buffer'
 import {
   CURATED_CLIMATE_OUTLETS,
@@ -29,16 +30,16 @@ type WebBrowseStats = {
   }
 }
 
-type EnhancedSearchResult = {
-  results: WebSearchResult[]
-  browseStats: WebBrowseStats | null
-}
-
 type WebSearchOverrides = {
   systemPrompt?: string
   userPrompt?: string
   resultLimit?: number
   allowedDomains?: string[]
+}
+
+type EnhancedSearchResult = {
+  results: WebSearchResult[]
+  browseStats: WebBrowseStats | null
 }
 
 const GOOGLE_SUGGESTION_MODEL =
@@ -253,7 +254,7 @@ function parseWebSearchJson(
                   item.description.trim().length > 0
                 ? item.description
                 : ''
-        ) || `Latest climate coverage for "${query}"`
+        ) || `Latest coverage for "${query}"`
 
       const published =
         typeof item.publishedDate === 'string'
@@ -424,6 +425,46 @@ async function callOpenAIWebSearch(
   }
 }
 
+async function callOpenAIEnhancedSearch(
+  query: string,
+  overrides?: WebSearchOverrides
+): Promise<EnhancedSearchResult> {
+  const combined: WebSearchResult[] = []
+  let browseStats: WebBrowseStats | null = null
+
+  const webSearch = await callOpenAIWebSearch(query, overrides)
+  if (webSearch.results.length > 0) {
+    combined.push(...webSearch.results)
+  }
+  if (webSearch.stats) {
+    browseStats = webSearch.stats
+  }
+
+  const googleResults = await discoverViaGoogleNews(query)
+  if (googleResults.length > 0) {
+    combined.push(...googleResults)
+  }
+
+  return {
+    results: dedupeWebResults(combined),
+    browseStats,
+  }
+}
+
+async function discoverViaGoogleNews(
+  query: string
+): Promise<WebSearchResult[]> {
+  const suggestionText = await generateGoogleNewsSuggestions(query)
+  const suggestionResults = await executeAISearchSuggestions(suggestionText)
+
+  if (suggestionResults.length > 0) {
+    return suggestionResults
+  }
+
+  console.log('AI suggestions empty, falling back to direct Google News search')
+  return await searchGoogleNewsRSS(query)
+}
+
 async function generateGoogleNewsSuggestions(
   query: string
 ): Promise<string | null> {
@@ -449,45 +490,6 @@ async function generateGoogleNewsSuggestions(
   } catch (error) {
     console.error('Error generating Google News suggestions:', error)
     return null
-  }
-}
-
-async function discoverViaGoogleNews(
-  query: string
-): Promise<WebSearchResult[]> {
-  const suggestionText = await generateGoogleNewsSuggestions(query)
-  const suggestionResults = await executeAISearchSuggestions(suggestionText)
-
-  if (suggestionResults.length > 0) {
-    return suggestionResults
-  }
-
-  console.log('AI suggestions empty, falling back to direct Google News search')
-  return await searchGoogleNewsRSS(query)
-}
-
-async function callOpenAIEnhancedSearch(
-  query: string
-): Promise<EnhancedSearchResult> {
-  const combined: WebSearchResult[] = []
-  let browseStats: WebBrowseStats | null = null
-
-  const webSearch = await callOpenAIWebSearch(query)
-  if (webSearch.results.length > 0) {
-    combined.push(...webSearch.results)
-  }
-  if (webSearch.stats) {
-    browseStats = webSearch.stats
-  }
-
-  const googleResults = await discoverViaGoogleNews(query)
-  if (googleResults.length > 0) {
-    combined.push(...googleResults)
-  }
-
-  return {
-    results: dedupeWebResults(combined),
-    browseStats,
   }
 }
 
@@ -1036,6 +1038,19 @@ async function tryInsertDiscoveredArticle(
   result: WebSearchResult,
   fallbackSourceId: number
 ): Promise<boolean> {
+  const isClimate = isClimateRelevant({
+    title: result.title,
+    summary: result.snippet ?? undefined,
+  })
+
+  if (!isClimate) {
+    const host = hostFromUrl(result.url) || result.source || 'unknown source'
+    console.log(
+      `- Skipped non-climate result from ${host}: ${result.title.substring(0, 80)}`
+    )
+    return false
+  }
+
   const duplicate = await isDuplicate(result.title, result.url)
 
   if (duplicate) {
@@ -1173,7 +1188,7 @@ async function runOutletDiscoverySegment({
       'You are curating climate coverage from a small list of pre-approved outlets. Always use the web search tool with site-specific queries and only return links from the allowed domains.'
     const targetedUserPrompt = `Provide up to ${limitPerBatch} of the most recent (${freshHours}-hour) climate or environment stories covering these outlets: ${outletNames.join(', ')}. Use site-specific queries (e.g., site:domain) and include at least one link per outlet when possible. Only include URLs that belong to these domains or their official climate sections, and return a JSON array with title, url, snippet, publishedDate, and source for each item.`
 
-    const { results, stats } = await callOpenAIWebSearch(
+    const { results, browseStats } = await callOpenAIEnhancedSearch(
       `Latest climate coverage across: ${domains.join(', ')}`,
       {
         systemPrompt: targetedSystemPrompt,
@@ -1185,9 +1200,9 @@ async function runOutletDiscoverySegment({
 
     queriesRun++
 
-    if (stats) {
-      browseCost += stats.estimatedCost
-      browseToolCalls += stats.toolCalls
+    if (browseStats) {
+      browseCost += browseStats.estimatedCost
+      browseToolCalls += browseStats.toolCalls
     }
 
     scanned += results.length
