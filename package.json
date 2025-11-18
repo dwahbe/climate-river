@@ -34,7 +34,6 @@
     "react": "19.1.1",
     "react-dom": "19.1.1",
     "rss-parser": "^3.12.0",
-    "stopword": "^3.0.1",
     "vaul": "^1.1.2"
   },
   "devDependencies": {

@@ -52,17 +52,6 @@ summary::-webkit-details-marker {
   .content a {
     @apply underline underline-offset-4 decoration-zinc-300 hover:decoration-zinc-400;
   }
-
-  /* Navbar links: clean, no underline */
-  .nav-link {
-    @apply no-underline text-zinc-600 hover:text-zinc-900 transition-colors;
-  }
-
-  .btn-ghost {
-    @apply no-underline rounded-md px-2.5 py-1.5 text-sm text-zinc-600
-           hover:text-zinc-900 hover:bg-zinc-50 border border-transparent
-           hover:border-zinc-200 transition;
-  }
   .content a.headline-link {
     @apply no-underline;
   }
@@ -72,50 +61,6 @@ summary::-webkit-details-marker {
   /* Publisher/source links: no underline (even inside .content) */
   .content a.source-link {
     @apply no-underline hover:no-underline;
-  }
-  .icon-btn {
-    @apply inline-flex items-center justify-center rounded-md p-2
-           text-zinc-600 hover:text-zinc-900 hover:bg-zinc-50
-           focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-300;
-  }
-
-  /* Hide scrollbar for horizontal scroll components */
-  .scrollbar-hide {
-    -ms-overflow-style: none; /* IE and Edge */
-    scrollbar-width: none; /* Firefox */
-  }
-  .scrollbar-hide::-webkit-scrollbar {
-    display: none; /* Chrome, Safari, and Opera */
-  }
-
-  /* Mobile-optimized horizontal scrolling - only on touch devices */
-  @media (hover: none) and (pointer: coarse) {
-    .mobile-scroll {
-      -webkit-overflow-scrolling: touch; /* iOS momentum scrolling */
-      overscroll-behavior-x: contain; /* Prevent page scroll when reaching scroll bounds */
-      touch-action: pan-x; /* Only allow horizontal panning */
-    }
-  }
-
-  /* All devices get smooth scrolling */
-  .mobile-scroll {
-    scroll-behavior: smooth;
-  }
-
-  /* Slide in animation for category icons */
-  @keyframes slideInFromRight {
-    0% {
-      transform: translateX(8px);
-      opacity: 0;
-    }
-    100% {
-      transform: translateX(0);
-      opacity: 1;
-    }
-  }
-
-  .animate-popBounce {
-    animation: slideInFromRight 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   }
 }
 
