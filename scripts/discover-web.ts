@@ -77,6 +77,14 @@ const HOST_BLOCKLIST = new Set([
   'www.msn.com',
 ])
 
+const APOLOGY_PATTERNS = [
+  /i['’]m sorry/i,
+  /\bunable to (?:locate|find|retrieve)/i,
+  /\bi (?:cannot|can't) (?:find|locate)/i,
+  /\bas an ai\b/i,
+  /\bno relevant results\b/i,
+]
+
 const sourceCache = new Map<string, number>()
 
 const OUTLET_BATCH_DOMAIN_GROUPS: string[][] = [
@@ -195,6 +203,24 @@ function humanizeHost(host: string): string {
     )
     .map((segment) => segment.charAt(0).toUpperCase() + segment.slice(1))
     .join(' ')
+}
+
+function isAllowedDomain(url: string, allowedDomains: string[]): boolean {
+  if (!url || allowedDomains.length === 0) return false
+  const host = hostFromUrl(url)
+  if (!host) return false
+  return allowedDomains.some((domain) => {
+    const normalized = domain.replace(/^www\./, '').toLowerCase()
+    return host === normalized || host.endsWith(`.${normalized}`)
+  })
+}
+
+function looksLikeApologyResult(result: WebSearchResult): boolean {
+  const haystack = `${result.title ?? ''} ${result.snippet ?? ''}`
+    .toLowerCase()
+    .trim()
+  if (!haystack) return false
+  return APOLOGY_PATTERNS.some((pattern) => pattern.test(haystack))
 }
 
 function extractJsonArrayBlock(content: string): string | null {
@@ -424,7 +450,29 @@ async function callOpenAIWebSearch(
       }
     }
 
-    results = dedupeWebResults(results).slice(0, requestedLimit)
+    results = dedupeWebResults(results)
+
+    if (allowedDomains && allowedDomains.length > 0) {
+      const before = results.length
+      results = results.filter((result) =>
+        isAllowedDomain(result.url, allowedDomains)
+      )
+      if (WEB_SEARCH_DEBUG && before !== results.length) {
+        console.log(
+          `Dropped ${before - results.length} results outside allowed domains`
+        )
+      }
+    }
+
+    const beforeApologyFilter = results.length
+    results = results.filter((result) => !looksLikeApologyResult(result))
+    if (WEB_SEARCH_DEBUG && beforeApologyFilter !== results.length) {
+      console.log(
+        `Dropped ${beforeApologyFilter - results.length} apology-style results`
+      )
+    }
+
+    results = results.slice(0, requestedLimit)
 
     const toolCalls =
       Array.isArray(response.toolResults) && response.toolResults.length > 0
