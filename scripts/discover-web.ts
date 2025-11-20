@@ -85,6 +85,42 @@ const APOLOGY_PATTERNS = [
   /\bno relevant results\b/i,
 ]
 
+function normalizeDomain(domain: string): string {
+  return domain
+    .replace(/^www\./, '')
+    .trim()
+    .toLowerCase()
+}
+
+const RSS_COVERED_DOMAINS = new Set([
+  'apnews.com',
+  'bbc.com',
+  'bbci.co.uk',
+  'bloomberg.com',
+  'carbonbrief.org',
+  'climate.gov',
+  'climatechangenews.com',
+  'cleantechnica.com',
+  'ft.com',
+  'grist.org',
+  'insideclimatenews.org',
+  'jacobin.com',
+  'nature.com',
+  'nytimes.com',
+  'reuters.com',
+  'theguardian.com',
+  'washingtonpost.com',
+  'yaleclimateconnections.org',
+])
+
+const DISCOVERY_OUTLETS = CURATED_CLIMATE_OUTLETS.filter(
+  (outlet) => !RSS_COVERED_DOMAINS.has(normalizeDomain(outlet.domain))
+)
+
+const RSS_SKIPPED_OUTLETS = CURATED_CLIMATE_OUTLETS.filter((outlet) =>
+  RSS_COVERED_DOMAINS.has(normalizeDomain(outlet.domain))
+)
+
 const sourceCache = new Map<string, number>()
 
 const OUTLET_BATCH_DOMAIN_GROUPS: string[][] = [
@@ -110,7 +146,10 @@ const OUTLET_BATCH_DOMAIN_GROUPS: string[][] = [
   ],
 ]
 
-const GOOGLE_SUGGESTION_OUTLET_EXAMPLES = CURATED_CLIMATE_OUTLETS.slice(0, 10)
+const GOOGLE_SUGGESTION_OUTLET_EXAMPLES = (
+  DISCOVERY_OUTLETS.length > 0 ? DISCOVERY_OUTLETS : CURATED_CLIMATE_OUTLETS
+)
+  .slice(0, 10)
   .map((outlet) => outlet.name)
   .join(', ')
 
@@ -203,13 +242,6 @@ function humanizeHost(host: string): string {
     )
     .map((segment) => segment.charAt(0).toUpperCase() + segment.slice(1))
     .join(' ')
-}
-
-function normalizeDomain(domain: string): string {
-  return domain
-    .replace(/^www\./, '')
-    .trim()
-    .toLowerCase()
 }
 
 function domainMatches(host: string, normalizedDomain: string): boolean {
@@ -1348,7 +1380,7 @@ function chunkArray<T>(items: T[], size: number): T[][] {
 
 function buildOutletBatches(batchSize: number): ClimateOutlet[][] {
   const byDomain = new Map(
-    CURATED_CLIMATE_OUTLETS.map((outlet) => [outlet.domain, outlet])
+    DISCOVERY_OUTLETS.map((outlet) => [outlet.domain, outlet])
   )
   const assigned = new Set<string>()
   const batches: ClimateOutlet[][] = []
@@ -1370,7 +1402,7 @@ function buildOutletBatches(batchSize: number): ClimateOutlet[][] {
     }
   }
 
-  const leftovers = CURATED_CLIMATE_OUTLETS.filter(
+  const leftovers = DISCOVERY_OUTLETS.filter(
     (outlet) => !assigned.has(outlet.domain)
   )
 
@@ -1396,7 +1428,7 @@ async function runOutletDiscoverySegment({
   articleCap: number
   freshHours: number
 }): Promise<DiscoverySegmentStats> {
-  if (CURATED_CLIMATE_OUTLETS.length === 0 || articleCap <= 0) {
+  if (DISCOVERY_OUTLETS.length === 0 || articleCap <= 0) {
     return {
       inserted: 0,
       scanned: 0,
@@ -1470,6 +1502,14 @@ async function runOutletDiscoverySegment({
     const missingDomainEntries = normalizedDomainEntries.filter(
       (entry) => (domainHitCounts.get(entry.normalized) ?? 0) === 0
     )
+
+    if (missingDomainEntries.length > 0) {
+      console.log(
+        `⚠️ Missing coverage after batch search: ${missingDomainEntries
+          .map((entry) => entry.outlet.name)
+          .join(', ')}`
+      )
+    }
 
     for (const entry of missingDomainEntries) {
       if (inserted >= articleCap) break
@@ -1567,6 +1607,18 @@ export async function run(
     opts.outletFreshHours ?? DEFAULT_OUTLET_FRESHNESS_HOURS
 
   console.log('Starting site-specific web discovery (batched)...')
+
+  if (RSS_SKIPPED_OUTLETS.length > 0) {
+    console.log(
+      `Skipping ${RSS_SKIPPED_OUTLETS.length} RSS-backed outlets for OpenAI discovery: ${RSS_SKIPPED_OUTLETS.map((outlet) => outlet.name).join(', ')}`
+    )
+  }
+
+  if (DISCOVERY_OUTLETS.length === 0) {
+    console.log(
+      'No eligible outlets remain for OpenAI discovery (all covered via RSS)'
+    )
+  }
 
   const fallbackSourceId = await getOrCreateWebDiscoverySource()
 
