@@ -92,8 +92,6 @@ export default async function CategoriesPage() {
               </span>
             )
           })}
-          {/* <div className="w-px h-6 bg-zinc-300" /> */}
-          {/* <ClimateRiverLogo size="lg" variant="colored" animated={true} /> */}
         </div>
       </div>
 
