@@ -50,10 +50,10 @@ const GOOGLE_SUGGESTION_MAX_OUTPUT_TOKENS = parseEnvInt(
 )
 
 const WEB_SEARCH_ENABLED = process.env.WEB_SEARCH_ENABLED !== '0'
-const WEB_SEARCH_MODEL = process.env.WEB_SEARCH_MODEL || 'gpt-4o'
+const WEB_SEARCH_MODEL = process.env.WEB_SEARCH_MODEL || 'gpt-4o-mini' // Use mini for cost savings
 const WEB_SEARCH_MAX_OUTPUT_TOKENS = parseEnvInt(
   'WEB_SEARCH_MAX_OUTPUT_TOKENS',
-  600
+  800 // Increased to allow full JSON responses
 )
 const WEB_SEARCH_RESULT_LIMIT = parseEnvInt('WEB_SEARCH_LIMIT_PER_QUERY', 6)
 const WEB_SEARCH_CONTEXT_SIZE = (() => {
@@ -338,8 +338,21 @@ function extractJsonArrayBlock(content: string): string | null {
     return fenced[1].replace(/^\s+/, '').replace(/\s+$/, '')
   }
 
-  const inline = content.match(/\[[\s\S]*\]/)
-  return inline ? inline[0] : null
+  // Look for a complete JSON array (must have opening and closing brackets)
+  const inline = content.match(/\[\s*\{[\s\S]*?\}\s*\]/)
+  if (inline) return inline[0]
+  
+  // Fallback: try to find any array
+  const anyArray = content.match(/\[[\s\S]*\]/)
+  if (anyArray) {
+    // Validate it looks like it contains objects, not just strings
+    const arr = anyArray[0]
+    if (arr.includes('"title"') || arr.includes('"url"')) {
+      return arr
+    }
+  }
+  
+  return null
 }
 
 function cleanText(value: string | null | undefined): string {
@@ -445,7 +458,20 @@ async function callOpenAIWebSearch(
     const requestedLimit = overrides?.resultLimit ?? WEB_SEARCH_RESULT_LIMIT
     const systemMessage =
       overrides?.systemPrompt ??
-      `You are ClimateRiver's climate desk scout. Before responding you must call openai.tools.webSearch with focused, site-specific queries (use site:domain, topic keywords, geography filters) while keeping tool calls to the minimum needed for full coverage. Only surface original journalism published within the past 72 hours from reputable climate or energy outlets. Reject syndicated copies, press releases, newsletters, video transcripts, or aggregator redirects (Google News, Yahoo, MSN). Verify that every URL's hostname matches any allowedDomains list provided and drop items without a verifiable timestamp. Respond ONLY with a JSON array sorted newest to oldest, where each item has title, url, snippet (climate angle), publishedDate in ISO 8601, and source (short outlet name). No prose outside the JSON.`
+      `You are ClimateRiver's climate desk scout. Use the web search tool to find recent climate articles.
+
+CRITICAL: Your response MUST be ONLY a valid JSON array. No text before or after.
+
+Required format:
+[{"title":"Article Title","url":"https://...","snippet":"Brief summary","publishedDate":"2025-11-25T12:00:00Z","source":"Outlet Name"}]
+
+Rules:
+- Only include articles from the past 72 hours
+- Only include articles from the specified domains
+- Reject aggregator URLs (news.google.com, yahoo, msn)
+- Each item MUST have: title, url, snippet, publishedDate (ISO 8601), source
+- Sort newest to oldest
+- If no articles found, return empty array: []`
     const userMessage =
       overrides?.userPrompt ??
       `Find up to ${requestedLimit} vetted climate or environment-related articles for: "${query}". Require publish dates within the past 72 hours, prioritize investigative/policy/science/finance impact, and ensure each entry includes a trustworthy ISO timestamp. If fewer than ${requestedLimit} items qualify, only return the smaller set. Sort newest to oldest before responding.`

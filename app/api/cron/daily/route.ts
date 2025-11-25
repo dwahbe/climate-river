@@ -134,16 +134,16 @@ export async function GET(req: Request) {
     console.log('✅ Rewrite completed:', rewriteResult)
 
     // 5) AI-enhanced web discovery (find stories beyond RSS feeds)
-    // Run during all daily cron jobs for better coverage
+    // Run during all daily cron jobs - cost-optimized parameters
     let webDiscoverResult: unknown = { skipped: 'not_run' }
 
     try {
       console.log('🔎 Running AI web discovery...')
       webDiscoverResult = await safeRun(import('@/scripts/discover-web'), {
-        outletArticleCap: 50, // Target 50 articles per run
-        outletLimitPerBatch: 10, // Up to 10 per batch
-        outletBatchSize: 5, // Process 5 outlets at a time
-        outletFreshHours: 72, // Look back 72 hours
+        outletArticleCap: 30, // Reduced from 50 for cost control
+        outletLimitPerBatch: 8, // Reduced from 10
+        outletBatchSize: 4, // Reduced from 5
+        outletFreshHours: 72,
         closePool: false,
       })
       console.log('✅ AI web discovery completed')

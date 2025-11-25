@@ -83,27 +83,34 @@ export async function GET(req: Request) {
       closePool: false,
     })
 
-    // Light web discovery - smaller batch during frequent runs
-    let webDiscoverResult: unknown = { skipped: 'not_run' }
+    // Light web discovery - only run during specific hours to control costs
+    // Skip during off-peak hours (late night) when RSS coverage is sufficient
+    let webDiscoverResult: unknown = { skipped: 'off_hours' }
+    const currentHour = new Date().getUTCHours()
+    const isBusinessHours = currentHour >= 12 && currentHour <= 22 // 12-22 UTC = 8am-6pm ET
 
-    try {
-      console.log('🔎 Running light web discovery...')
-      webDiscoverResult = await safeRun(import('@/scripts/discover-web'), {
-        outletArticleCap: 20, // Smaller cap for light runs
-        outletLimitPerBatch: 6, // Fewer per batch
-        outletBatchSize: 3, // Fewer outlets at a time
-        outletFreshHours: 48, // Focus on more recent content
-        closePool: false,
-      })
-      console.log('✅ Light web discovery completed')
-    } catch (webError: unknown) {
-      console.error('❌ Web discovery failed:', webError)
-      const message = webError instanceof Error ? webError.message : String(webError)
-      webDiscoverResult = {
-        ok: false,
-        error: message,
-        skipped: 'error',
+    if (isBusinessHours) {
+      try {
+        console.log('🔎 Running light web discovery...')
+        webDiscoverResult = await safeRun(import('@/scripts/discover-web'), {
+          outletArticleCap: 15, // Small cap for light runs
+          outletLimitPerBatch: 5,
+          outletBatchSize: 3,
+          outletFreshHours: 48,
+          closePool: false,
+        })
+        console.log('✅ Light web discovery completed')
+      } catch (webError: unknown) {
+        console.error('❌ Web discovery failed:', webError)
+        const message = webError instanceof Error ? webError.message : String(webError)
+        webDiscoverResult = {
+          ok: false,
+          error: message,
+          skipped: 'error',
+        }
       }
+    } else {
+      console.log(`⏭️  Skipping light web discovery (off-hours: ${currentHour} UTC)`)
     }
 
     // Don't close the pool - let it be managed by the runtime
