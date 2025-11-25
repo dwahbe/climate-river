@@ -32,7 +32,10 @@ async function authorized(req: Request) {
 
 type ScriptOptions = Record<string, unknown> | undefined
 type ScriptRunner<R = unknown> = (options?: ScriptOptions) => Promise<R> | R
-type ScriptModule<R = unknown> = { run?: ScriptRunner<R>; default?: ScriptRunner<R> }
+type ScriptModule<R = unknown> = {
+  run?: ScriptRunner<R>
+  default?: ScriptRunner<R>
+}
 type ScriptError = { ok: false; error: string }
 
 /** Safely invoke a script module's `run` (or its default). */
@@ -131,25 +134,19 @@ export async function GET(req: Request) {
     console.log('✅ Rewrite completed:', rewriteResult)
 
     // 5) AI-enhanced web discovery (find stories beyond RSS feeds)
-    // Only run at 2AM to control costs - check if this is the full daily job
-    let webDiscoverResult: unknown = { skipped: 'time_check_failed' }
+    // Run during all daily cron jobs for better coverage
+    let webDiscoverResult: unknown = { skipped: 'not_run' }
 
     try {
-      const currentHour = new Date().getHours()
-      console.log(`Current hour: ${currentHour}`)
-
-      // Only run AI discovery during the 2AM full job (not the light business hour jobs)
-      if (currentHour >= 0 && currentHour <= 6) {
-        console.log('Running AI web discovery...')
-        webDiscoverResult = await safeRun(import('@/scripts/discover-web'), {
-          limitPerQuery: 4, // Increased from 2 for more articles
-          maxQueries: 6, // Increased from 3 for broader coverage
-          closePool: false,
-        })
-        console.log('AI web discovery completed')
-      } else {
-        console.log(`Skipping AI discovery - current hour: ${currentHour}`)
-      }
+      console.log('🔎 Running AI web discovery...')
+      webDiscoverResult = await safeRun(import('@/scripts/discover-web'), {
+        outletArticleCap: 50, // Target 50 articles per run
+        outletLimitPerBatch: 10, // Up to 10 per batch
+        outletBatchSize: 5, // Process 5 outlets at a time
+        outletFreshHours: 72, // Look back 72 hours
+        closePool: false,
+      })
+      console.log('✅ AI web discovery completed')
     } catch (webDiscoverError: unknown) {
       console.error('❌ AI web discovery failed:', webDiscoverError)
       const message =

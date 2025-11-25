@@ -83,26 +83,23 @@ export async function GET(req: Request) {
       closePool: false,
     })
 
-    // Minimal breaking news discovery during peak hours (9AM-9PM)
-    // Run 1 query with minimal limits to control costs
-    let breakingNewsResult: unknown = { skipped: 'off_peak_hours' }
+    // Light web discovery - smaller batch during frequent runs
+    let webDiscoverResult: unknown = { skipped: 'not_run' }
 
     try {
-      const currentHour = new Date().getHours()
-
-      if (currentHour >= 9 && currentHour <= 21) {
-        console.log('🚨 Running breaking news discovery...')
-        breakingNewsResult = await safeRun(import('@/scripts/discover-web'), {
-          limitPerQuery: 3, // Increased from 2
-          maxQueries: 5, // Increased from 1
-          breakingNewsMode: true, // Signal to use breaking news queries
-          closePool: false,
-        })
-      }
+      console.log('🔎 Running light web discovery...')
+      webDiscoverResult = await safeRun(import('@/scripts/discover-web'), {
+        outletArticleCap: 20, // Smaller cap for light runs
+        outletLimitPerBatch: 6, // Fewer per batch
+        outletBatchSize: 3, // Fewer outlets at a time
+        outletFreshHours: 48, // Focus on more recent content
+        closePool: false,
+      })
+      console.log('✅ Light web discovery completed')
     } catch (webError: unknown) {
-      console.error('❌ Breaking news discovery failed:', webError)
+      console.error('❌ Web discovery failed:', webError)
       const message = webError instanceof Error ? webError.message : String(webError)
-      breakingNewsResult = {
+      webDiscoverResult = {
         ok: false,
         error: message,
         skipped: 'error',
@@ -119,7 +116,7 @@ export async function GET(req: Request) {
         ingest: ingestResult,
         prefetch: prefetchResult,
         rescore: rescoreResult,
-        breakingNews: breakingNewsResult,
+        webDiscover: webDiscoverResult,
       },
     })
   } catch (err: unknown) {

@@ -66,8 +66,8 @@ const WEB_SEARCH_ALLOWED_DOMAINS = process.env.WEB_SEARCH_ALLOWED_DOMAINS
       .filter(Boolean)
   : undefined
 const WEB_SEARCH_DEBUG = process.env.WEB_SEARCH_DEBUG === '1'
-const DISCOVERY_PAUSE_MS = 2000
-const DEFAULT_OUTLET_FRESHNESS_HOURS = 96
+const DISCOVERY_PAUSE_MS = 1000 // Reduced from 2000ms for faster processing
+const DEFAULT_OUTLET_FRESHNESS_HOURS = 72 // Reduced from 96 for fresher content
 const HOST_BLOCKLIST = new Set([
   'news.google.com',
   'www.news.google.com',
@@ -78,12 +78,50 @@ const HOST_BLOCKLIST = new Set([
 ])
 
 const APOLOGY_PATTERNS = [
-  /i['’]m sorry/i,
+  /i['']m sorry/i,
   /\bunable to (?:locate|find|retrieve)/i,
-  /\bi (?:cannot|can't) (?:find|locate)/i,
+  /\bi (?:cannot|can't|couldn't|wasn't able to) (?:find|locate)/i,
   /\bas an ai\b/i,
   /\bno relevant results\b/i,
+  /wasn't able to find/i,
+  /couldn't find any/i,
+  /no articles.*published/i,
+  /i apologize/i,
 ]
+
+// Patterns that indicate LLM response artifacts (not real headlines)
+const LLM_ARTIFACT_PATTERNS = [
+  /\*\*.*\*\*/,                        // Markdown bold **text**
+  /\*[^*]+\*/,                         // Markdown italic *text*
+  /\(domain:\s*[a-z.]+\)/i,            // Contains (domain: example.com)
+  /within the (?:past|last) \d+ hours/i, // Time reference from prompt
+  /here are (?:the|some).*(?:stories|articles)/i, // LLM listing intro
+  /most recent.*climate.*stories/i,    // LLM response pattern
+  /from \*\*[^*]+\*\*/,                // "from **Source Name**"
+  /i\.e\.\s*since/i,                   // "i.e. since November..."
+]
+
+/**
+ * Validate that a title looks like a real headline, not an LLM artifact
+ */
+function isValidHeadlineTitle(title: string): boolean {
+  if (!title || title.trim().length < 20) return false
+  if (title.length > 300) return false // Real headlines aren't this long
+  
+  // Check for LLM artifact patterns
+  if (LLM_ARTIFACT_PATTERNS.some(pattern => pattern.test(title))) {
+    console.log(`⚠️  Rejected LLM artifact title: "${title.substring(0, 80)}..."`)
+    return false
+  }
+  
+  // Check for apology patterns
+  if (APOLOGY_PATTERNS.some(pattern => pattern.test(title))) {
+    console.log(`⚠️  Rejected apology title: "${title.substring(0, 80)}..."`)
+    return false
+  }
+  
+  return true
+}
 
 function normalizeDomain(domain: string): string {
   return domain
@@ -370,6 +408,11 @@ function parseWebSearchJson(
           : ''
       if (!source) {
         source = extractSourceFromUrl(url)
+      }
+
+      // Validate the title before adding to results
+      if (!isValidHeadlineTitle(title)) {
+        continue
       }
 
       results.push({
@@ -1314,6 +1357,11 @@ async function tryInsertDiscoveredArticle(
   result: WebSearchResult,
   fallbackSourceId: number
 ): Promise<boolean> {
+  // FIRST: Validate the title is a real headline, not an LLM artifact
+  if (!isValidHeadlineTitle(result.title)) {
+    return false
+  }
+
   const isClimate = isClimateRelevant({
     title: result.title,
     summary: result.snippet ?? undefined,
