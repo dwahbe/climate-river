@@ -1754,9 +1754,124 @@ async function runOutletDiscoverySegment({
   }
 }
 
+// Broad climate discovery - searches the web generally for high-quality climate content
+async function runBroadClimateDiscovery({
+  fallbackSourceId,
+  articleCap,
+  freshHours,
+}: {
+  fallbackSourceId: number
+  articleCap: number
+  freshHours: number
+}): Promise<DiscoverySegmentStats> {
+  if (!TAVILY_ENABLED || articleCap <= 0) {
+    return {
+      inserted: 0,
+      scanned: 0,
+      queriesRun: 0,
+      browseCost: 0,
+      browseToolCalls: 0,
+      duration: 0,
+    }
+  }
+
+  const segmentStart = Date.now()
+  const freshnessCutoffMs =
+    freshHours > 0 ? Date.now() - freshHours * 60 * 60 * 1000 : null
+
+  let inserted = 0
+  let scanned = 0
+  let browseCost = 0
+
+  // Broad climate search queries - varied to capture different types of content
+  const broadQueries = [
+    'climate change policy legislation 2025',
+    'renewable energy solar wind investment',
+    'carbon emissions reduction net zero',
+    'climate science research report',
+    'clean energy transition electric vehicles',
+  ]
+
+  // Domains to exclude (social media, aggregators, low-quality)
+  const excludeDomains = [
+    'twitter.com', 'x.com', 'facebook.com', 'reddit.com', 'linkedin.com',
+    'youtube.com', 'tiktok.com', 'instagram.com',
+    'news.google.com', 'news.yahoo.com', 'msn.com',
+    'pinterest.com', 'tumblr.com', 'medium.com',
+  ]
+
+  console.log(`\n🌍 Broad Climate Discovery (${broadQueries.length} queries)`)
+
+  for (const searchQuery of broadQueries) {
+    if (inserted >= articleCap) break
+
+    try {
+      console.log(`  → Searching: "${searchQuery}"`)
+      
+      const response = await tavilyClient.search(searchQuery, {
+        searchDepth: TAVILY_SEARCH_DEPTH,
+        topic: 'news',
+        days: 3, // Focus on very recent content
+        maxResults: 5,
+        excludeDomains,
+        includeAnswer: false,
+      })
+
+      browseCost += TAVILY_COST_PER_SEARCH
+
+      const results: WebSearchResult[] = response.results
+        .filter((r) => {
+          // Filter out category pages, homepages
+          const path = new URL(r.url).pathname.toLowerCase()
+          if (path === '/' || path === '') return false
+          if (path.match(/^\/(climate|energy|environment|news|about|contact|category|tag|topics?)?\/?$/)) return false
+          return true
+        })
+        .map((r) => ({
+          title: r.title,
+          url: r.url,
+          snippet: r.content,
+          publishedDate: r.publishedDate,
+          source: hostFromUrl(r.url) || 'unknown',
+        }))
+
+      scanned += results.length
+      console.log(`    Found ${results.length} results`)
+
+      for (const result of results) {
+        if (inserted >= articleCap) break
+        if (freshnessCutoffMs && !isResultFresh(result, freshnessCutoffMs)) {
+          continue
+        }
+        const added = await tryInsertDiscoveredArticle(result, fallbackSourceId)
+        if (added) {
+          inserted++
+        }
+      }
+
+      // Small delay between queries
+      await delay(300)
+    } catch (error) {
+      console.error(`  Error in broad search "${searchQuery}":`, error)
+    }
+  }
+
+  console.log(`  Broad discovery complete: ${inserted} articles from ${scanned} results`)
+
+  return {
+    inserted,
+    scanned,
+    queriesRun: broadQueries.length,
+    browseCost,
+    browseToolCalls: 0,
+    duration: Math.round((Date.now() - segmentStart) / 1000),
+  }
+}
+
 export async function run(
   opts: {
     closePool?: boolean
+    broadArticleCap?: number
     outletArticleCap?: number
     outletLimitPerBatch?: number
     outletBatchSize?: number
@@ -1764,14 +1879,15 @@ export async function run(
   } = {}
 ) {
   const startTime = Date.now()
+  const broadArticleCap = opts.broadArticleCap ?? 15 // Broad discovery cap
   const outletArticleCap = opts.outletArticleCap ?? 70
   const outletLimitPerBatch = Math.max(4, opts.outletLimitPerBatch ?? 12)
   const outletBatchSize = Math.max(2, opts.outletBatchSize ?? 4)
   const outletFreshHours =
     opts.outletFreshHours ?? DEFAULT_OUTLET_FRESHNESS_HOURS
 
-  console.log('Starting site-specific web discovery (batched)...')
-  console.log(`Search tiers: ${TAVILY_ENABLED ? '1) Tavily → ' : ''}2) OpenAI → 3) Google News`)
+  console.log('Starting web discovery...')
+  console.log(`Search tiers: ${TAVILY_ENABLED ? '0) Broad → 1) Tavily → ' : ''}2) OpenAI → 3) Google News`)
 
   if (RSS_SKIPPED_OUTLETS.length > 0) {
     console.log(
@@ -1787,6 +1903,14 @@ export async function run(
 
   const fallbackSourceId = await getOrCreateWebDiscoverySource()
 
+  // Tier 0: Broad climate discovery (searches web generally)
+  const broadStats = await runBroadClimateDiscovery({
+    fallbackSourceId,
+    articleCap: broadArticleCap,
+    freshHours: outletFreshHours,
+  })
+
+  // Tier 1-3: Outlet-specific discovery
   const outletStats = await runOutletDiscoverySegment({
     fallbackSourceId,
     limitPerBatch: outletLimitPerBatch,
@@ -1805,11 +1929,11 @@ export async function run(
     )
   }
 
-  const totalInserted = outletStats.inserted
-  const totalScanned = outletStats.scanned
-  const totalBrowseCost = outletStats.browseCost
+  const totalInserted = broadStats.inserted + outletStats.inserted
+  const totalScanned = broadStats.scanned + outletStats.scanned
+  const totalBrowseCost = broadStats.browseCost + outletStats.browseCost
   const totalBrowseToolCalls = outletStats.browseToolCalls
-  const totalQueries = outletStats.queriesRun
+  const totalQueries = broadStats.queriesRun + outletStats.queriesRun
 
   const duration = Math.round((Date.now() - startTime) / 1000)
   console.log(

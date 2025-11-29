@@ -140,6 +140,7 @@ export async function GET(req: Request) {
     try {
       console.log('🔎 Running AI web discovery...')
       webDiscoverResult = await safeRun(import('@/scripts/discover-web'), {
+        broadArticleCap: 15, // Broad climate discovery cap
         outletArticleCap: 30, // Reduced from 50 for cost control
         outletLimitPerBatch: 8, // Reduced from 10
         outletBatchSize: 4, // Reduced from 5
@@ -155,6 +156,19 @@ export async function GET(req: Request) {
           : String(webDiscoverError)
       webDiscoverResult = { error: message, skipped: 'error' }
     }
+
+    // 6) Prefetch content for web-discovered articles
+    // This runs AFTER web discovery to ensure discovered articles get content
+    console.log('📖 Prefetching content for discovered articles...')
+    const prefetchDiscoveredResult = await safeRun(
+      import('@/scripts/prefetch-content'),
+      {
+        limit: 30, // Prefetch recently discovered articles
+        hoursAgo: 6, // Focus on very recent discoveries
+        closePool: false,
+      }
+    )
+    console.log('✅ Discovered article prefetch completed:', prefetchDiscoveredResult)
 
     console.log('🎯 Daily cron job completed successfully!')
 
@@ -172,6 +186,7 @@ export async function GET(req: Request) {
         rescore: rescoreResult,
         rewrite: rewriteResult,
         webDiscover: webDiscoverResult,
+        prefetchDiscovered: prefetchDiscoveredResult,
       },
     })
   } catch (err: unknown) {

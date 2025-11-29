@@ -89,10 +89,14 @@ export async function GET(req: Request) {
     const currentHour = new Date().getUTCHours()
     const isBusinessHours = currentHour >= 12 && currentHour <= 22 // 12-22 UTC = 8am-6pm ET
 
+    // Prefetch for web-discovered articles
+    let prefetchDiscoveredResult: unknown = { skipped: 'not_run' }
+
     if (isBusinessHours) {
       try {
         console.log('🔎 Running light web discovery...')
         webDiscoverResult = await safeRun(import('@/scripts/discover-web'), {
+          broadArticleCap: 8, // Smaller broad discovery for light runs
           outletArticleCap: 15, // Small cap for light runs
           outletLimitPerBatch: 5,
           outletBatchSize: 3,
@@ -100,6 +104,18 @@ export async function GET(req: Request) {
           closePool: false,
         })
         console.log('✅ Light web discovery completed')
+
+        // Prefetch content for discovered articles
+        console.log('📖 Prefetching discovered article content...')
+        prefetchDiscoveredResult = await safeRun(
+          import('@/scripts/prefetch-content'),
+          {
+            limit: 15, // Smaller batch for light runs
+            hoursAgo: 4, // Focus on very recent
+            closePool: false,
+          }
+        )
+        console.log('✅ Discovered prefetch completed')
       } catch (webError: unknown) {
         console.error('❌ Web discovery failed:', webError)
         const message = webError instanceof Error ? webError.message : String(webError)
@@ -124,6 +140,7 @@ export async function GET(req: Request) {
         prefetch: prefetchResult,
         rescore: rescoreResult,
         webDiscover: webDiscoverResult,
+        prefetchDiscovered: prefetchDiscoveredResult,
       },
     })
   } catch (err: unknown) {
