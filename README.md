@@ -200,6 +200,226 @@ sequenceDiagram
 - **Semantic Clustering** (ingest.ts only): Uses pgvector cosine similarity on embeddings to group articles about the same story, even with different wording
 - **Keyword Clustering** (discover.ts, discover-web.ts): Groups by extracted keywords from title - faster but less accurate
 
+### Function Call Graph
+
+```mermaid
+flowchart TB
+    subgraph Cron["🕐 Cron Entry Points"]
+        FULL["/api/cron/full"]
+        REFRESH["/api/cron/refresh"]
+    end
+
+    subgraph CronLib["lib/cron.ts"]
+        safeRun["safeRun()"]
+        authorized["authorized()"]
+    end
+
+    FULL --> authorized
+    REFRESH --> authorized
+    FULL --> safeRun
+    REFRESH --> safeRun
+
+    subgraph DiscoverScript["scripts/discover.ts"]
+        disc_run["run()"]
+        disc_ingestQuery["ingestQuery()"]
+        disc_insertArticle["insertArticle()"]
+        disc_ensureCluster["ensureClusterForArticle()"]
+        disc_clusterKey["clusterKey()"]
+
+        disc_run --> disc_ingestQuery
+        disc_ingestQuery --> disc_insertArticle
+        disc_ingestQuery --> disc_ensureCluster
+        disc_ensureCluster --> disc_clusterKey
+    end
+
+    subgraph IngestScript["scripts/ingest.ts"]
+        ing_run["run()"]
+        ing_ingestFromFeed["ingestFromFeed()"]
+        ing_generateEmbedding["generateEmbedding()"]
+        ing_insertArticle["insertArticle()"]
+        ing_semanticCluster["ensureSemanticClusterForArticle()"]
+        ing_updateScore["updateClusterScore()"]
+
+        ing_run --> ing_ingestFromFeed
+        ing_ingestFromFeed --> ing_generateEmbedding
+        ing_ingestFromFeed --> ing_insertArticle
+        ing_insertArticle --> ing_generateEmbedding
+        ing_ingestFromFeed --> ing_semanticCluster
+        ing_semanticCluster --> ing_updateScore
+    end
+
+    subgraph WebDiscoverScript["scripts/discover-web.ts"]
+        web_run["run()"]
+        web_broadDiscovery["runBroadClimateDiscovery()"]
+        web_outletDiscovery["runOutletDiscoverySegment()"]
+        web_tavily["searchViaTavily()"]
+        web_tavilyBatch["searchViaTavilyBatch()"]
+        web_openai["callOpenAIWebSearch()"]
+        web_tryInsert["tryInsertDiscoveredArticle()"]
+        web_insertArticle["insertWebDiscoveredArticle()"]
+        web_ensureCluster["ensureClusterForArticle()"]
+
+        web_run --> web_broadDiscovery
+        web_run --> web_outletDiscovery
+        web_broadDiscovery --> web_tavily
+        web_outletDiscovery --> web_tavilyBatch
+        web_outletDiscovery --> web_openai
+        web_broadDiscovery --> web_tryInsert
+        web_outletDiscovery --> web_tryInsert
+        web_tryInsert --> web_insertArticle
+        web_tryInsert --> web_ensureCluster
+    end
+
+    subgraph CategorizeScript["scripts/categorize.ts"]
+        cat_run["run()"]
+    end
+
+    subgraph RewriteScript["scripts/rewrite.ts"]
+        rew_run["run()"]
+        rew_batch["batch()"]
+        rew_processOne["processOne()"]
+        rew_generateOpenAI["generateWithOpenAI()"]
+        rew_passesChecks["passesChecks()"]
+        rew_buildPrompt["buildPrompt()"]
+
+        rew_run --> rew_batch
+        rew_batch --> rew_processOne
+        rew_processOne --> rew_generateOpenAI
+        rew_processOne --> rew_passesChecks
+        rew_generateOpenAI --> rew_buildPrompt
+    end
+
+    subgraph RescoreScript["scripts/rescore.ts"]
+        res_run["run()"]
+    end
+
+    subgraph PrefetchScript["scripts/prefetch-content.ts"]
+        pre_run["run()"]
+    end
+
+    subgraph CategorizerLib["lib/categorizer.ts"]
+        catLib_store["categorizeAndStoreArticle()"]
+        catLib_hybrid["categorizeArticleHybrid()"]
+        catLib_storeCategories["storeArticleCategories()"]
+        catLib_articleEmbed["generateArticleEmbedding()"]
+        catLib_catEmbed["getCategoryEmbedding()"]
+
+        catLib_store --> catLib_hybrid
+        catLib_store --> catLib_storeCategories
+        catLib_hybrid --> catLib_articleEmbed
+        catLib_hybrid --> catLib_catEmbed
+    end
+
+    subgraph TaggerLib["lib/tagger.ts"]
+        tag_isClimate["isClimateRelevant()"]
+        tag_categorize["categorizeArticle()"]
+    end
+
+    subgraph ReaderLib["lib/services/readerService.ts"]
+        reader_prefetch["prefetchArticles()"]
+        reader_getContent["getArticleContent()"]
+        reader_fetch["fetchArticleContent()"]
+
+        reader_prefetch --> reader_getContent
+        reader_getContent --> reader_fetch
+    end
+
+    subgraph DbLib["lib/db.ts"]
+        db_query["query()"]
+        db_endPool["endPool()"]
+    end
+
+    %% Script to lib connections
+    safeRun -.-> disc_run
+    safeRun -.-> ing_run
+    safeRun -.-> cat_run
+    safeRun -.-> pre_run
+    safeRun -.-> res_run
+    safeRun -.-> rew_run
+    safeRun -.-> web_run
+
+    disc_ingestQuery --> tag_isClimate
+    ing_ingestFromFeed --> tag_isClimate
+    ing_ingestFromFeed --> catLib_store
+    web_tryInsert --> tag_isClimate
+    web_tryInsert --> catLib_store
+    cat_run --> catLib_store
+    catLib_hybrid --> tag_categorize
+    rew_processOne --> tag_isClimate
+    pre_run --> reader_prefetch
+
+    %% All scripts use db
+    disc_run --> db_query
+    ing_run --> db_query
+    cat_run --> db_query
+    res_run --> db_query
+    rew_run --> db_query
+    web_run --> db_query
+    pre_run --> db_query
+    catLib_store --> db_query
+```
+
+### Shared Library Dependencies
+
+```mermaid
+flowchart LR
+    subgraph Scripts
+        D[discover.ts]
+        I[ingest.ts]
+        C[categorize.ts]
+        P[prefetch-content.ts]
+        R[rescore.ts]
+        W[rewrite.ts]
+        WD[discover-web.ts]
+    end
+
+    subgraph Libraries
+        DB[(lib/db.ts)]
+        TAG[lib/tagger.ts]
+        CAT[lib/categorizer.ts]
+        READ[lib/services/readerService.ts]
+        CRON[lib/cron.ts]
+    end
+
+    subgraph External
+        OPENAI[OpenAI API]
+        TAVILY[Tavily API]
+        PG[(PostgreSQL)]
+    end
+
+    D --> DB
+    D --> TAG
+
+    I --> DB
+    I --> TAG
+    I --> CAT
+    I --> OPENAI
+
+    C --> DB
+    C --> CAT
+
+    P --> DB
+    P --> READ
+
+    R --> DB
+
+    W --> DB
+    W --> TAG
+    W --> OPENAI
+
+    WD --> DB
+    WD --> TAG
+    WD --> CAT
+    WD --> OPENAI
+    WD --> TAVILY
+
+    CAT --> TAG
+    CAT --> OPENAI
+    CAT --> DB
+
+    DB --> PG
+```
+
 ### Database Schema (Core Tables)
 
 ```mermaid
