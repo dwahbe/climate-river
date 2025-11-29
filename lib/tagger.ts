@@ -326,6 +326,8 @@ export function getCategoryBySlug(slug: string) {
 /**
  * Check if an article is climate-relevant by requiring at least one climate-related term.
  * This prevents non-climate political/business news from slipping through.
+ *
+ * TODO: This is prone to both false positives and false negatives. A simple way to improve this is to use LLMs to check the article + summary.
  */
 export function isClimateRelevant(article: ArticleLike): boolean {
   const text = `${article.title} ${article.summary || ''}`.toLowerCase()
@@ -450,4 +452,3 @@ export function categorizeArticle(article: ArticleLike): CategoryScore[] {
   // Sort by confidence (highest first)
   return scores.sort((a, b) => b.confidence - a.confidence)
 }
-
