@@ -2,6 +2,7 @@
 import { query, endPool } from '@/lib/db'
 import { generateText } from 'ai'
 import { openai } from '@ai-sdk/openai'
+import { tavily } from '@tavily/core'
 import { categorizeAndStoreArticle } from '@/lib/categorizer'
 import { isClimateRelevant } from '@/lib/tagger'
 import { Buffer } from 'node:buffer'
@@ -9,6 +10,12 @@ import {
   CURATED_CLIMATE_OUTLETS,
   type ClimateOutlet,
 } from '@/config/climateOutlets'
+
+// Tavily client for cost-effective site-specific search
+const tavilyClient = tavily({ apiKey: process.env.TAVILY_API_KEY || '' })
+const TAVILY_ENABLED = !!process.env.TAVILY_API_KEY
+const TAVILY_SEARCH_DEPTH = (process.env.TAVILY_SEARCH_DEPTH || 'basic') as 'basic' | 'advanced'
+const TAVILY_COST_PER_SEARCH = TAVILY_SEARCH_DEPTH === 'basic' ? 0.002 : 0.004
 
 type WebSearchResult = {
   title: string
@@ -480,11 +487,8 @@ Rules:
         ? overrides.allowedDomains
         : WEB_SEARCH_ALLOWED_DOMAINS
 
-    const toolArgs =
-      allowedDomains && allowedDomains.length > 0
-        ? { filters: { allowedDomains } }
-        : {}
-
+    // Note: filters.allowedDomains is NOT supported with gpt-4o-mini
+    // We rely on the prompt to guide domain-specific searches and post-filter results
     const response = await generateText({
       model: openai(WEB_SEARCH_MODEL),
       messages: [
@@ -500,7 +504,6 @@ Rules:
       tools: {
         webSearch: openai.tools.webSearch({
           searchContextSize: WEB_SEARCH_CONTEXT_SIZE,
-          ...toolArgs,
         }),
       },
       toolChoice: 'auto',
@@ -641,6 +644,98 @@ Rules:
     console.error('Error calling OpenAI web search:', error)
     return { results: [], stats: { estimatedCost: 0, toolCalls: 0 } }
   }
+}
+
+// Tavily search - 20x cheaper than OpenAI for site-specific searches
+async function searchViaTavily(
+  domain: string,
+  maxResults = 5
+): Promise<{ results: WebSearchResult[]; cost: number }> {
+  if (!TAVILY_ENABLED) {
+    return { results: [], cost: 0 }
+  }
+
+  try {
+    console.log(`🔍 Tavily search: site:${domain} climate`)
+    
+    // Tavily SDK: search(query: string, options?: TavilySearchOptions)
+    const response = await tavilyClient.search(
+      `site:${domain} climate energy environment`,
+      {
+        searchDepth: TAVILY_SEARCH_DEPTH,
+        includeAnswer: false,
+        maxResults,
+        includeDomains: [domain], // Use native domain filtering
+        topic: 'news', // Focus on news articles
+        days: 7, // Last 7 days
+      }
+    )
+
+    const results: WebSearchResult[] = response.results
+      .filter((r) => {
+        // Verify the result is actually from the target domain
+        const host = hostFromUrl(r.url)
+        if (!host || !domainMatches(normalizeDomain(host), normalizeDomain(domain))) {
+          return false
+        }
+        
+        // Filter out category pages, homepages, and non-article URLs
+        const url = r.url.toLowerCase()
+        const path = new URL(r.url).pathname.toLowerCase()
+        
+        // Skip if it's just a homepage or category page
+        if (path === '/' || path === '') return false
+        if (path.match(/^\/(climate|energy|environment|news|about|contact|category|tag|topics?)?\/?$/)) return false
+        
+        // Skip if title looks like a category page
+        const title = r.title.toLowerCase()
+        if (title === domain || title.match(/^(climate|energy|environment|news|about)\s*$/)) return false
+        if (title.includes(' | home') || title.endsWith(' news')) return false
+        
+        return true
+      })
+      .map((r) => ({
+        title: r.title,
+        url: r.url,
+        snippet: r.content,
+        publishedDate: r.publishedDate,
+        source: domain,
+      }))
+
+    console.log(`  Tavily returned ${results.length} results (~$${TAVILY_COST_PER_SEARCH.toFixed(4)})`)
+    
+    return { results, cost: TAVILY_COST_PER_SEARCH }
+  } catch (error) {
+    console.error(`Tavily search error for ${domain}:`, error)
+    return { results: [], cost: 0 }
+  }
+}
+
+// Batch Tavily search for multiple domains
+async function searchViaTavilyBatch(
+  domains: string[],
+  maxResultsPerDomain = 4
+): Promise<{ results: WebSearchResult[]; totalCost: number }> {
+  if (!TAVILY_ENABLED || domains.length === 0) {
+    return { results: [], totalCost: 0 }
+  }
+
+  const allResults: WebSearchResult[] = []
+  let totalCost = 0
+
+  // Search each domain sequentially to respect rate limits
+  for (const domain of domains) {
+    const { results, cost } = await searchViaTavily(domain, maxResultsPerDomain)
+    allResults.push(...results)
+    totalCost += cost
+    
+    // Small delay between searches
+    if (domains.indexOf(domain) < domains.length - 1) {
+      await new Promise(resolve => setTimeout(resolve, 200))
+    }
+  }
+
+  return { results: dedupeWebResults(allResults), totalCost }
 }
 
 async function callOpenAIEnhancedSearch(
@@ -900,7 +995,9 @@ function normalizePublishedDate(
 function isResultFresh(result: WebSearchResult, cutoffMs: number): boolean {
   const publishedAt = normalizePublishedDate(result.publishedDate)
   if (!publishedAt) {
-    return false
+    // If no date available, assume it's fresh (let dedup handle old articles)
+    // This is important for Tavily results which often lack dates
+    return true
   }
   return publishedAt.getTime() >= cutoffMs
 }
@@ -1523,7 +1620,6 @@ async function runOutletDiscoverySegment({
   let queriesRun = 0
   let browseCost = 0
   let browseToolCalls = 0
-  const outletFallbackAttempts = new Set<string>()
 
   for (const batch of outletBatches) {
     if (inserted >= articleCap) {
@@ -1543,29 +1639,21 @@ async function runOutletDiscoverySegment({
 
     console.log(`Searching (site-specific batch): ${outletNames.join(', ')}`)
 
-    const targetedSystemPrompt = `You are ClimateRiver's climate outlet curator. For each outlet you must issue at least one precise site:domain query that reflects the outlet's specialty while keeping total tool calls as low as possible. Only keep original articles published in the past ${freshHours} hours. Reject syndicated content, opinion newsletters, or aggregator redirections. Double-check that every URL's hostname belongs to the allowed domain list and drop any entry without a confirmed ISO timestamp. Respond with a JSON array sorted newest to oldest containing title, url, snippet (why the story matters), publishedDate (ISO), and source.`
-    const targetedUserPrompt = `Provide up to ${limitPerBatch} combined articles across these outlets: ${outletDescriptors.join('; ')}. Use site-specific queries (e.g., site:domain "topic") tailored to each prompt hint, and when possible include at least one qualifying link per outlet. Only include URLs from ${domains.join(', ')} or their official climate sections, ensure every item was published within the last ${freshHours} hours, and omit any link that fails those tests. Return only the JSON array sorted newest to oldest.`
-
-    const { results: initialResults, browseStats } =
-      await callOpenAIEnhancedSearch(
-        `Latest climate coverage across: ${domains.join(', ')}`,
-        {
-          systemPrompt: targetedSystemPrompt,
-          userPrompt: targetedUserPrompt,
-          allowedDomains: domains,
-          resultLimit: limitPerBatch,
-        }
+    // TIER 1: Try Tavily first (20x cheaper than OpenAI)
+    let batchResults: WebSearchResult[] = []
+    
+    if (TAVILY_ENABLED) {
+      console.log(`  → Tier 1: Tavily search for ${domains.length} domains`)
+      const { results: tavilyResults, totalCost } = await searchViaTavilyBatch(
+        domains,
+        Math.ceil(limitPerBatch / domains.length)
       )
-
-    queriesRun++
-
-    if (browseStats) {
-      browseCost += browseStats.estimatedCost
-      browseToolCalls += browseStats.toolCalls
+      batchResults = tavilyResults
+      browseCost += totalCost
+      queriesRun += domains.length
     }
 
-    let batchResults = [...initialResults]
-
+    // Check which domains got results from Tavily
     const domainHitCounts = new Map<string, number>()
     updateDomainHitCounts(
       domainHitCounts,
@@ -1577,62 +1665,64 @@ async function runOutletDiscoverySegment({
       (entry) => (domainHitCounts.get(entry.normalized) ?? 0) === 0
     )
 
+    // TIER 2: Fall back to OpenAI for domains Tavily missed
     if (missingDomainEntries.length > 0) {
       console.log(
-        `⚠️ Missing coverage after batch search: ${missingDomainEntries
+        `  → Tier 2: OpenAI fallback for ${missingDomainEntries.length} domains: ${missingDomainEntries
           .map((entry) => entry.outlet.name)
           .join(', ')}`
       )
-    }
-
-    for (const entry of missingDomainEntries) {
-      if (inserted >= articleCap) break
-      if (outletFallbackAttempts.has(entry.normalized)) {
-        continue
-      }
-      outletFallbackAttempts.add(entry.normalized)
-
-      const fallbackResultLimit = Math.min(4, limitPerBatch)
-      const fallbackSystemPrompt = `You are ClimateRiver's climate outlet curator focusing exclusively on ${entry.outlet.name}. Use the web search tool with site:${entry.raw} queries, confirm every link belongs to ${entry.raw}, keep total tool calls minimal, and only return articles published within the last ${freshHours} hours. Reject summaries, newsletters, or paywall notices. Respond only with JSON (title, url, snippet, publishedDate ISO, source) sorted newest to oldest.`
-      const fallbackUserPrompt = `Provide up to ${fallbackResultLimit} original climate or energy stories from ${entry.outlet.name} (${entry.outlet.promptHint ?? 'climate desk'}) published within the last ${freshHours} hours. Only include URLs from ${entry.raw} or its official subdomains and omit any item without a trustworthy timestamp.`
-
-      console.log(
-        `🔁 Running fallback search for ${entry.outlet.name} (${entry.raw})`
+      
+      const missingDomains = missingDomainEntries.map((e) => e.raw)
+      const missingDescriptors = missingDomainEntries.map((e) =>
+        e.outlet.promptHint ? `${e.outlet.name} (${e.outlet.promptHint})` : e.outlet.name
       )
-      const { results: fallbackResults, browseStats: fallbackBrowse } =
+
+      const targetedSystemPrompt = `You are ClimateRiver's climate outlet curator. For each outlet you must issue at least one precise site:domain query that reflects the outlet's specialty while keeping total tool calls as low as possible. Only keep original articles published in the past ${freshHours} hours. Reject syndicated content, opinion newsletters, or aggregator redirections. Double-check that every URL's hostname belongs to the allowed domain list and drop any entry without a confirmed ISO timestamp. Respond with a JSON array sorted newest to oldest containing title, url, snippet (why the story matters), publishedDate (ISO), and source.`
+      const targetedUserPrompt = `Provide up to ${limitPerBatch} combined articles across these outlets: ${missingDescriptors.join('; ')}. Use site-specific queries (e.g., site:domain "topic") tailored to each prompt hint, and when possible include at least one qualifying link per outlet. Only include URLs from ${missingDomains.join(', ')} or their official climate sections, ensure every item was published within the last ${freshHours} hours, and omit any link that fails those tests. Return only the JSON array sorted newest to oldest.`
+
+      const { results: openAIResults, browseStats } =
         await callOpenAIEnhancedSearch(
-          `Latest climate coverage from: ${entry.raw}`,
+          `Latest climate coverage across: ${missingDomains.join(', ')}`,
           {
-            systemPrompt: fallbackSystemPrompt,
-            userPrompt: fallbackUserPrompt,
-            allowedDomains: [entry.raw],
-            resultLimit: fallbackResultLimit,
+            systemPrompt: targetedSystemPrompt,
+            userPrompt: targetedUserPrompt,
+            allowedDomains: missingDomains,
+            resultLimit: limitPerBatch,
           }
         )
 
       queriesRun++
 
-      if (fallbackBrowse) {
-        browseCost += fallbackBrowse.estimatedCost
-        browseToolCalls += fallbackBrowse.toolCalls
+      if (browseStats) {
+        browseCost += browseStats.estimatedCost
+        browseToolCalls += browseStats.toolCalls
       }
 
-      if (fallbackResults.length === 0) {
-        console.log(
-          `⚠️  Fallback search returned no results for ${entry.outlet.name}`
-        )
-        continue
-      }
-
-      console.log(
-        `✅ Fallback recovered ${fallbackResults.length} result(s) for ${entry.outlet.name}`
+      batchResults.push(...openAIResults)
+      
+      // Update hit counts after OpenAI results
+      updateDomainHitCounts(
+        domainHitCounts,
+        openAIResults,
+        missingDomainEntries.map((entry) => entry.normalized)
       )
-      batchResults.push(...fallbackResults)
-      updateDomainHitCounts(domainHitCounts, fallbackResults, [
-        entry.normalized,
-      ])
+    }
+    
+    // Check for still-missing domains after both tiers
+    const stillMissingEntries = normalizedDomainEntries.filter(
+      (entry) => (domainHitCounts.get(entry.normalized) ?? 0) === 0
+    )
+
+    if (stillMissingEntries.length > 0) {
+      console.log(
+        `⚠️ Still missing coverage after all tiers: ${stillMissingEntries
+          .map((entry) => entry.outlet.name)
+          .join(', ')}`
+      )
     }
 
+    // Dedupe before processing
     batchResults = dedupeWebResults(batchResults)
     scanned += batchResults.length
 
@@ -1681,6 +1771,7 @@ export async function run(
     opts.outletFreshHours ?? DEFAULT_OUTLET_FRESHNESS_HOURS
 
   console.log('Starting site-specific web discovery (batched)...')
+  console.log(`Search tiers: ${TAVILY_ENABLED ? '1) Tavily → ' : ''}2) OpenAI → 3) Google News`)
 
   if (RSS_SKIPPED_OUTLETS.length > 0) {
     console.log(
@@ -1727,9 +1818,8 @@ export async function run(
 
   if (totalBrowseCost > 0) {
     console.log(
-      `Estimated OpenAI web search spend: ~$${totalBrowseCost.toFixed(
-        4
-      )} (${totalBrowseToolCalls} tool calls)`
+      `Estimated search spend: ~$${totalBrowseCost.toFixed(4)} ` +
+      `(${TAVILY_ENABLED ? 'Tavily + ' : ''}OpenAI${totalBrowseToolCalls > 0 ? `, ${totalBrowseToolCalls} tool calls` : ''})`
     )
   }
 
