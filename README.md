@@ -44,15 +44,26 @@ flowchart TB
     end
 
     subgraph Ingest["📥 Ingestion Layer"]
-        DISC[discover.ts<br/>Google News RSS]
-        ING[ingest.ts<br/>Feed Processing]
-        WEBDISC[discover-web.ts<br/>AI Web Search]
+        direction TB
+        subgraph DiscoverPath["discover.ts"]
+            DISC[Google News RSS]
+            DISC_KW[Keyword Clustering]
+        end
+        subgraph IngestPath["ingest.ts (Full Processing)"]
+            ING[Feed Processing]
+            EMB[Generate Embeddings<br/>text-embedding-3-small]
+            SEM_CLUST[Semantic Clustering<br/>pgvector similarity]
+            ING_CAT[Categorization]
+        end
+        subgraph WebPath["discover-web.ts"]
+            WEBDISC[AI Web Search]
+            WEB_KW[Keyword Clustering]
+            WEB_CAT[Categorization]
+        end
     end
 
-    subgraph Process["⚙️ Processing Layer"]
-        EMB[Generate Embeddings<br/>text-embedding-3-small]
-        CLUST[Semantic Clustering<br/>pgvector similarity]
-        CAT[categorize.ts<br/>AI Categorization]
+    subgraph Backfill["🔄 Backfill Layer"]
+        CAT[categorize.ts<br/>Uncategorized Articles]
         PRE[prefetch-content.ts<br/>Reader Mode Cache]
     end
 
@@ -69,16 +80,20 @@ flowchart TB
         DB[(Supabase<br/>PostgreSQL)]
     end
 
-    RSS --> ING
     GN --> DISC
-    WEB --> WEBDISC
+    DISC --> DISC_KW
+    DISC_KW --> DB
 
-    DISC --> DB
+    RSS --> ING
     ING --> EMB
-    WEBDISC --> DB
+    EMB --> SEM_CLUST
+    SEM_CLUST --> ING_CAT
+    ING_CAT --> DB
 
-    EMB --> CLUST
-    CLUST --> DB
+    WEB --> WEBDISC
+    WEBDISC --> WEB_KW
+    WEB_KW --> WEB_CAT
+    WEB_CAT --> DB
 
     DB --> CAT
     DB --> PRE
@@ -110,13 +125,13 @@ sequenceDiagram
     participant DB as Database
 
     C->>D: 1. Discover (60 queries)
-    D->>DB: Insert discovered articles
+    D->>DB: Insert + keyword cluster (no categories)
 
     C->>I: 2. Ingest (150 articles)
-    I->>DB: Insert + embed + cluster
+    I->>DB: Insert + embed + semantic cluster + categorize
 
-    C->>CA: 3. Categorize (100 articles)
-    CA->>DB: Store categories
+    C->>CA: 3. Categorize backfill (100 articles)
+    CA->>DB: Categorize discover.ts articles
 
     C->>P: 4. Prefetch (50 articles)
     P->>DB: Cache content
@@ -128,7 +143,7 @@ sequenceDiagram
     RW->>DB: Store rewrites
 
     C->>W: 7. Web Discovery (heavy)
-    W->>DB: Insert AI-discovered
+    W->>DB: Insert + keyword cluster + categorize
 
     C->>P: 8. Prefetch discovered
     P->>DB: Cache new content
@@ -149,10 +164,10 @@ sequenceDiagram
     participant DB as Database
 
     C->>I: 1. Ingest (30 articles)
-    I->>DB: Insert + embed + cluster
+    I->>DB: Insert + embed + semantic cluster + categorize
 
-    C->>CA: 2. Categorize (30 articles)
-    CA->>DB: Store categories
+    C->>CA: 2. Categorize backfill (30 articles)
+    CA->>DB: Catch any uncategorized
 
     C->>P: 3. Prefetch (20 articles)
     P->>DB: Cache content
@@ -162,7 +177,7 @@ sequenceDiagram
 
     Note over C,W: Only during business hours (12-22 UTC)
     C->>W: 5. Light Web Discovery
-    W->>DB: Insert AI-discovered
+    W->>DB: Insert + keyword cluster + categorize
 
     C->>P: 6. Prefetch discovered
     P->>DB: Cache new content
@@ -170,15 +185,20 @@ sequenceDiagram
 
 ### Script Details
 
-| Script                | Purpose                | AI Model                 | Key Features                            |
-| --------------------- | ---------------------- | ------------------------ | --------------------------------------- |
-| `discover.ts`         | Google News RSS search | —                        | 14 climate queries, relevance filtering |
-| `ingest.ts`           | RSS feed processing    | `text-embedding-3-small` | Dedup, embeddings, semantic clustering  |
-| `categorize.ts`       | Article categorization | Hybrid rules + AI        | Multi-category tagging                  |
-| `prefetch-content.ts` | Reader mode cache      | —                        | Content extraction, paywall detection   |
-| `rescore.ts`          | Cluster scoring        | —                        | Freshness decay, velocity, coverage     |
-| `rewrite.ts`          | Headline enhancement   | `gpt-4o-mini`            | Techmeme-style, fact validation         |
-| `discover-web.ts`     | AI web discovery       | `gpt-4o-mini` + Tavily   | Multi-tier search, 60+ outlets          |
+| Script                | Purpose                 | AI Model                 | Clustering              | Categorization | Key Features                                                 |
+| --------------------- | ----------------------- | ------------------------ | ----------------------- | -------------- | ------------------------------------------------------------ |
+| `discover.ts`         | Google News RSS         | —                        | Keyword                 | ❌             | 14 climate queries, relevance filtering                      |
+| `ingest.ts`           | RSS feed processing     | `text-embedding-3-small` | **Semantic** (pgvector) | ✅ Inline      | Full pipeline: dedup, embeddings, clustering, categorization |
+| `discover-web.ts`     | AI web discovery        | `gpt-4o-mini` + Tavily   | Keyword                 | ✅ Inline      | Multi-tier search, 60+ curated outlets                       |
+| `categorize.ts`       | Backfill categorization | Hybrid rules + AI        | —                       | ✅             | Catches uncategorized articles (e.g., from discover.ts)      |
+| `prefetch-content.ts` | Reader mode cache       | —                        | —                       | —              | Content extraction, paywall detection                        |
+| `rescore.ts`          | Cluster scoring         | —                        | —                       | —              | Freshness decay (9h half-life), velocity, coverage           |
+| `rewrite.ts`          | Headline enhancement    | `gpt-4o-mini`            | —                       | —              | Techmeme-style, fact validation, no hallucinated numbers     |
+
+**Clustering Methods:**
+
+- **Semantic Clustering** (ingest.ts only): Uses pgvector cosine similarity on embeddings to group articles about the same story, even with different wording
+- **Keyword Clustering** (discover.ts, discover-web.ts): Groups by extracted keywords from title - faster but less accurate
 
 ### Database Schema (Core Tables)
 
