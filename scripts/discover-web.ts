@@ -373,6 +373,64 @@ function cleanText(value: string | null | undefined): string {
     .trim()
 }
 
+/**
+ * Clean a snippet/dek by removing social share buttons, markdown artifacts,
+ * images, navigation elements, and truncating to a reasonable length.
+ */
+function cleanSnippet(value: string | null | undefined, maxLength = 250): string {
+  if (!value) return ''
+  
+  let cleaned = value
+    // Remove markdown images first (before link removal)
+    .replace(/!\[([^\]]*)\]\([^)]+\)/g, '')
+    // Remove markdown links, keeping text
+    .replace(/\[([^\]]*)\]\([^)]+(?:\s+"[^"]*")?\)/g, '$1')
+    // Remove social share button text patterns
+    .replace(/\b(Facebook|Twitter|Print|Email|Share this via [^)]+)\b/gi, '')
+    // Remove standalone URLs
+    .replace(/https?:\/\/[^\s]+/g, '')
+    // Remove mailto: patterns
+    .replace(/mailto:\S+/g, '')
+    // Remove markdown bold/italic
+    .replace(/\*\*([^*]+)\*\*/g, '$1')
+    .replace(/\*([^*]+)\*/g, '$1')
+    .replace(/__([^_]+)__/g, '$1')
+    .replace(/_([^_]+)_/g, '$1')
+    // Remove HTML tags
+    .replace(/<[^>]+>/g, '')
+    // Remove markdown headers
+    .replace(/^#{1,6}\s+/gm, '')
+    // Remove list markers
+    .replace(/^\s*[-*]\s+/gm, '')
+    // Remove image alt text patterns
+    .replace(/Image \d+:/gi, '')
+    // Clean up dates that appear alone
+    .replace(/^\d{1,2}\s+\w+\s+\d{4}\s*/gm, '')
+    // Remove category/tag-like text in square brackets
+    .replace(/\[[^\]]{1,30}\]/g, '')
+    // Normalize whitespace
+    .replace(/\s+/g, ' ')
+    .trim()
+  
+  // If the result is mostly garbage (too short or just punctuation), return empty
+  if (cleaned.length < 20 || /^[\s.,!?()-]*$/.test(cleaned)) {
+    return ''
+  }
+  
+  // Find the first meaningful sentence (at least 40 chars ending in punctuation)
+  const sentenceMatch = cleaned.match(/^(.{40,}?[.!?])\s/)
+  if (sentenceMatch) {
+    cleaned = sentenceMatch[1]
+  }
+  
+  // Truncate if still too long
+  if (cleaned.length > maxLength) {
+    cleaned = cleaned.slice(0, maxLength - 1).trimEnd() + '…'
+  }
+  
+  return cleaned
+}
+
 function parseWebSearchJson(
   content: string | null | undefined,
   query: string
@@ -696,7 +754,7 @@ async function searchViaTavily(
       .map((r) => ({
         title: r.title,
         url: r.url,
-        snippet: r.content,
+        snippet: cleanSnippet(r.content),
         publishedDate: r.publishedDate,
         source: domain,
       }))
@@ -1285,6 +1343,16 @@ async function isDuplicate(title: string, url: string): Promise<boolean> {
   return false
 }
 
+/**
+ * Check if a string looks like a raw domain (e.g., "heatmap.news", "news.un.org")
+ * vs a proper outlet name (e.g., "Heatmap News", "UN News Climate")
+ */
+function looksLikeDomain(name: string): boolean {
+  if (!name) return false
+  // A domain typically has no spaces, contains dots, and matches domain pattern
+  return /^[a-z0-9.-]+\.[a-z]{2,}$/i.test(name.trim())
+}
+
 async function getOrCreateSourceForResult(
   result: WebSearchResult,
   fallbackSourceId: number
@@ -1296,30 +1364,23 @@ async function getOrCreateSourceForResult(
   const host = hostFromUrl(result.url)
 
   if (!host || HOST_BLOCKLIST.has(host)) {
+    // Only use result.source if it's a real name, not a domain
+    const sourceName = result.source?.trim()
     return {
       sourceId: fallbackSourceId,
-      publisherName: result.source?.trim() || null,
+      publisherName: sourceName && !looksLikeDomain(sourceName) ? sourceName : null,
       publisherHomepage: null,
-    }
-  }
-
-  const cached = sourceCache.get(host)
-  if (cached) {
-    return {
-      sourceId: cached,
-      publisherName: result.source?.trim() || humanizeHost(host),
-      publisherHomepage: `https://${host}`,
     }
   }
 
   const slug = slugifyHost(host)
   const feedUrl = `web://${host}`
   const homepage = `https://${host}`
-  const publisherName = result.source?.trim() || humanizeHost(host)
 
-  const existing = await query<{ id: number }>(
+  // Check if we already have this source with a proper name
+  const existing = await query<{ id: number; name: string }>(
     `
-      SELECT id
+      SELECT id, name
       FROM sources
       WHERE slug = $1
          OR feed_url = $2
@@ -1330,35 +1391,54 @@ async function getOrCreateSourceForResult(
     [slug, feedUrl, `%${host}%`]
   )
 
-  let sourceId = existing.rows[0]?.id
+  if (existing.rows[0]) {
+    const sourceId = existing.rows[0].id
+    const sourceName = existing.rows[0].name
+    sourceCache.set(host, sourceId)
 
-  if (!sourceId) {
-    const inserted = await query<{ id: number }>(
-      `
-        INSERT INTO sources (name, homepage_url, feed_url, weight, slug)
-        VALUES ($1, $2, $3, $4, $5)
-        ON CONFLICT (feed_url) DO UPDATE
-          SET name = EXCLUDED.name,
-              homepage_url = EXCLUDED.homepage_url,
-              weight = EXCLUDED.weight,
-              slug = EXCLUDED.slug
-        RETURNING id
-      `,
-      [publisherName, homepage, feedUrl, 4, slug]
-    )
-    sourceId = inserted.rows[0]?.id
+    // The source table has a proper name, so don't override with publisher_name
+    // Let the query's coalesce fall back to the source name
+    return {
+      sourceId,
+      publisherName: null, // Will use source.name via coalesce
+      publisherHomepage: homepage,
+    }
   }
+
+  // No existing source - determine the best name to use
+  const resultSource = result.source?.trim()
+  // Only use result.source if it's a proper name, not a domain
+  const publisherName = resultSource && !looksLikeDomain(resultSource) 
+    ? resultSource 
+    : humanizeHost(host)
+
+  const inserted = await query<{ id: number }>(
+    `
+      INSERT INTO sources (name, homepage_url, feed_url, weight, slug)
+      VALUES ($1, $2, $3, $4, $5)
+      ON CONFLICT (feed_url) DO UPDATE
+        SET name = EXCLUDED.name,
+            homepage_url = EXCLUDED.homepage_url,
+            weight = EXCLUDED.weight,
+            slug = EXCLUDED.slug
+      RETURNING id
+    `,
+    [publisherName, homepage, feedUrl, 4, slug]
+  )
+  
+  const sourceId = inserted.rows[0]?.id
 
   if (!sourceId) {
     return {
       sourceId: fallbackSourceId,
-      publisherName,
+      publisherName: null,
       publisherHomepage: homepage,
     }
   }
 
   sourceCache.set(host, sourceId)
 
+  // New source was just created with publisherName, so set it on the article too
   return {
     sourceId,
     publisherName,
@@ -1826,7 +1906,7 @@ async function runBroadClimateDiscovery({
         .map((r) => ({
           title: r.title,
           url: r.url,
-          snippet: r.content,
+          snippet: cleanSnippet(r.content),
           publishedDate: r.publishedDate,
           source: hostFromUrl(r.url) || 'unknown',
         }))
