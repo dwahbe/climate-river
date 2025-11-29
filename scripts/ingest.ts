@@ -3,6 +3,7 @@ import Parser from 'rss-parser'
 import dayjs from 'dayjs'
 import { query, endPool } from '@/lib/db'
 import { categorizeAndStoreArticle } from '@/lib/categorizer'
+import { isClimateRelevant } from '@/lib/tagger'
 import { embed } from 'ai'
 import { openai } from '@ai-sdk/openai'
 
@@ -643,6 +644,13 @@ async function ingestFromFeed(feedUrl: string, sourceId: number, limit = 20) {
     if (fromGoogle) link = unGoogleLink(link)
 
     const dek = bestDek(it)
+
+    // Climate relevance check - skip non-climate articles before insertion
+    if (!isClimateRelevant({ title, summary: dek })) {
+      console.log(`⏭️  Skipped (not climate): "${title.substring(0, 60)}..."`)
+      continue
+    }
+
     const author = (it.creator || it.author || null) as string | null
 
     let pub: { name?: string; homepage?: string } = {}

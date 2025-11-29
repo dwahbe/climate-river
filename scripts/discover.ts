@@ -2,6 +2,7 @@
 import Parser from 'rss-parser'
 import dayjs from 'dayjs'
 import { query, endPool } from '@/lib/db'
+import { isClimateRelevant } from '@/lib/tagger'
 
 type RssItem = {
   title?: string
@@ -281,6 +282,12 @@ async function ingestQuery(q: string, limitPerQuery = 25) {
 
     const resolved = resolveGoogleNewsLink(raw)
     const urlCanon = canonical(resolved)
+
+    // Climate relevance check - skip non-climate articles before insertion
+    if (!isClimateRelevant({ title, summary: undefined })) {
+      console.log(`⏭️  Skipped (not climate): "${title.substring(0, 60)}..."`)
+      continue
+    }
 
     let host = ''
     try {
