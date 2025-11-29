@@ -680,7 +680,6 @@ async function searchViaTavily(
         }
         
         // Filter out category pages, homepages, and non-article URLs
-        const url = r.url.toLowerCase()
         const path = new URL(r.url).pathname.toLowerCase()
         
         // Skip if it's just a homepage or category page
@@ -1627,9 +1626,6 @@ async function runOutletDiscoverySegment({
     }
 
     const outletNames = batch.map((outlet) => outlet.promptHint || outlet.name)
-    const outletDescriptors = batch.map((outlet) =>
-      outlet.promptHint ? `${outlet.name} (${outlet.promptHint})` : outlet.name
-    )
     const domains = batch.map((outlet) => outlet.domain)
     const normalizedDomainEntries = batch.map((outlet) => ({
       outlet,
