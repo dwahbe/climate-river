@@ -148,7 +148,9 @@ function buildPrompt(input: {
     '- No hype words: "revolutionary", "game-changer", "unprecedented", "major breakthrough"',
     '- No vague phrases: "significant", "important" (show don\'t tell with numbers)',
     '- No questions, puns, or editorial voice',
-    '- No weak hedging: "may", "could", "might", "possibly"',
+    '- Match certainty level of source: if source states fact ("Trump Won"), rewrite as fact ("Trump wins"), never as speculation',
+    '- FORBIDDEN WORDS: "likely", "expected to", "set to", "poised to" - these will cause rejection',
+    '- "may"/"could" OK only for scientific projections about future events',
     '',
     'SOURCE MATERIAL:',
     `Original headline: ${input.title}`,
@@ -456,7 +458,15 @@ function passesChecks(
   }
 
   // Check for weak hedging language (allow "could"/"may" for scientific projections)
-  const weakPatterns = [/\bmight\b/i, /\bpossibly\b/i]
+  // Reject hedging words that soften confirmed facts
+  const weakPatterns = [
+    /\bmight\b/i,
+    /\bpossibly\b/i,
+    /\blikely\b/i,
+    /\bexpected to\b/i,
+    /\bset to\b/i,
+    /\bpoised to\b/i,
+  ]
 
   if (weakPatterns.some((p) => p.test(t))) {
     console.warn(`⚠️  Rejected weak hedging language: "${t.slice(0, 50)}..."`)
@@ -533,7 +543,7 @@ async function generateWithOpenAI(
     const { text } = await generateText({
       model: openai(model),
       prompt,
-      temperature: 0.3, // Slightly higher for more natural phrasing
+      temperature: 0.15, // Lower for stricter instruction following
       maxOutputTokens: 50, // Lower - headlines shouldn't need much
       maxRetries: retries,
       abortSignal: AbortSignal.timeout(abortMs),
