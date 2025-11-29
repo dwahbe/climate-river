@@ -136,6 +136,10 @@ function buildPrompt(input: {
     '- Technology: "[Company] [announces/demonstrates] [technology], achieving [metrics], targeting [application]"',
     '  Example: "Form Energy demonstrates 100-hour iron-air battery, targets grid-scale seasonal storage"',
     '',
+    '- Qualitative (when no numbers in source): "[Entity] [action] [specific thing], citing [reason]"',
+    '  Example: "Fashion for Good releases decarbonization blueprint, offering practical factory-level guidance"',
+    '  Example: "Indigenous groups blockade COP30 entrance, protesting lack of forest protection commitments"',
+    '',
     'STYLE RULES:',
     '- Present tense, active voice',
     '- 120-160 characters ideal (Techmeme density)',
@@ -178,6 +182,10 @@ function buildPrompt(input: {
     }
   }
 
+  lines.push('')
+  lines.push(
+    'CRITICAL: If a number, percentage, date, or measurement does NOT appear in the source material above, do NOT include it. Wrong numbers = rejected headline. When in doubt, omit the number entirely.'
+  )
   lines.push('')
   lines.push(
     'OUTPUT: Rewritten headline only (no quotes, no explanation, no "Here is...")'
@@ -366,23 +374,16 @@ function passesChecks(
 
   // Techmeme-style density: allow more flexibility for high-quality specificity
   const minLength = hasContent ? 60 : 50
-  if (t.length < minLength || t.length > 170) {
+  if (t.length < minLength || t.length > 185) {
     console.warn(
       `⚠️  Length check failed (${t.length} chars): "${t.slice(0, 50)}..."`
     )
     return false
   }
 
-  // Require quantifier only when source provides quantitative backing
-  if (sourceQuant.hasQuantEvidence && !containsQuantifier(t)) {
-    console.warn(
-      `⚠️  Source has quantitative detail but rewrite lacks it: "${t.slice(
-        0,
-        50
-      )}..."`
-    )
-    return false
-  }
+  // Note: Removed "require quantifier if headline has numbers" check
+  // Rationale: Hallucination check still catches invented numbers, 
+  // and LLM may intentionally omit numbers that aren't central to the story
 
   const norm = (s: string) =>
     s
@@ -454,8 +455,8 @@ function passesChecks(
     return false
   }
 
-  // Check for weak hedging language
-  const weakPatterns = [/\bmay\b/i, /\bcould\b/i, /\bmight\b/i, /\bpossibly\b/i]
+  // Check for weak hedging language (allow "could"/"may" for scientific projections)
+  const weakPatterns = [/\bmight\b/i, /\bpossibly\b/i]
 
   if (weakPatterns.some((p) => p.test(t))) {
     console.warn(`⚠️  Rejected weak hedging language: "${t.slice(0, 50)}..."`)
@@ -463,21 +464,45 @@ function passesChecks(
   }
 
   // Check for climate context (at least one climate-related term)
+  // Note: Article already passed isClimateRelevant() so we know it's climate-related
+  // This check ensures the rewrite doesn't lose ALL climate context
   const climateTerms = [
-    /\b(climate|carbon|emission|renewable|fossil|solar|wind|epa|greenhouse|warming|energy|environmental?)\b/i,
-    /\b(ev|evs|electric[- ]vehicles?|electric[- ]cars?|plug-in|battery[- ]electric)\b/i,
-    /\b(battery|charging station|charging network|grid storage|long-duration storage)\b/i,
-    /\b(flood|floods|flooding|drought|droughts|storm surge|hurricane|typhoon|cyclone|tornado)\b/i,
-    /\b(wildfire|wildfires|fire danger|fire weather|smoke plume|smoke plumes)\b/i,
-    /\b(heatwave|heat wave|heatwaves|heat waves|heat dome|heat domes|heat index|extreme heat)\b/i,
-    /\b(crop yield|crop yields|harvest|agricultural|farmers|food security|food supply)\b/i,
-    /\b(oil|gas|methane|petroleum|petrochemical|refinery|refineries|diesel|jet fuel)\b/i,
-    /\b(coal|mining|miners|mine|strip mine|mountaintop removal)\b/i,
-    /\b(fracking|drilling|offshore rig|rigs|pipeline|pipelines|liquefied natural gas|lng)\b/i,
-    /\b(pollution|pollutants|air quality|soot|smog)\b/i,
-    /\b(hydrogen|ammonia|electrolyzer|carbon capture|ccs|direct air capture)\b/i,
+    // Core climate terms
+    /\b(climate|carbon|co2|emission|greenhouse|warming|temperature|degrees|celsius)\b/i,
+    // Clean energy
+    /\b(renewable|solar|wind|geothermal|hydropower|clean energy|green energy)\b/i,
+    // EVs and electrification
+    /\b(ev|evs|electric[- ]?vehicles?|electric[- ]?cars?|plug-?in|battery[- ]electric|charger|charging|electrification)\b/i,
+    // Storage and grid
+    /\b(battery|batteries|grid storage|energy storage|long-duration storage)\b/i,
+    // Extreme weather
+    /\b(flood|floods|flooding|drought|droughts|storm|storms|hurricane|typhoon|cyclone|tornado|extreme weather)\b/i,
+    /\b(wildfire|wildfires|fire danger|fire weather|smoke)\b/i,
+    /\b(heat\s?wave|heat\s?dome|heat index|extreme heat|record heat|record temperature)\b/i,
+    // Ice and sea level
+    /\b(glacier|glaciers|ice sheet|ice cap|permafrost|arctic|antarctic|antarctica|sea level|sea-level|ice melt)\b/i,
+    // Forests and land
+    /\b(forest|forests|deforestation|reforestation|afforestation|rainforest|amazon|land use)\b/i,
+    // Biodiversity
+    /\b(biodiversity|species|extinction|ecosystem|habitat|wildlife|conservation)\b/i,
+    // Agriculture and water
+    /\b(crop|crops|harvest|agricultural|farmers|food security|water scarcity|water stress|irrigation)\b/i,
+    // Fossil fuels
+    /\b(oil|gas|methane|petroleum|petrochemical|refinery|refineries|diesel|jet fuel|fossil)\b/i,
+    /\b(coal|mining|miners|mine|strip mine)\b/i,
+    /\b(fracking|drilling|offshore|pipeline|pipelines|lng|liquefied natural gas)\b/i,
+    // Pollution
+    /\b(pollution|pollutants|air quality|soot|smog|toxic)\b/i,
+    // New tech
+    /\b(hydrogen|ammonia|electrolyzer|carbon capture|ccs|direct air capture|cdr|carbon removal)\b/i,
     /\b(nuclear|reactor|reactors|fusion|fission)\b/i,
-    /\b(sunrise movement|greenpeace|sierra club|friends of the earth|350\.org|earthjustice|world wildlife fund|wwf|green new deal network|union of concerned scientists|campus climate network)\b/i,
+    // Policy and targets
+    /\b(net[- ]?zero|decarboni[sz]ation|sustainability|sustainable|epa|doe|ipcc)\b/i,
+    /\b(paris agreement|cop\d+|cop 30|inflation reduction act|ira|chips act)\b/i,
+    // Organizations
+    /\b(greenpeace|sierra club|earthjustice|wwf|nature conservancy)\b/i,
+    // Coastal and ocean
+    /\b(coastal|ocean|oceans|marine|coral|reef|wetland|wetlands|mangrove)\b/i,
   ]
 
   if (!climateTerms.some((p) => p.test(t))) {
@@ -698,6 +723,7 @@ async function processOne(r: Row) {
 
   const clusterTitles = clusterContext.map((item) => item.title).filter(Boolean)
 
+  // For validating numbers exist: check all source material
   const sourceQuant = buildSourceQuantContext([
     r.title,
     r.dek,
