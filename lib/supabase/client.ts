@@ -34,17 +34,3 @@ export function createServerClient() {
   })
 }
 
-/**
- * Create a Supabase client for client-side use
- * Always uses anon key with RLS enabled
- */
-export function createBrowserClient() {
-  const { supabaseUrl, supabaseAnonKey } = getSupabaseConfig()
-  
-  return createClient(supabaseUrl, supabaseAnonKey, {
-    auth: {
-      persistSession: true,
-      autoRefreshToken: true,
-    },
-  })
-}

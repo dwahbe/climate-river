@@ -451,13 +451,3 @@ export function categorizeArticle(article: ArticleLike): CategoryScore[] {
   return scores.sort((a, b) => b.confidence - a.confidence)
 }
 
-/**
- * Tag an article with categories above confidence threshold
- */
-export function tagArticle(
-  article: ArticleLike,
-  confidenceThreshold = 0.3
-): CategoryScore[] {
-  const scores = categorizeArticle(article)
-  return scores.filter((score) => score.confidence >= confidenceThreshold)
-}
