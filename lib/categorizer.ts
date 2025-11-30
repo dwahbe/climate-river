@@ -5,6 +5,7 @@ import { query } from './db'
 import {
   CATEGORIES,
   categorizeArticle,
+  isClimateRelevant,
   type CategoryScore,
   type CategorySlug,
 } from './tagger'
@@ -96,11 +97,15 @@ function cosineSimilarity(a: number[], b: number[]): number {
 
 /**
  * Enhanced categorization using both rule-based and semantic approaches
+ * Returns empty array for non-climate articles.
  */
 export async function categorizeArticleHybrid(
   title: string,
   summary?: string
 ): Promise<CategoryScore[]> {
+  if (!isClimateRelevant({ title, summary })) {
+    return []
+  }
   // Start with rule-based categorization
   const ruleBasedScores = categorizeArticle({ title, summary })
 
@@ -109,7 +114,9 @@ export async function categorizeArticleHybrid(
 
   if (!articleEmbedding) {
     // Fallback to rule-based only if embedding generation fails
-    console.warn(`Failed to generate article embedding for "${title}", using rule-based only`)
+    console.warn(
+      `Failed to generate article embedding for "${title}", using rule-based only`
+    )
     return ruleBasedScores
   }
 
@@ -127,9 +134,9 @@ export async function categorizeArticleHybrid(
 
     if (categoryEmbedding) {
       const similarity = cosineSimilarity(articleEmbedding, categoryEmbedding)
-      // Scale similarity to confidence with more gradual scaling
-      // Maps 0.3-1.0 similarity to 0.0-1.0 confidence
-      semanticConfidence = Math.max(0, Math.min(1.0, (similarity - 0.3) * 1.43))
+      // Scale similarity to confidence with gradual scaling
+      // Maps 0.25-0.85 similarity to 0.0-1.0 confidence (embeddings cluster around 0.4-0.6)
+      semanticConfidence = Math.max(0, Math.min(1.0, (similarity - 0.25) / 0.6))
       hasSemanticScore = true
     }
 
@@ -164,7 +171,7 @@ export async function categorizeArticleHybrid(
 export async function storeArticleCategories(
   articleId: number,
   scores: CategoryScore[],
-  minConfidence: number = 0.35
+  minConfidence: number = 0.25
 ): Promise<void> {
   try {
     // Filter scores by minimum confidence
@@ -228,4 +235,3 @@ export async function categorizeAndStoreArticle(
     throw error
   }
 }
-

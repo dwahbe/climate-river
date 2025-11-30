@@ -439,8 +439,8 @@ export function categorizeArticle(article: ArticleLike): CategoryScore[] {
     const patternScore = Math.min(patternMatches * 0.4, 1.2)
     confidence += patternScore
 
-    // Only include categories with meaningful confidence
-    if (confidence >= 0.3) {
+    // Include all categories with any signal (filtering happens in storeArticleCategories)
+    if (confidence > 0) {
       scores.push({
         slug: category.slug,
         confidence: Math.min(confidence, 1.0), // Cap at 1.0
