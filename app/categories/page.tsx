@@ -68,7 +68,7 @@ export default async function CategoriesPage() {
   )
 
   return (
-    <div className="mx-auto max-w-3xl px-4 sm:px-6 pt-1 sm:pt-1.5 pb-8 content overflow-x-hidden">
+    <div className="mx-auto max-w-3xl px-4 sm:px-6 pt-1 sm:pt-1.5 pb-8 content">
       <div className="flex items-center justify-between mb-4">
         <h1 className="text-xl font-semibold tracking-tight">Categories</h1>
         <div className="flex items-center gap-2">

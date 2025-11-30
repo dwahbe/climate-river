@@ -151,7 +151,7 @@ export default function SourceTooltip({
           ref={tooltipRef}
           onMouseEnter={handleTooltipMouseEnter}
           onMouseLeave={handleTooltipMouseLeave}
-          className="fixed z-50 bg-white rounded shadow-sm border border-zinc-200 p-3 max-w-xs sm:max-w-sm w-auto min-w-60 sm:min-w-64"
+          className="fixed z-50 bg-white rounded shadow-sm border border-zinc-200 p-3 max-w-[min(calc(100vw-32px),24rem)] w-auto min-w-60 sm:min-w-64"
           style={{
             left: position.x,
             top: position.y,

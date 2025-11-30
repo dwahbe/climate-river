@@ -38,9 +38,15 @@ summary::-webkit-details-marker {
     --line: #eceae4;
   }
 
+  html {
+    overflow-x: hidden;
+    overscroll-behavior-x: none;
+  }
+
   html,
   body {
     @apply h-full bg-zinc-50 text-zinc-900 antialiased;
+    max-width: 100%;
   }
 
   /* No global <a> styling here on purpose */
