@@ -4,6 +4,7 @@ import RiverClusterList from '@/components/RiverClusterList'
 import { getRiverData } from '@/lib/services/riverService'
 import { getCategoryBySlug, CATEGORIES } from '@/lib/tagger'
 import { CategoryIcon } from '@/components/categoryIcons'
+import BreadcrumbStructuredData from '@/components/BreadcrumbStructuredData'
 import type { Metadata } from 'next'
 
 export const revalidate = 300
@@ -62,15 +63,26 @@ export default async function CategoryDetailPage(props: {
   })
 
   return (
-    <div className="mx-auto max-w-3xl px-4 sm:px-6 py-6 sm:py-10">
-      <div className="text-sm text-zinc-500">
-        <Link
-          href="/categories"
-          className="inline-flex items-center gap-1 hover:underline"
-        >
-          ← All categories
-        </Link>
-      </div>
+    <>
+      <BreadcrumbStructuredData
+        items={[
+          { name: 'Home', url: 'https://climateriver.org' },
+          { name: 'Categories', url: 'https://climateriver.org/categories' },
+          {
+            name: category.name,
+            url: `https://climateriver.org/categories/${category.slug}`,
+          },
+        ]}
+      />
+      <div className="mx-auto max-w-3xl px-4 sm:px-6 py-6 sm:py-10">
+        <div className="text-sm text-zinc-500">
+          <Link
+            href="/categories"
+            className="inline-flex items-center gap-1 hover:underline"
+          >
+            ← All categories
+          </Link>
+        </div>
 
       <div className="mt-4">
         <div className="inline-flex items-center gap-2 rounded-full bg-white px-3 py-1 text-xs font-semibold uppercase tracking-wide text-zinc-500 shadow-sm ring-1 ring-zinc-200">
@@ -91,5 +103,6 @@ export default async function CategoryDetailPage(props: {
         <RiverClusterList clusters={clusters} />
       </div>
     </div>
+    </>
   )
 }

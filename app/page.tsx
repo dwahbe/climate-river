@@ -1,5 +1,6 @@
 import { getRiverData } from '@/lib/services/riverService'
 import RiverClusterList from '@/components/RiverClusterList'
+import ItemListStructuredData from '@/components/ItemListStructuredData'
 import type { Metadata } from 'next'
 
 // Cache for 5 minutes (300 seconds)
@@ -45,9 +46,12 @@ export default async function RiverPage() {
   })
 
   return (
-    <div className="mx-auto w-full max-w-3xl px-4 sm:px-6 pt-1 sm:pt-1.5">
-      <h1 className="mb-3 text-xl font-semibold tracking-tight">Top news</h1>
-      <RiverClusterList clusters={clusters} />
-    </div>
+    <>
+      <ItemListStructuredData clusters={clusters} />
+      <div className="mx-auto w-full max-w-3xl px-4 sm:px-6 pt-1 sm:pt-1.5">
+        <h1 className="mb-3 text-xl font-semibold tracking-tight">Top news</h1>
+        <RiverClusterList clusters={clusters} />
+      </div>
+    </>
   )
 }

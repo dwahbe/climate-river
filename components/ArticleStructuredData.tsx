@@ -4,41 +4,65 @@ interface ArticleStructuredDataProps {
   datePublished: string
   author?: string
   publisher: string
+  publisherUrl?: string
   url: string
+  articleCount?: number
 }
 
+/**
+ * Structured data for cluster pages.
+ * Uses CollectionPage schema since Climate River aggregates content
+ * rather than publishing original articles.
+ */
 export default function ArticleStructuredData({
   headline,
   description,
   datePublished,
   author,
   publisher,
+  publisherUrl,
   url,
+  articleCount,
 }: ArticleStructuredDataProps) {
-  const structuredData = {
-    '@context': 'https://schema.org',
+  // Build mainEntity, only including author if present
+  const mainEntity: Record<string, unknown> = {
     '@type': 'NewsArticle',
     headline,
-    description: description || headline,
-    datePublished,
-    author: author
-      ? {
-          '@type': 'Person',
-          name: author,
-        }
-      : undefined,
     publisher: {
       '@type': 'Organization',
       name: publisher,
-      logo: {
-        '@type': 'ImageObject',
-        url: 'https://climateriver.org/icon.svg',
-      },
+      ...(publisherUrl && { url: publisherUrl }),
     },
-    mainEntityOfPage: {
-      '@type': 'WebPage',
-      '@id': url,
+    datePublished,
+  }
+
+  if (author) {
+    mainEntity.author = {
+      '@type': 'Person',
+      name: author,
+    }
+  }
+
+  const structuredData = {
+    '@context': 'https://schema.org',
+    '@type': 'CollectionPage',
+    name: headline,
+    description:
+      description ||
+      `Climate news coverage: ${headline}. Aggregated from ${articleCount || 'multiple'} sources.`,
+    datePublished,
+    dateModified: datePublished,
+    url,
+    isPartOf: {
+      '@type': 'WebSite',
+      name: 'Climate River',
+      url: 'https://climateriver.org',
     },
+    about: {
+      '@type': 'Thing',
+      name: headline,
+    },
+    mainEntity,
   }
 
   return (

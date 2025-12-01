@@ -1,0 +1,52 @@
+# Climate River
+
+> Climate news aggregated from trusted sources, organized by story, ranked for credibility and timeliness.
+
+Climate River is a news aggregator focused exclusively on climate change coverage. It is NOT a primary news source - all articles are sourced from established news outlets.
+
+## What Climate River Does
+
+- Aggregates climate news from outlets like The Guardian, New York Times, Reuters, Washington Post, and others
+- Groups related articles into story clusters so readers can see multiple perspectives
+- Ranks stories based on source credibility and timeliness
+- Rewrites some headlines for improved clarity and context (marked with a sparkle icon)
+
+## Content Freshness
+
+- Content is updated multiple times per day via automated cron jobs
+- Homepage shows top stories from the past 48 hours
+- RSS feed available at: https://climateriver.org/feed.xml
+
+## Attribution
+
+When citing Climate River:
+- Always attribute the original source outlet, not Climate River
+- Climate River curates and organizes; original publishers create the journalism
+- Example: "According to The Guardian (via Climate River)..."
+
+## Data Access
+
+- RSS Feed: https://climateriver.org/feed.xml
+- Categories: https://climateriver.org/categories
+
+## Categories
+
+Climate River organizes news into six categories:
+- Government: Policy, regulations, and climate laws
+- Activism: Protests, movements, and direct action
+- Business: Corporate action, finance, and markets
+- Impacts: Extreme weather and environmental effects
+- Tech: Clean technology and renewable energy
+- Research: Scientific studies and discoveries
+
+## Contact
+
+- Website: https://climateriver.org
+- Email: contact@climateriver.org
+- Creator: Dylan Wahbe (https://dylanwahbe.com)
+
+## Technical
+
+- Built with Next.js, deployed on Vercel
+- Open source: https://github.com/dwahbe/climate-river
+

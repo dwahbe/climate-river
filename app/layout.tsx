@@ -19,6 +19,11 @@ export const metadata = {
     default: 'Climate River - Climate News Aggregator',
     template: '%s | Climate River',
   },
+  alternates: {
+    types: {
+      'application/rss+xml': 'https://climateriver.org/feed.xml',
+    },
+  },
   description:
     'Climate River aggregates climate news from The Guardian, New York Times, Reuters, and other trusted sources. Stories organized by topic, ranked for credibility and timeliness. Your focused source for climate change coverage.',
   keywords: [
