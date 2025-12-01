@@ -7,6 +7,7 @@ import {
   AlertTriangle,
   Zap,
   Microscope,
+  Sparkles,
 } from 'lucide-react'
 import { CATEGORIES, type CategorySlug } from '@/lib/tagger'
 import { CategoryIcon } from '@/components/categoryIcons'
@@ -155,6 +156,17 @@ export default async function CategoriesPage() {
                         >
                           {cluster.lead_title}
                         </a>
+                        {cluster.lead_was_rewritten && (
+                          <span
+                            className="ml-1 inline-flex align-middle text-amber-500"
+                            title="Rewritten for improved context by Climate River"
+                          >
+                            <Sparkles className="h-3 w-3" aria-hidden="true" />
+                            <span className="sr-only">
+                              Rewritten for improved context by Climate River
+                            </span>
+                          </span>
+                        )}
                         <p className="mt-1 text-[11px] uppercase tracking-wide text-zinc-400 break-all">
                           {source}
                         </p>
