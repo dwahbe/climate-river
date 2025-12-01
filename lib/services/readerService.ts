@@ -286,6 +286,7 @@ export async function getArticleContent(
     content_status: string | null
     content_error: string | null
     content_fetched_at: Date | null
+    content_image: string | null
     canonical_url: string
     title: string
     author: string | null
@@ -299,6 +300,7 @@ export async function getArticleContent(
       content_status,
       content_error,
       content_fetched_at,
+      content_image,
       canonical_url,
       title,
       author,
@@ -335,6 +337,7 @@ export async function getArticleContent(
         author: article.author || undefined,
         wordCount: article.content_word_count || 0,
         publishedAt: article.published_at?.toISOString(),
+        image: article.content_image || undefined,
         fromCache: true,
       }
     } else {
@@ -364,15 +367,17 @@ export async function getArticleContent(
         content_html = $1,
         content_text = $2,
         content_word_count = $3,
+        content_image = $4,
         content_status = 'success',
         content_error = NULL,
         content_fetched_at = NOW()
-      WHERE id = $4
+      WHERE id = $5
     `,
       [
         result.content,
         result.content, // TODO: strip HTML for content_text
         result.wordCount,
+        result.image || null,
         articleId,
       ]
     )

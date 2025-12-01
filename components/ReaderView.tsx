@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import Image from 'next/image'
 import { Drawer } from 'vaul'
 import { X } from 'lucide-react'
 
@@ -18,6 +19,7 @@ type ReaderData = {
   author?: string
   wordCount: number
   publishedAt?: string
+  image?: string
 }
 
 export default function ReaderView({
@@ -114,10 +116,24 @@ export default function ReaderView({
       )}
 
       {data && !error && (
-        <article
-          className={`prose prose-zinc max-w-none ${isMobile ? '' : 'prose-lg'}`}
-          dangerouslySetInnerHTML={{ __html: data.content }}
-        />
+        <>
+          {data.image && (
+            <figure className="mb-6">
+              <Image
+                src={data.image}
+                alt=""
+                width={800}
+                height={400}
+                className="w-full rounded-lg object-cover max-h-80"
+                unoptimized
+              />
+            </figure>
+          )}
+          <article
+            className={`prose prose-zinc max-w-none ${isMobile ? '' : 'prose-lg'}`}
+            dangerouslySetInnerHTML={{ __html: data.content }}
+          />
+        </>
       )}
     </>
   )

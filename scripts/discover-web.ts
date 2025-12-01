@@ -1393,7 +1393,6 @@ async function getOrCreateSourceForResult(
 
   if (existing.rows[0]) {
     const sourceId = existing.rows[0].id
-    const sourceName = existing.rows[0].name
     sourceCache.set(host, sourceId)
 
     // The source table has a proper name, so don't override with publisher_name

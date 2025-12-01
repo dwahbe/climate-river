@@ -72,6 +72,9 @@ export async function run() {
   await query(
     `alter table if exists articles add column if not exists content_fetched_at timestamptz;`
   )
+  await query(
+    `alter table if exists articles add column if not exists content_image text;`
+  )
 
   // Add embedding column for semantic similarity (vector dimension 1536 for text-embedding-3-small)
   await query(
