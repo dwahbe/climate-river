@@ -1,8 +1,13 @@
 import { unstable_cache } from 'next/cache'
 import * as DB from '@/lib/db'
-import LocalTime from '@/components/LocalTime'
 
 type LastUpdatedRow = { ts: string | Date }
+
+const formatter = new Intl.DateTimeFormat('en-US', {
+  dateStyle: 'medium',
+  timeStyle: 'short',
+  timeZone: 'America/Los_Angeles',
+})
 
 // Cache the timestamp independently from page cache so all pages show the same value
 const getLastUpdatedCached = unstable_cache(
@@ -44,9 +49,11 @@ export default async function LastUpdated() {
     return null
   }
 
+  const pretty = formatter.format(new Date(lastUpdatedISO))
+
   return (
     <div className="text-xs text-zinc-500">
-      Last updated <LocalTime iso={lastUpdatedISO} />
+      Last updated <time dateTime={lastUpdatedISO}>{pretty} PT</time>
     </div>
   )
 }

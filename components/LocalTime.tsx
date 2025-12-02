@@ -1,19 +1,10 @@
-'use client'
-import { useMemo } from 'react'
+const formatter = new Intl.DateTimeFormat('en-US', {
+  dateStyle: 'medium',
+  timeStyle: 'short',
+  timeZone: 'America/Los_Angeles',
+})
 
 export default function LocalTime({ iso }: { iso: string }) {
-  const d = useMemo(() => new Date(iso), [iso])
-  const pretty = useMemo(
-    () =>
-      new Intl.DateTimeFormat(undefined, {
-        dateStyle: 'medium',
-        timeStyle: 'short',
-      }).format(d),
-    [d]
-  )
-  return (
-    <time dateTime={iso} title={iso} suppressHydrationWarning>
-      {pretty}
-    </time>
-  )
+  const pretty = formatter.format(new Date(iso))
+  return <time dateTime={iso}>{pretty} PT</time>
 }
