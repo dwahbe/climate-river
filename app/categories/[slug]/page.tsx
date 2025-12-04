@@ -84,20 +84,14 @@ export default async function CategoryDetailPage(props: {
           </Link>
         </div>
 
-      <div className="mt-4">
-        <div className="inline-flex items-center gap-2 rounded-full bg-white px-3 py-1 text-xs font-semibold uppercase tracking-wide text-zinc-500 shadow-sm ring-1 ring-zinc-200">
-          <span
-            className="inline-flex h-5 w-5 flex-none items-center justify-center rounded-full bg-zinc-100"
-            style={{ color: category.color }}
-          >
-            <CategoryIcon
-              slug={category.slug}
-              className="h-3.5 w-3.5 text-current"
-            />
-          </span>
-          <span>{category.name}</span>
-        </div>
-      </div>
+      <h1 className="mt-4 flex items-center gap-3 text-2xl font-bold text-zinc-900">
+        <span>{category.name}</span>
+        <CategoryIcon
+          slug={category.slug}
+          className="h-6 w-6"
+          style={{ color: category.color }}
+        />
+      </h1>
 
       <div className="mt-6">
         <RiverClusterList clusters={clusters} />

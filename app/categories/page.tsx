@@ -107,32 +107,18 @@ export default async function CategoriesPage() {
             key={category.slug}
             className="py-8 first:pt-0 last:pb-0 sm:py-10"
           >
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <div className="flex items-center gap-3">
-                <span
-                  className="inline-flex h-9 w-9 flex-none items-center justify-center rounded-full bg-zinc-100"
+            <div>
+              <h2 className="text-base font-semibold tracking-tight text-zinc-900">
+                {category.name}
+                <CategoryIcon
+                  slug={category.slug}
+                  className="ml-1.5 inline h-4 w-4 align-[-0.15em]"
                   style={{ color: category.color }}
-                >
-                  <CategoryIcon
-                    slug={category.slug}
-                    className="h-4 w-4 text-current"
-                  />
-                </span>
-                <div>
-                  <h2 className="text-base font-semibold tracking-tight text-zinc-900">
-                    {category.name}
-                  </h2>
-                  <p className="mt-1 text-sm text-zinc-500">
-                    {category.description}
-                  </p>
-                </div>
-              </div>
-              <Link
-                href={`/categories/${category.slug}`}
-                className="inline-flex items-center gap-1 text-sm font-medium text-sky-600 hover:text-sky-700 flex-shrink-0"
-              >
-                View top stories <span aria-hidden="true">→</span>
-              </Link>
+                />
+              </h2>
+              <p className="mt-1 text-sm text-zinc-500">
+                {category.description}
+              </p>
             </div>
 
             <ol className="mt-5 space-y-2.5 list-none">
@@ -152,7 +138,7 @@ export default async function CategoriesPage() {
                       <div>
                         <a
                           href={leadHref}
-                          className="text-sm font-medium leading-snug text-zinc-900 hover:underline decoration-zinc-300 hover:decoration-zinc-500"
+                          className="text-sm font-medium leading-snug text-zinc-900 hover:underline decoration-zinc-300 hover:decoration-zinc-500 text-pretty"
                         >
                           {cluster.lead_title}
                         </a>
@@ -180,6 +166,13 @@ export default async function CategoriesPage() {
                 </li>
               )}
             </ol>
+
+            <Link
+              href={`/categories/${category.slug}`}
+              className="mt-4 inline-flex items-center gap-1 text-sm font-medium text-sky-600 hover:text-sky-700"
+            >
+              View more stories <span aria-hidden="true">→</span>
+            </Link>
           </section>
         ))}
       </div>

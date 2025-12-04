@@ -22,13 +22,15 @@ export function CategoryIcon({
   slug,
   className,
   strokeWidth = 1.75,
+  style,
 }: {
   slug: CategorySlug
   className?: string
   strokeWidth?: number
+  style?: React.CSSProperties
 }) {
   const Icon = CATEGORY_ICON_MAP[slug]
   return (
-    <Icon className={className} strokeWidth={strokeWidth} aria-hidden="true" />
+    <Icon className={className} strokeWidth={strokeWidth} style={style} aria-hidden="true" />
   )
 }
