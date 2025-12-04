@@ -74,29 +74,23 @@ export default async function CategoryDetailPage(props: {
           },
         ]}
       />
-      <div className="mx-auto max-w-3xl px-4 sm:px-6 py-6 sm:py-10">
-        <div className="text-sm text-zinc-500">
-          <Link
-            href="/categories"
-            className="inline-flex items-center gap-1 hover:underline"
-          >
-            ← All categories
-          </Link>
-        </div>
-
-      <h1 className="mt-4 flex items-center gap-3 text-2xl font-bold text-zinc-900">
-        <span>{category.name}</span>
-        <CategoryIcon
-          slug={category.slug}
-          className="h-6 w-6"
-          style={{ color: category.color }}
-        />
-      </h1>
-
-      <div className="mt-6">
+      <div className="mx-auto max-w-3xl px-4 sm:px-6 pt-1 sm:pt-1.5 pb-8">
+        <Link
+          href="/categories"
+          className="text-sm text-zinc-500 hover:underline"
+        >
+          ← All categories
+        </Link>
+        <h1 className="mt-2 mb-3 flex items-center gap-2 text-xl font-semibold tracking-tight">
+          <span>{category.name}</span>
+          <CategoryIcon
+            slug={category.slug}
+            className="h-5 w-5"
+            style={{ color: category.color }}
+          />
+        </h1>
         <RiverClusterList clusters={clusters} />
       </div>
-    </div>
     </>
   )
 }
