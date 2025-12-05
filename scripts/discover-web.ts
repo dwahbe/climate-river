@@ -12,8 +12,11 @@ import {
 } from '@/config/climateOutlets'
 
 // Tavily client for cost-effective site-specific search
-const tavilyClient = tavily({ apiKey: process.env.TAVILY_API_KEY || '' })
+// Only initialize if API key exists (SDK throws on empty key)
 const TAVILY_ENABLED = !!process.env.TAVILY_API_KEY
+const tavilyClient = TAVILY_ENABLED 
+  ? tavily({ apiKey: process.env.TAVILY_API_KEY! })
+  : null
 const TAVILY_SEARCH_DEPTH = (process.env.TAVILY_SEARCH_DEPTH || 'basic') as 'basic' | 'advanced'
 const TAVILY_COST_PER_SEARCH = TAVILY_SEARCH_DEPTH === 'basic' ? 0.002 : 0.004
 
@@ -717,7 +720,8 @@ async function searchViaTavily(
     console.log(`🔍 Tavily search: site:${domain} climate`)
     
     // Tavily SDK: search(query: string, options?: TavilySearchOptions)
-    const response = await tavilyClient.search(
+    // tavilyClient is guaranteed non-null here because TAVILY_ENABLED check above
+    const response = await tavilyClient!.search(
       `site:${domain} climate energy environment`,
       {
         searchDepth: TAVILY_SEARCH_DEPTH,
@@ -1883,7 +1887,8 @@ async function runBroadClimateDiscovery({
     try {
       console.log(`  → Searching: "${searchQuery}"`)
       
-      const response = await tavilyClient.search(searchQuery, {
+      // tavilyClient guaranteed non-null (TAVILY_ENABLED check at function start)
+      const response = await tavilyClient!.search(searchQuery, {
         searchDepth: TAVILY_SEARCH_DEPTH,
         topic: 'news',
         days: 3, // Focus on very recent content
