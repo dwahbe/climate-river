@@ -203,7 +203,11 @@ export async function categorizeArticleHybrid(
   })
 
   // Strip internal ruleConfidence field before returning
-  return sorted.map(({ ruleConfidence: _, ...score }) => score)
+  return sorted.map((item): CategoryScore => ({
+    slug: item.slug,
+    confidence: item.confidence,
+    reasons: item.reasons,
+  }))
 }
 
 /**
