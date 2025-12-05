@@ -1,5 +1,12 @@
 export type ArticleLike = { title: string; summary?: string | null }
 
+/**
+ * Escape special regex characters in a string for use in RegExp constructor
+ */
+function escapeRegex(str: string): string {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
 // Refined 6-category structure for climate news
 export const CATEGORIES = [
   {
@@ -201,6 +208,11 @@ export const CATEGORIES = [
       /(sea level|glacier|ice sheet|arctic|coral|species|extinction)/i,
       /(ecosystem|biodiversity|agriculture|crops|water|food security)/i,
       /(climate (crisis|refugee|migration|displacement)|displaced by climate)/i,
+      // Definitive disaster + casualty patterns (high confidence signals)
+      // Note: Use \w* suffixes to match plurals (floods, storms) and -ing forms (flooding)
+      /\b(death toll|kills?|killed|dead|deaths?|casualties|victims?|lives? (lost|claimed)|claiming.{0,10}lives)\b.{0,60}\b(flood\w*|storm\w*|hurricane|wildfire|cyclone|typhoon|tornado|drought)\b/i,
+      /\b(flood\w*|storm\w*|hurricane|wildfire|cyclone|typhoon|tornado)\b.{0,60}\b(kills?|killed|deaths?|dead|casualties|victims?|devastat\w*|claiming.{0,10}lives)\b/i,
+      /\b(evacuat\w*|displac\w*|homeless|stranded)\b.{0,60}\b(flood\w*|storm\w*|fire|hurricane|cyclone|typhoon|tornado)\b/i,
     ],
   },
   {
@@ -243,7 +255,8 @@ export const CATEGORIES = [
     ],
     patterns: [
       /(technology|innovation|startup|carbon capture|ccus|direct air capture)/i,
-      /(hydrogen|electric vehicle|ev|tesla|battery|smart grid)/i,
+      // Word boundaries around ev/evs to prevent matching "severe", "evacuated", etc.
+      /\b(hydrogen|electric vehicles?|evs?|tesla|battery|smart grid)\b/i,
       /(artificial intelligence|satellite|sensor|monitoring|app|platform)/i,
       /(solar panel|wind turbine|renewable energy|grid storage|energy storage)/i,
       /(nuclear power|transmission line|utility scale|clean tech|cleantech)/i,
@@ -304,8 +317,7 @@ export const CATEGORIES = [
       /(analysis shows|findings show|evidence shows|data reveals)/i,
       /(climate model|simulation|peer.?reviewed|scientific study)/i,
       /(ipcc report|science journal|nature journal|research paper|academic)/i,
-      // Add patterns that catch broader research terms but exclude news/events
-      /(study|research|scientist|scientists|scientific|findings|data|analysis)(?!.*(?:heat wave|wildfire|flood|hurricane|storm))/i,
+      // Removed: negative lookahead pattern was flawed (only worked if weather terms came after)
     ],
   },
 ] as const
@@ -418,9 +430,13 @@ export function categorizeArticle(article: ArticleLike): CategoryScore[] {
     const reasons: string[] = []
 
     // Check keywords (weight: 0.3 per match, max 0.9)
+    // Using word boundaries to prevent partial matches (e.g., "ev" matching "evacuated")
     let keywordMatches = 0
     for (const keyword of category.keywords) {
-      if (text.includes(keyword.toLowerCase())) {
+      const keywordPattern = new RegExp(
+        `\\b${escapeRegex(keyword.toLowerCase())}\\b`
+      )
+      if (keywordPattern.test(text)) {
         keywordMatches++
         reasons.push(`keyword: ${keyword}`)
       }

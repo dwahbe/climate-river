@@ -95,9 +95,22 @@ function cosineSimilarity(a: number[], b: number[]): number {
   return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB))
 }
 
+// Internal type for tracking both rule and combined confidence during hybrid scoring
+interface HybridScoreInternal extends CategoryScore {
+  ruleConfidence: number
+}
+
 /**
  * Enhanced categorization using both rule-based and semantic approaches
  * Returns empty array for non-climate articles.
+ *
+ * Uses adaptive weighting: when rule-based confidence is high (>=0.7),
+ * we trust it more (70% rule, 30% semantic). Otherwise, semantic gets
+ * more weight (40% rule, 60% semantic).
+ *
+ * Primary category selection prioritizes strong rule-based signals to
+ * ensure articles with clear keyword matches (like disaster headlines)
+ * aren't overridden by semantic similarity to other categories.
  */
 export async function categorizeArticleHybrid(
   title: string,
@@ -120,7 +133,7 @@ export async function categorizeArticleHybrid(
     return ruleBasedScores
   }
 
-  const hybridScores: CategoryScore[] = []
+  const hybridScores: HybridScoreInternal[] = []
 
   // Process each category
   for (const category of CATEGORIES) {
@@ -140,12 +153,19 @@ export async function categorizeArticleHybrid(
       hasSemanticScore = true
     }
 
-    // Combine rule-based and semantic scores
-    // If semantic scoring failed, use rule-based only (don't penalize)
-    // Otherwise: Weight 40% rule-based, 60% semantic (semantic embeddings are more accurate)
-    const combinedConfidence = hasSemanticScore
-      ? ruleConfidence * 0.4 + semanticConfidence * 0.6
-      : ruleConfidence
+    // ADAPTIVE WEIGHTING: Trust strong rule-based signals more
+    // When rule confidence is high (>=0.7), it indicates clear keyword/pattern matches
+    // that shouldn't be overridden by semantic similarity
+    let combinedConfidence: number
+    if (!hasSemanticScore) {
+      combinedConfidence = ruleConfidence
+    } else if (ruleConfidence >= 0.7) {
+      // Strong rule signal: 70% rule, 30% semantic
+      combinedConfidence = ruleConfidence * 0.7 + semanticConfidence * 0.3
+    } else {
+      // Weak/no rule signal: 40% rule, 60% semantic (let semantic guide)
+      combinedConfidence = ruleConfidence * 0.4 + semanticConfidence * 0.6
+    }
 
     const reasons = [
       ...(ruleScore?.reasons || []),
@@ -157,12 +177,33 @@ export async function categorizeArticleHybrid(
     hybridScores.push({
       slug: category.slug,
       confidence: Math.min(1.0, combinedConfidence),
+      ruleConfidence,
       reasons,
     })
   }
 
-  // Sort by confidence, highest first
-  return hybridScores.sort((a, b) => b.confidence - a.confidence)
+  // SMART PRIMARY SELECTION: Sort with rule-based priority
+  // This ensures articles with strong keyword signals (like disaster headlines)
+  // get the correct primary category even if semantic scores favor another category
+  const sorted = hybridScores.sort((a, b) => {
+    const aStrong = a.ruleConfidence >= 0.7
+    const bStrong = b.ruleConfidence >= 0.7
+
+    // Strong rule signal wins over weak
+    if (aStrong && !bStrong) return -1
+    if (bStrong && !aStrong) return 1
+
+    // Both strong: higher rule confidence wins primary
+    if (aStrong && bStrong) {
+      return b.ruleConfidence - a.ruleConfidence
+    }
+
+    // Neither strong: use combined confidence
+    return b.confidence - a.confidence
+  })
+
+  // Strip internal ruleConfidence field before returning
+  return sorted.map(({ ruleConfidence: _, ...score }) => score)
 }
 
 /**
