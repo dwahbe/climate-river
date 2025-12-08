@@ -2,7 +2,7 @@
 // Quick refresh cron - runs 6×/day for fast content updates
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
-export const maxDuration = 120 // 2 minutes for quick refresh
+export const maxDuration = 180 // 3 minutes for refresh with rewrites
 
 import { NextResponse } from 'next/server'
 import { authorized, safeRun } from '@/lib/cron'
@@ -103,6 +103,14 @@ export async function GET(req: Request) {
       console.log(`⏭️  Skipping light web discovery (off-hours: ${currentHour} UTC)`)
     }
 
+    // 7) Rewrite headlines - quick batch to keep headlines fresh
+    console.log('✏️  Running headline rewrite...')
+    const rewriteResult = await safeRun(import('@/scripts/rewrite'), {
+      limit: 15, // Small batch for quick refresh
+      closePool: false,
+    })
+    console.log('✅ Rewrite completed:', rewriteResult)
+
     console.log('🔄 Refresh cron job completed!')
 
     return NextResponse.json({
@@ -115,6 +123,7 @@ export async function GET(req: Request) {
         rescore: rescoreResult,
         webDiscover: webDiscoverResult,
         prefetchDiscovered: prefetchDiscoveredResult,
+        rewrite: rewriteResult,
       },
     })
   } catch (err: unknown) {
