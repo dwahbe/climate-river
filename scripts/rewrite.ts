@@ -476,52 +476,10 @@ function passesChecks(
     return false
   }
 
-  // Check for climate context (at least one climate-related term)
-  // Note: Article already passed isClimateRelevant() so we know it's climate-related
-  // This check ensures the rewrite doesn't lose ALL climate context
-  const climateTerms = [
-    // Core climate terms
-    /\b(climate|carbon|co2|emission|greenhouse|warming|temperature|degrees|celsius)\b/i,
-    // Clean energy
-    /\b(renewable|solar|wind|geothermal|hydropower|clean energy|green energy)\b/i,
-    // EVs and electrification
-    /\b(ev|evs|electric[- ]?vehicles?|electric[- ]?cars?|plug-?in|battery[- ]electric|charger|charging|electrification)\b/i,
-    // Storage and grid
-    /\b(battery|batteries|grid storage|energy storage|long-duration storage)\b/i,
-    // Extreme weather
-    /\b(flood|floods|flooding|drought|droughts|storm|storms|hurricane|typhoon|cyclone|tornado|extreme weather)\b/i,
-    /\b(wildfire|wildfires|fire danger|fire weather|smoke)\b/i,
-    /\b(heat\s?wave|heat\s?dome|heat index|extreme heat|record heat|record temperature)\b/i,
-    // Ice and sea level
-    /\b(glacier|glaciers|ice sheet|ice cap|permafrost|arctic|antarctic|antarctica|sea level|sea-level|ice melt)\b/i,
-    // Forests and land
-    /\b(forest|forests|deforestation|reforestation|afforestation|rainforest|amazon|land use)\b/i,
-    // Biodiversity
-    /\b(biodiversity|species|extinction|ecosystem|habitat|wildlife|conservation)\b/i,
-    // Agriculture and water
-    /\b(crop|crops|harvest|agricultural|farmers|food security|water scarcity|water stress|irrigation)\b/i,
-    // Fossil fuels
-    /\b(oil|gas|methane|petroleum|petrochemical|refinery|refineries|diesel|jet fuel|fossil)\b/i,
-    /\b(coal|mining|miners|mine|strip mine)\b/i,
-    /\b(fracking|drilling|offshore|pipeline|pipelines|lng|liquefied natural gas)\b/i,
-    // Pollution
-    /\b(pollution|pollutants|air quality|soot|smog|toxic)\b/i,
-    // New tech
-    /\b(hydrogen|ammonia|electrolyzer|carbon capture|ccs|direct air capture|cdr|carbon removal)\b/i,
-    /\b(nuclear|reactor|reactors|fusion|fission)\b/i,
-    // Policy and targets
-    /\b(net[- ]?zero|decarboni[sz]ation|sustainability|sustainable|epa|doe|ipcc)\b/i,
-    /\b(paris agreement|cop\d+|cop 30|inflation reduction act|ira|chips act)\b/i,
-    // Organizations
-    /\b(greenpeace|sierra club|earthjustice|wwf|nature conservancy)\b/i,
-    // Coastal and ocean
-    /\b(coastal|ocean|oceans|marine|coral|reef|wetland|wetlands|mangrove)\b/i,
-  ]
-
-  if (!climateTerms.some((p) => p.test(t))) {
-    console.warn(`⚠️  Rejected non-climate headline: "${t.slice(0, 50)}..."`)
-    return false
-  }
+  // Note: Removed output headline climate term check
+  // Articles already passed isClimateRelevant() during categorization AND rewrite input
+  // The LLM naturally produces climate-relevant headlines from climate content
+  // Removing this check prevents false negatives like "Heat Pumps Prevail..." or "EU ETS reform..."
 
   return true
 }

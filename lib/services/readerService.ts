@@ -232,13 +232,23 @@ async function fetchArticleContent(url: string): Promise<ReaderResult> {
       // Convert markdown to HTML for display
       const htmlContent = result.content ? markdownToHtml(result.content) : ''
 
+      // Validate we actually got content (fixes Google News redirect issue)
+      const wordCount = result.wordCount || 0
+      if (!htmlContent || htmlContent.length < 100 || wordCount < 50) {
+        return {
+          success: false,
+          status: 'error',
+          error: `Insufficient content extracted (${wordCount} words, ${htmlContent.length} chars)`,
+        } as ReaderError
+      }
+
       // Success!
       return {
         success: true,
         content: htmlContent,
         title: result.title || '',
         author: result.author,
-        wordCount: result.wordCount || 0,
+        wordCount,
         publishedAt: result.published,
         image: result.image,
       } as ReaderSuccess
