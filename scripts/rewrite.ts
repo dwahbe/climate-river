@@ -31,7 +31,8 @@ type Row = {
 function extractContentSnippet(
   contentText: string | null,
   contentHtml: string | null,
-  maxChars = 600
+  maxChars = 600,
+  articleId?: number
 ): string | null {
   const text = contentText || contentHtml
   if (!text) return null
@@ -41,8 +42,9 @@ function extractContentSnippet(
   cleaned = cleaned.replace(/\s+/g, ' ').trim()
 
   // 🛡️ SAFETY CHECK 1: Minimum viable length
+  const idLabel = articleId ? `[${articleId}] ` : ''
   if (cleaned.length < 100) {
-    console.warn('⚠️  Content too short (<100 chars), skipping')
+    console.warn(`⚠️  ${idLabel}Content too short (<100 chars), skipping`)
     return null
   }
 
@@ -56,22 +58,23 @@ function extractContentSnippet(
     /paywall/i,
   ]
   const firstPart = cleaned.slice(0, 200)
-  if (paywallPatterns.some((p) => p.test(firstPart))) {
-    console.warn('⚠️  Paywall detected in content, skipping')
+  const paywallMatch = paywallPatterns.find((p) => p.test(firstPart))
+  if (paywallMatch) {
+    console.warn(`⚠️  ${idLabel}Paywall detected ("${paywallMatch.source}"): "${firstPart.slice(0, 80)}..."`)
     return null
   }
 
   // 🛡️ SAFETY CHECK 3: Word count sanity
   const words = cleaned.split(/\s+/).filter((w) => w.length > 0)
   if (words.length < 30) {
-    console.warn('⚠️  Content too few words (<30), skipping')
+    console.warn(`⚠️  ${idLabel}Content too few words (<30), skipping`)
     return null
   }
 
   // 🛡️ SAFETY CHECK 4: Uniqueness ratio (detect repetitive error pages)
   const uniqueWords = new Set(words.map((w) => w.toLowerCase()))
   if (uniqueWords.size < words.length * 0.3) {
-    console.warn('⚠️  Content too repetitive, skipping')
+    console.warn(`⚠️  ${idLabel}Content too repetitive, skipping`)
     return null
   }
 
@@ -376,7 +379,7 @@ function passesChecks(
 
   // Techmeme-style density: allow more flexibility for high-quality specificity
   const minLength = hasContent ? 60 : 50
-  if (t.length < minLength || t.length > 185) {
+  if (t.length < minLength || t.length > 200) {
     console.warn(
       `⚠️  Length check failed (${t.length} chars): "${t.slice(0, 50)}..."`
     )
@@ -691,14 +694,14 @@ async function processOne(r: Row) {
   // SAFETY LAYER 1: Only use content if status is explicitly 'success'
   const contentSnippet =
     r.content_status === 'success'
-      ? extractContentSnippet(r.content_text, r.content_html)
+      ? extractContentSnippet(r.content_text, r.content_html, 600, r.id)
       : null
 
   const previewExcerpt =
     r.content_status === 'success' &&
     typeof r.content_html === 'string' &&
     r.content_html.trim().length > 0
-      ? extractContentSnippet(null, r.content_html, 1500)
+      ? extractContentSnippet(null, r.content_html, 1500, r.id)
       : null
 
   const clusterContext: ClusterContextItem[] = Array.isArray(r.cluster_context)
