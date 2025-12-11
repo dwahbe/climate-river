@@ -1,10 +1,12 @@
 # Climate River
 
-Minimal, fast climate news river. Next.js (App Router) + Tailwind + Postgres (Supabase). Built by [Dylan Wahbe](https://dylanwahbe.com).
+Minimal, fast climate news river. Next.js (App Router) + Tailwind + Postgres (Supabase).
+
+Built by [Dylan Wahbe](https://dylanwahbe.com).
 
 ## Pipeline Architecture
 
-Climate River uses a multi-stage data pipeline orchestrated by two Vercel cron jobs that run at different frequencies and intensities.
+Climate River uses a multi-stage data pipeline orchestrated by three Vercel cron jobs that run at different frequencies and intensities.
 
 ### Cron Schedule Overview
 
@@ -26,12 +28,19 @@ gantt
     Refresh (2min) :r4, 16, 1h
     Refresh (2min) :r5, 18, 1h
     Refresh (2min) :r6, 22, 1h
+
+    section Rewrite Cron
+    Rewrite (1min) :w1, 00, 1h
+    Rewrite (1min) :w2, 03, 1h
+    Rewrite (1min) :w3, 07, 1h
+    Rewrite (1min) :w4, 11, 13h
 ```
 
-| Cron        | Schedule                                     | Timeout | Purpose                                          |
-| ----------- | -------------------------------------------- | ------- | ------------------------------------------------ |
-| **Full**    | 01:00, 10:00, 20:00 UTC                      | 5 min   | Comprehensive pipeline with discovery + rewrites |
-| **Refresh** | 00:00, 04:00, 12:00, 16:00, 18:00, 22:00 UTC | 2 min   | Quick content refresh                            |
+| Cron        | Schedule                                      | Timeout | Purpose                                        |
+| ----------- | --------------------------------------------- | ------- | ---------------------------------------------- |
+| **Full**    | 01:00, 10:00, 20:00 UTC                       | 5 min   | Comprehensive pipeline with discovery + web AI |
+| **Refresh** | 00:00, 04:00, 12:00, 16:00, 18:00, 22:00 UTC  | 2 min   | Quick content refresh                          |
+| **Rewrite** | 00:00, 03:00, 07:00, 11:00-23:00 hourly (16×) | 1 min   | Dedicated headline rewriting                   |
 
 ### Pipeline Flow
 
@@ -120,32 +129,28 @@ sequenceDiagram
     participant CA as categorize.ts
     participant P as prefetch-content.ts
     participant R as rescore.ts
-    participant RW as rewrite.ts
     participant W as discover-web.ts
     participant DB as Database
 
-    C->>D: 1. Discover (60 queries)
+    C->>D: 1. Discover (40 queries)
     D->>DB: Insert + keyword cluster (no categories)
 
-    C->>I: 2. Ingest (150 articles)
+    C->>I: 2. Ingest (60 articles)
     I->>DB: Insert + embed + semantic cluster + categorize
 
-    C->>CA: 3. Categorize backfill (100 articles)
+    C->>CA: 3. Categorize backfill (40 articles)
     CA->>DB: Categorize discover.ts articles
 
-    C->>P: 4. Prefetch (50 articles)
+    C->>P: 4. Prefetch (25 articles)
     P->>DB: Cache content
 
     C->>R: 5. Rescore clusters
     R->>DB: Update scores + leads
 
-    C->>RW: 6. Rewrite (60 headlines)
-    RW->>DB: Store rewrites
-
-    C->>W: 7. Web Discovery (heavy)
+    C->>W: 6. Web Discovery (conditional)
     W->>DB: Insert + keyword cluster + categorize
 
-    C->>P: 8. Prefetch discovered
+    C->>P: 7. Prefetch discovered (15 articles)
     P->>DB: Cache new content
 ```
 
@@ -179,8 +184,27 @@ sequenceDiagram
     C->>W: 5. Light Web Discovery
     W->>DB: Insert + keyword cluster + categorize
 
-    C->>P: 6. Prefetch discovered
+    C->>P: 6. Prefetch discovered (15 articles)
     P->>DB: Cache new content
+```
+
+### Rewrite Cron Pipeline
+
+The rewrite cron (`/api/cron/rewrite`) runs headline enhancement independently:
+
+```mermaid
+sequenceDiagram
+    participant C as Cron Trigger
+    participant RW as rewrite.ts
+    participant DB as Database
+
+    C->>RW: 1. Rewrite (25 headlines)
+    RW->>DB: Fetch unrewritten articles (prioritized by score)
+    RW->>RW: Validate climate relevance
+    RW->>RW: Extract content snippets + cluster context
+    RW->>RW: Generate Techmeme-style headlines (gpt-4o-mini)
+    RW->>RW: Validate: no hallucinated numbers, length, quality
+    RW->>DB: Store rewrites with metadata
 ```
 
 ### Script Details
@@ -192,7 +216,7 @@ sequenceDiagram
 | `discover-web.ts`     | AI web discovery        | `gpt-4o-mini` + Tavily   | Keyword                 | ✅ Inline      | Multi-tier search, 60+ curated outlets                       |
 | `categorize.ts`       | Backfill categorization | Hybrid rules + AI        | —                       | ✅             | Catches uncategorized articles (e.g., from discover.ts)      |
 | `prefetch-content.ts` | Reader mode cache       | —                        | —                       | —              | Content extraction, paywall detection                        |
-| `rescore.ts`          | Cluster scoring         | —                        | —                       | —              | Freshness decay (9h half-life), velocity, coverage           |
+| `rescore.ts`          | Cluster scoring         | —                        | —                       | —              | Freshness decay (6h/9h half-life), velocity, coverage        |
 | `rewrite.ts`          | Headline enhancement    | `gpt-4o-mini`            | —                       | —              | Techmeme-style, fact validation, no hallucinated numbers     |
 
 **Clustering Methods:**
@@ -207,6 +231,7 @@ flowchart TB
     subgraph Cron["🕐 Cron Entry Points"]
         FULL["/api/cron/full"]
         REFRESH["/api/cron/refresh"]
+        REWRITE_CRON["/api/cron/rewrite"]
     end
 
     subgraph CronLib["lib/cron.ts"]
@@ -216,8 +241,10 @@ flowchart TB
 
     FULL --> authorized
     REFRESH --> authorized
+    REWRITE_CRON --> authorized
     FULL --> safeRun
     REFRESH --> safeRun
+    REWRITE_CRON --> safeRun
 
     subgraph DiscoverScript["scripts/discover.ts"]
         disc_run["run()"]
@@ -489,10 +516,25 @@ Score = (0.18 × coverage) + (0.05 × avg_weight) + (0.27 × ln(1 + velocity)) +
 
 Where:
 
-- **Freshness**: Exponential decay with 9-hour half-life
+- **Freshness**: Exponential decay with configurable half-lives
+  - Articles: 6-hour half-life (lose 50% score every 6 hours)
+  - Clusters: 9-hour half-life (25% faster decay for fresher homepage)
 - **Velocity**: Articles added in last 4 hours
-- **Coverage**: Source diversity + total weighted coverage
+- **Coverage**: Source diversity + total weighted coverage (using log scaling)
 - **Weight**: Source editorial weight (1-5 scale)
+- **Pool Strength**: Aggregate article quality within cluster
+
+**Lead Article Selection:**
+
+Articles are scored individually using: `(0.40 × editorial_quality) + (0.60 × freshness)`
+
+Editorial quality includes:
+
+- Source weight (1-5)
+- Author presence (+0.25)
+- Dek length ≥120 chars (+0.10)
+- Google News aggregator penalty (-0.50)
+- Press release penalty (-0.60)
 
 ### Web Discovery Tiers
 
