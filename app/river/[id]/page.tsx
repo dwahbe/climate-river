@@ -255,9 +255,7 @@ export default async function ClusterPage(props: {
         datePublished={r.published_at}
         author={r.lead_author || undefined}
         publisher={r.lead_source || 'Climate River'}
-        publisherUrl={r.lead_homepage || undefined}
         url={`https://climateriver.org/river/${cid}`}
-        articleCount={r.size}
       />
       <div className="mx-auto max-w-3xl px-4 sm:px-6 py-3">
         {/* Page chrome */}
