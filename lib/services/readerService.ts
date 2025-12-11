@@ -82,7 +82,9 @@ const READER_ERROR_STATUS_SET = new Set<ReaderError['status']>([
 function isReaderErrorStatus(
   status: string | null
 ): status is ReaderError['status'] {
-  return !!status && READER_ERROR_STATUS_SET.has(status as ReaderError['status'])
+  return (
+    !!status && READER_ERROR_STATUS_SET.has(status as ReaderError['status'])
+  )
 }
 
 // Paywall detection patterns
