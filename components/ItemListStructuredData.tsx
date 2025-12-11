@@ -31,9 +31,3 @@ export default function ItemListStructuredData({
     />
   )
 }
-
-
-
-
-
-

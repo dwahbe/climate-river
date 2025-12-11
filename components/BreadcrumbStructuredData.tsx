@@ -28,9 +28,3 @@ export default function BreadcrumbStructuredData({
     />
   )
 }
-
-
-
-
-
-

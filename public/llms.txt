@@ -49,9 +49,3 @@ Climate River organizes news into six categories:
 
 - Built with Next.js, deployed on Vercel
 - Open source: https://github.com/dwahbe/climate-river
-
-
-
-
-
-
