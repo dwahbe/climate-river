@@ -33,7 +33,19 @@ gantt
     Rewrite (1min) :w1, 00, 1h
     Rewrite (1min) :w2, 03, 1h
     Rewrite (1min) :w3, 07, 1h
-    Rewrite (1min) :w4, 11, 13h
+    Rewrite (1min) :w4, 11, 1h
+    Rewrite (1min) :w5, 12, 1h
+    Rewrite (1min) :w6, 13, 1h
+    Rewrite (1min) :w7, 14, 1h
+    Rewrite (1min) :w8, 15, 1h
+    Rewrite (1min) :w9, 16, 1h
+    Rewrite (1min) :w10, 17, 1h
+    Rewrite (1min) :w11, 18, 1h
+    Rewrite (1min) :w12, 19, 1h
+    Rewrite (1min) :w13, 20, 1h
+    Rewrite (1min) :w14, 21, 1h
+    Rewrite (1min) :w15, 22, 1h
+    Rewrite (1min) :w16, 23, 1h
 ```
 
 | Cron        | Schedule                                      | Timeout | Purpose                                        |
