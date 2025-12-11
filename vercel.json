@@ -2,6 +2,7 @@
   "framework": "nextjs",
   "crons": [
     { "path": "/api/cron/refresh", "schedule": "0 12,16,18,22,0,4 * * *" },
-    { "path": "/api/cron/full", "schedule": "0 1,10,20 * * *" }
+    { "path": "/api/cron/full", "schedule": "0 1,10,20 * * *" },
+    { "path": "/api/cron/rewrite", "schedule": "0 0,3,7,11-23 * * *" }
   ]
 }

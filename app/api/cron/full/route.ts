@@ -32,10 +32,6 @@ export async function GET(req: Request) {
     1,
     Math.min(100, Number(url.searchParams.get('limit') || 60))
   )
-  const rewriteLimit = Math.max(
-    1,
-    Math.min(40, Number(url.searchParams.get('rewrite') || 20))
-  )
 
   try {
     console.log('🎯 Full cron job starting...')
@@ -79,7 +75,7 @@ export async function GET(req: Request) {
     })
     console.log(`✅ Rescore completed (${elapsed()}s):`, rescoreResult)
 
-    // 6) WEB DISCOVERY - Run BEFORE rewrite (higher priority than rewrites)
+    // 6) WEB DISCOVERY
     let webDiscoverResult: unknown = { skipped: 'timeout' }
     let prefetchDiscoveredResult: unknown = { skipped: 'not_run' }
 
@@ -115,21 +111,9 @@ export async function GET(req: Request) {
         webDiscoverResult = { error: msg, skipped: 'error' }
       }
     } else {
-      console.log(`⏭️  Skipping web discovery (${elapsed()}s elapsed, timeout risk)`)
-    }
-
-    // 7) Rewrite headlines - LAST (lowest priority, can be skipped)
-    let rewriteResult: unknown = { skipped: 'timeout' }
-
-    if (hasTime()) {
-      console.log(`✏️ Running rewrite (${elapsed()}s elapsed)...`)
-      rewriteResult = await safeRun(import('@/scripts/rewrite'), {
-        limit: rewriteLimit,
-        closePool: false,
-      })
-      console.log(`✅ Rewrite completed (${elapsed()}s):`, rewriteResult)
-    } else {
-      console.log(`⏭️  Skipping rewrite (${elapsed()}s elapsed, timeout risk)`)
+      console.log(
+        `⏭️  Skipping web discovery (${elapsed()}s elapsed, timeout risk)`
+      )
     }
 
     console.log(`🎯 Full cron job completed in ${elapsed()}s!`)
@@ -145,7 +129,6 @@ export async function GET(req: Request) {
         rescore: rescoreResult,
         webDiscover: webDiscoverResult,
         prefetchDiscovered: prefetchDiscoveredResult,
-        rewrite: rewriteResult,
       },
     })
   } catch (err: unknown) {

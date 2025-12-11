@@ -2,7 +2,7 @@
 // Quick refresh cron - runs 6×/day for fast content updates
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
-export const maxDuration = 180 // 3 minutes for refresh with rewrites
+export const maxDuration = 120 // 2 minutes for refresh
 
 import { NextResponse } from 'next/server'
 import { authorized, safeRun } from '@/lib/cron'
@@ -92,7 +92,8 @@ export async function GET(req: Request) {
         console.log('✅ Discovered prefetch completed')
       } catch (webError: unknown) {
         console.error('❌ Web discovery failed:', webError)
-        const message = webError instanceof Error ? webError.message : String(webError)
+        const message =
+          webError instanceof Error ? webError.message : String(webError)
         webDiscoverResult = {
           ok: false,
           error: message,
@@ -100,16 +101,10 @@ export async function GET(req: Request) {
         }
       }
     } else {
-      console.log(`⏭️  Skipping light web discovery (off-hours: ${currentHour} UTC)`)
+      console.log(
+        `⏭️  Skipping light web discovery (off-hours: ${currentHour} UTC)`
+      )
     }
-
-    // 7) Rewrite headlines - quick batch to keep headlines fresh
-    console.log('✏️  Running headline rewrite...')
-    const rewriteResult = await safeRun(import('@/scripts/rewrite'), {
-      limit: 15, // Small batch for quick refresh
-      closePool: false,
-    })
-    console.log('✅ Rewrite completed:', rewriteResult)
 
     console.log('🔄 Refresh cron job completed!')
 
@@ -123,7 +118,6 @@ export async function GET(req: Request) {
         rescore: rescoreResult,
         webDiscover: webDiscoverResult,
         prefetchDiscovered: prefetchDiscoveredResult,
-        rewrite: rewriteResult,
       },
     })
   } catch (err: unknown) {
@@ -133,4 +127,3 @@ export async function GET(req: Request) {
 }
 
 export const POST = GET
-
