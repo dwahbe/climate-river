@@ -1,87 +1,87 @@
-import Link from 'next/link'
-import { Sparkles } from 'lucide-react'
-import LocalTime from '@/components/LocalTime'
-import PublisherLink from '@/components/PublisherLink'
-import SourceTooltip from '@/components/SourceTooltip'
-import ReadNowButton from '@/components/ReadNowButton'
-import type { Cluster, ClusterArticle } from '@/lib/models/cluster'
+import Link from "next/link";
+import { Sparkles } from "lucide-react";
+import LocalTime from "@/components/LocalTime";
+import PublisherLink from "@/components/PublisherLink";
+import SourceTooltip from "@/components/SourceTooltip";
+import ReadNowButton from "@/components/ReadNowButton";
+import type { Cluster, ClusterArticle } from "@/lib/models/cluster";
 
 function hostFrom(url: string) {
   try {
-    return new URL(url).hostname.replace(/^www\./, '')
+    return new URL(url).hostname.replace(/^www\./, "");
   } catch {
-    return ''
+    return "";
   }
 }
 
 type ArticleIndexEntry = {
-  key: string
-  normalizedKey: string
-  articles: ClusterArticle[]
-}
+  key: string;
+  normalizedKey: string;
+  articles: ClusterArticle[];
+};
 
 function normalizeSourceKey(value?: string | null) {
   return value
     ? value
         .trim()
         .toLowerCase()
-        .replace(/^https?:\/\//, '')
-        .replace(/^www\./, '')
-    : ''
+        .replace(/^https?:\/\//, "")
+        .replace(/^www\./, "")
+    : "";
 }
 
 function buildArticleIndex(
-  allArticles?: Record<string, ClusterArticle[]> | null
+  allArticles?: Record<string, ClusterArticle[]> | null,
 ): Map<string, ArticleIndexEntry> {
-  const index = new Map<string, ArticleIndexEntry>()
+  const index = new Map<string, ArticleIndexEntry>();
 
   if (!allArticles) {
-    return index
+    return index;
   }
 
   for (const [key, articles] of Object.entries(allArticles)) {
-    const normalizedKey = normalizeSourceKey(key)
+    const normalizedKey = normalizeSourceKey(key);
 
     if (!normalizedKey) {
-      continue
+      continue;
     }
 
     index.set(normalizedKey, {
       key,
       normalizedKey,
       articles,
-    })
+    });
   }
 
-  return index
+  return index;
 }
 
 function findArticlesForSource(
   index: Map<string, ArticleIndexEntry>,
   sourceName: string,
-  url: string
+  url: string,
 ) {
-  const candidates = [sourceName, hostFrom(url)].filter(Boolean) as string[]
+  const candidates = [sourceName, hostFrom(url)].filter(Boolean) as string[];
 
   for (const candidate of candidates) {
-    const normalized = normalizeSourceKey(candidate)
+    const normalized = normalizeSourceKey(candidate);
 
     if (!normalized) {
-      continue
+      continue;
     }
 
-    const exact = index.get(normalized)
+    const exact = index.get(normalized);
 
     if (exact) {
-      return exact.articles
+      return exact.articles;
     }
   }
 
   for (const candidate of candidates) {
-    const normalized = normalizeSourceKey(candidate)
+    const normalized = normalizeSourceKey(candidate);
 
     if (!normalized) {
-      continue
+      continue;
     }
 
     for (const entry of index.values()) {
@@ -89,28 +89,32 @@ function findArticlesForSource(
         entry.normalizedKey.includes(normalized) ||
         normalized.includes(entry.normalizedKey)
       ) {
-        return entry.articles
+        return entry.articles;
       }
     }
   }
 
-  return []
+  return [];
 }
 
-export default function RiverClusterList({ clusters }: { clusters: Cluster[] }) {
+export default function RiverClusterList({
+  clusters,
+}: {
+  clusters: Cluster[];
+}) {
   return (
     <section>
       {clusters.map((cluster) => {
-        const secondaries = cluster.subs ?? []
-        const isCluster = cluster.size > 1
-        const publisher = cluster.lead_source || hostFrom(cluster.lead_url)
+        const secondaries = cluster.subs ?? [];
+        const isCluster = cluster.size > 1;
+        const publisher = cluster.lead_source || hostFrom(cluster.lead_url);
         const leadClickHref = `/api/click?aid=${cluster.lead_article_id}&url=${encodeURIComponent(
-          cluster.lead_url
-        )}`
-        const articleIndex = buildArticleIndex(cluster.all_articles_by_source)
+          cluster.lead_url,
+        )}`;
+        const articleIndex = buildArticleIndex(cluster.all_articles_by_source);
         const leadArticles = publisher
           ? findArticlesForSource(articleIndex, publisher, cluster.lead_url)
-          : []
+          : [];
 
         return (
           <article
@@ -126,10 +130,7 @@ export default function RiverClusterList({ clusters }: { clusters: Cluster[] }) 
                   {cluster.lead_author && publisher && (
                     <span className="text-zinc-400">•</span>
                   )}
-                  <SourceTooltip
-                    sourceName={publisher}
-                    articles={leadArticles}
-                  >
+                  <SourceTooltip sourceName={publisher} articles={leadArticles}>
                     {cluster.lead_homepage ? (
                       <PublisherLink
                         href={cluster.lead_homepage}
@@ -194,21 +195,23 @@ export default function RiverClusterList({ clusters }: { clusters: Cluster[] }) 
                 <span> </span>
                 {secondaries.map((subLink, index) => {
                   const href = `/api/click?aid=${subLink.article_id}&url=${encodeURIComponent(
-                    subLink.url
-                  )}`
-                  const sourceName = subLink.source || hostFrom(subLink.url)
+                    subLink.url,
+                  )}`;
+                  const sourceName = subLink.source || hostFrom(subLink.url);
                   const articlesForSource = findArticlesForSource(
                     articleIndex,
                     sourceName,
-                    subLink.url
-                  )
+                    subLink.url,
+                  );
                   const articleCount =
                     subLink.article_count ??
-                    (articlesForSource.length > 0 ? articlesForSource.length : 1)
+                    (articlesForSource.length > 0
+                      ? articlesForSource.length
+                      : 1);
                   const linkLabel =
                     articleCount > 1
                       ? `${sourceName} (${articleCount})`
-                      : sourceName
+                      : sourceName;
                   return (
                     <span key={subLink.article_id}>
                       <SourceTooltip
@@ -226,13 +229,13 @@ export default function RiverClusterList({ clusters }: { clusters: Cluster[] }) 
                         <span className="text-zinc-400">, </span>
                       )}
                     </span>
-                  )
+                  );
                 })}
               </div>
             )}
           </article>
-        )
+        );
       })}
     </section>
-  )
+  );
 }

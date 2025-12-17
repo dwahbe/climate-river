@@ -1,41 +1,41 @@
-'use client'
+"use client";
 
-import { useState } from 'react'
-import ReaderView from './ReaderView'
+import { useState } from "react";
+import ReaderView from "./ReaderView";
 
 type ReadNowButtonProps = {
-  articleId: number
-  articleTitle: string
-  articleUrl: string
-  disabled?: boolean
-  contentStatus?: string | null
-  contentWordCount?: number | null
-}
+  articleId: number;
+  articleTitle: string;
+  articleUrl: string;
+  disabled?: boolean;
+  contentStatus?: string | null;
+  contentWordCount?: number | null;
+};
 
 /**
  * Known paywall/difficult sites where reader mode typically fails
  */
 const KNOWN_PAYWALL_DOMAINS = [
-  'nytimes.com',
-  'wsj.com',
-  'ft.com',
-  'economist.com',
-  'bloomberg.com',
-  'washingtonpost.com',
-  'newyorker.com',
-  'theathletic.com',
-  'foreignpolicy.com',
-]
+  "nytimes.com",
+  "wsj.com",
+  "ft.com",
+  "economist.com",
+  "bloomberg.com",
+  "washingtonpost.com",
+  "newyorker.com",
+  "theathletic.com",
+  "foreignpolicy.com",
+];
 
 /**
  * Check if URL is from a known paywall site
  */
 function isKnownPaywall(url: string): boolean {
   try {
-    const hostname = new URL(url).hostname.toLowerCase()
-    return KNOWN_PAYWALL_DOMAINS.some((domain) => hostname.includes(domain))
+    const hostname = new URL(url).hostname.toLowerCase();
+    return KNOWN_PAYWALL_DOMAINS.some((domain) => hostname.includes(domain));
   } catch {
-    return false
+    return false;
   }
 }
 
@@ -46,32 +46,32 @@ function isKnownPaywall(url: string): boolean {
 function shouldShowReaderButton(
   articleUrl: string,
   contentStatus: string | null | undefined,
-  contentWordCount: number | null | undefined
+  contentWordCount: number | null | undefined,
 ): boolean {
   // Hide button for known paywall sites (don't even try)
   if (isKnownPaywall(articleUrl)) {
-    return false
+    return false;
   }
 
   // If we haven't tried fetching yet, show the button
-  if (!contentStatus) return true
+  if (!contentStatus) return true;
 
   // Hide button for known failure states
-  if (['paywall', 'blocked', 'timeout', 'error'].includes(contentStatus)) {
-    return false
+  if (["paywall", "blocked", "timeout", "error"].includes(contentStatus)) {
+    return false;
   }
 
   // Hide button if content is too short (< 100 words)
   // This catches cases like Financial Times where we get minimal HTML
   if (
-    contentStatus === 'success' &&
+    contentStatus === "success" &&
     contentWordCount &&
     contentWordCount < 100
   ) {
-    return false
+    return false;
   }
 
-  return true
+  return true;
 }
 
 export default function ReadNowButton({
@@ -82,17 +82,17 @@ export default function ReadNowButton({
   contentStatus,
   contentWordCount,
 }: ReadNowButtonProps) {
-  const [isOpen, setIsOpen] = useState(false)
+  const [isOpen, setIsOpen] = useState(false);
 
   // Don't render the button if content is unavailable
   if (!shouldShowReaderButton(articleUrl, contentStatus, contentWordCount)) {
-    return null
+    return null;
   }
 
   const handleClick = () => {
     // Open drawer immediately so loading state is visible while content fetches
-    setIsOpen(true)
-  }
+    setIsOpen(true);
+  };
 
   return (
     <>
@@ -113,5 +113,5 @@ export default function ReadNowButton({
         onClose={() => setIsOpen(false)}
       />
     </>
-  )
+  );
 }

@@ -1,26 +1,26 @@
-'use client'
+"use client";
 
-import { useState, useEffect } from 'react'
-import Image from 'next/image'
-import { Drawer } from 'vaul'
-import { X } from 'lucide-react'
+import { useState, useEffect } from "react";
+import Image from "next/image";
+import { Drawer } from "vaul";
+import { X } from "lucide-react";
 
 type ReaderViewProps = {
-  articleId: number
-  articleTitle: string
-  articleUrl: string
-  isOpen: boolean
-  onClose: () => void
-}
+  articleId: number;
+  articleTitle: string;
+  articleUrl: string;
+  isOpen: boolean;
+  onClose: () => void;
+};
 
 type ReaderData = {
-  content: string
-  title: string
-  author?: string
-  wordCount: number
-  publishedAt?: string
-  image?: string
-}
+  content: string;
+  title: string;
+  author?: string;
+  wordCount: number;
+  publishedAt?: string;
+  image?: string;
+};
 
 export default function ReaderView({
   articleId,
@@ -29,68 +29,68 @@ export default function ReaderView({
   isOpen,
   onClose,
 }: ReaderViewProps) {
-  const [data, setData] = useState<ReaderData | null>(null)
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [isMobile, setIsMobile] = useState(false)
+  const [data, setData] = useState<ReaderData | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [isMobile, setIsMobile] = useState(false);
 
   // Detect mobile on mount
   useEffect(() => {
-    const checkMobile = () => setIsMobile(window.innerWidth < 768)
-    checkMobile()
-    window.addEventListener('resize', checkMobile)
-    return () => window.removeEventListener('resize', checkMobile)
-  }, [])
+    const checkMobile = () => setIsMobile(window.innerWidth < 768);
+    checkMobile();
+    window.addEventListener("resize", checkMobile);
+    return () => window.removeEventListener("resize", checkMobile);
+  }, []);
 
   // Calculate read time (roughly 200 words per minute)
   const readTimeMinutes = data?.wordCount
     ? Math.ceil(data.wordCount / 200)
-    : null
+    : null;
 
   useEffect(() => {
-    if (!isOpen || data) return
+    if (!isOpen || data) return;
 
     const fetchContent = async () => {
-      setLoading(true)
-      setError(null)
+      setLoading(true);
+      setError(null);
 
       try {
-        const res = await fetch(`/api/reader/${articleId}`)
-        const json = await res.json()
+        const res = await fetch(`/api/reader/${articleId}`);
+        const json = await res.json();
 
         if (!res.ok) {
-          if (json.status === 'paywall') {
-            setError('This article requires a subscription')
-          } else if (json.status === 'blocked') {
-            setError('Publisher blocked reader mode')
-          } else if (json.status === 'timeout') {
-            setError('Article took too long to load')
+          if (json.status === "paywall") {
+            setError("This article requires a subscription");
+          } else if (json.status === "blocked") {
+            setError("Publisher blocked reader mode");
+          } else if (json.status === "timeout") {
+            setError("Article took too long to load");
           } else {
-            setError('Could not load article')
+            setError("Could not load article");
           }
-          return
+          return;
         }
 
-        setData(json.data)
+        setData(json.data);
       } catch (err) {
-        setError('Failed to fetch article')
-        console.error('Reader view error:', err)
+        setError("Failed to fetch article");
+        console.error("Reader view error:", err);
       } finally {
-        setLoading(false)
+        setLoading(false);
       }
-    }
+    };
 
-    fetchContent()
-  }, [isOpen, articleId, data])
+    fetchContent();
+  }, [isOpen, articleId, data]);
 
   const handleClose = () => {
-    onClose()
+    onClose();
     // Reset state when closing
     setTimeout(() => {
-      setData(null)
-      setError(null)
-    }, 300)
-  }
+      setData(null);
+      setError(null);
+    }, 300);
+  };
 
   // Shared content component
   const ReaderContent = () => (
@@ -130,27 +130,27 @@ export default function ReaderView({
             </figure>
           )}
           <article
-            className={`prose prose-zinc max-w-none ${isMobile ? '' : 'prose-lg'}`}
+            className={`prose prose-zinc max-w-none ${isMobile ? "" : "prose-lg"}`}
             dangerouslySetInnerHTML={{ __html: data.content }}
           />
         </>
       )}
     </>
-  )
+  );
 
   return (
     <Drawer.Root
       open={isOpen}
       onOpenChange={handleClose}
-      direction={isMobile ? 'bottom' : 'right'}
+      direction={isMobile ? "bottom" : "right"}
     >
       <Drawer.Portal>
         <Drawer.Overlay className="fixed inset-0 bg-black/40 z-40" />
         <Drawer.Content
           className={
             isMobile
-              ? 'bg-white flex flex-col rounded-t-[10px] h-[90%] mt-24 fixed bottom-0 left-0 right-0 z-50 overflow-hidden'
-              : 'bg-white rounded-l-[16px] overflow-hidden bg-clip-padding right-0 top-0 bottom-0 fixed z-50 outline-none w-[45%] flex shadow-2xl'
+              ? "bg-white flex flex-col rounded-t-[10px] h-[90%] mt-24 fixed bottom-0 left-0 right-0 z-50 overflow-hidden"
+              : "bg-white rounded-l-[16px] overflow-hidden bg-clip-padding right-0 top-0 bottom-0 fixed z-50 outline-none w-[45%] flex shadow-2xl"
           }
         >
           <div className="h-full w-full flex flex-col relative">
@@ -161,7 +161,7 @@ export default function ReaderView({
 
             {/* Header */}
             <div
-              className={`flex items-start justify-between gap-4 ${isMobile ? 'px-4 pb-4 -mt-2' : 'p-6'} border-b border-zinc-200 bg-zinc-50/50`}
+              className={`flex items-start justify-between gap-4 ${isMobile ? "px-4 pb-4 -mt-2" : "p-6"} border-b border-zinc-200 bg-zinc-50/50`}
             >
               <div className="flex-1 min-w-0">
                 <Drawer.Title className="text-lg font-semibold text-zinc-900 mb-2 line-clamp-2">
@@ -195,7 +195,7 @@ export default function ReaderView({
 
             {/* Content */}
             <div
-              className={`flex-1 overflow-y-auto ${isMobile ? 'px-4 py-6' : 'px-6 py-8'}`}
+              className={`flex-1 overflow-y-auto ${isMobile ? "px-4 py-6" : "px-6 py-8"}`}
             >
               <ReaderContent />
             </div>
@@ -203,5 +203,5 @@ export default function ReaderView({
         </Drawer.Content>
       </Drawer.Portal>
     </Drawer.Root>
-  )
+  );
 }
