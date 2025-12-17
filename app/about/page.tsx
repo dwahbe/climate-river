@@ -1,27 +1,27 @@
 // app/about/page.tsx
-import type { Metadata } from 'next'
+import type { Metadata } from "next";
 
-export const dynamic = 'force-static'
+export const dynamic = "force-static";
 
 export const metadata: Metadata = {
-  title: 'About',
+  title: "About",
   description:
-    'Learn about Climate River, a climate news aggregator that brings focus to the latest climate news by organizing articles from leading outlets and ranking for trust and timeliness. Inspired by Techmeme.',
+    "Learn about Climate River, a climate news aggregator that brings focus to the latest climate news by organizing articles from leading outlets and ranking for trust and timeliness. Inspired by Techmeme.",
   openGraph: {
-    title: 'About Climate River',
+    title: "About Climate River",
     description:
-      'Learn about Climate River, a climate news aggregator that brings focus to the latest climate news by organizing articles from leading outlets.',
-    url: 'https://climateriver.org/about',
+      "Learn about Climate River, a climate news aggregator that brings focus to the latest climate news by organizing articles from leading outlets.",
+    url: "https://climateriver.org/about",
   },
   twitter: {
-    title: 'About Climate River',
+    title: "About Climate River",
     description:
-      'Learn about Climate River, a climate news aggregator that brings focus to the latest climate news.',
+      "Learn about Climate River, a climate news aggregator that brings focus to the latest climate news.",
   },
   alternates: {
-    canonical: 'https://climateriver.org/about',
+    canonical: "https://climateriver.org/about",
   },
-}
+};
 
 export default function AboutPage() {
   return (
@@ -43,7 +43,7 @@ export default function AboutPage() {
       </p>
       <hr className="my-4 border-zinc-200" />
       <p className="mt-3 text-zinc-700 text-pretty">
-        Built with Next.js, Tailwind, and Postgres.{' '}
+        Built with Next.js, Tailwind, and Postgres.{" "}
         <a
           href="https://github.com/dwahbe/climate-river"
           target="_blank"
@@ -52,7 +52,7 @@ export default function AboutPage() {
         >
           Code&nbsp;available on GitHub
         </a>
-        . Inspired by{' '}
+        . Inspired by{" "}
         <a
           href="https://techmeme.com"
           target="_blank"
@@ -65,7 +65,7 @@ export default function AboutPage() {
       </p>
 
       <p className="mt-3 text-zinc-700 text-pretty">
-        Created by{' '}
+        Created by{" "}
         <a
           href="https://dylanwahbe.com"
           target="_blank"
@@ -77,5 +77,5 @@ export default function AboutPage() {
         .
       </p>
     </div>
-  )
+  );
 }
