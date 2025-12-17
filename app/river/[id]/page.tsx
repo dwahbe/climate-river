@@ -1,24 +1,24 @@
-import Link from 'next/link'
-import * as DB from '@/lib/db'
-import LocalTime from '@/components/LocalTime'
-import ArticleStructuredData from '@/components/ArticleStructuredData'
-import type { Metadata } from 'next'
+import Link from "next/link";
+import * as DB from "@/lib/db";
+import LocalTime from "@/components/LocalTime";
+import ArticleStructuredData from "@/components/ArticleStructuredData";
+import type { Metadata } from "next";
 
 // Cache for 5 minutes (300 seconds)
-export const revalidate = 300
-export const runtime = 'nodejs'
+export const revalidate = 300;
+export const runtime = "nodejs";
 
 export async function generateMetadata(props: {
-  params: Promise<{ id: string }>
+  params: Promise<{ id: string }>;
 }): Promise<Metadata> {
-  const params = await props.params
-  const cid = Number(params.id)
+  const params = await props.params;
+  const cid = Number(params.id);
 
   const { rows } = await DB.query<{
-    lead_title: string
-    lead_dek: string | null
-    lead_source: string | null
-    size: number
+    lead_title: string;
+    lead_dek: string | null;
+    lead_source: string | null;
+    size: number;
   }>(
     `
     SELECT
@@ -32,28 +32,28 @@ export async function generateMetadata(props: {
     WHERE cs.cluster_id = $1::bigint
     LIMIT 1
     `,
-    [cid]
-  )
+    [cid],
+  );
 
-  const cluster = rows[0]
+  const cluster = rows[0];
   if (!cluster) {
     return {
-      title: 'Story Not Found',
-      description: 'This climate news story could not be found.',
+      title: "Story Not Found",
+      description: "This climate news story could not be found.",
       robots: {
         index: false,
         follow: false,
       },
-    }
+    };
   }
 
-  const title = cluster.lead_title
+  const title = cluster.lead_title;
 
   // Create SEO-optimized description that emphasizes aggregation and sources
   const description =
     cluster.size > 1
-      ? `Coverage of "${cluster.lead_title}" from ${cluster.size} trusted climate news sources. Compare reporting from ${cluster.lead_source || 'leading outlets'} and more on Climate River.`
-      : `Latest reporting on "${cluster.lead_title}" from ${cluster.lead_source || 'trusted climate news sources'}. Part of Climate River's curated climate news coverage.`
+      ? `Coverage of "${cluster.lead_title}" from ${cluster.size} trusted climate news sources. Compare reporting from ${cluster.lead_source || "leading outlets"} and more on Climate River.`
+      : `Latest reporting on "${cluster.lead_title}" from ${cluster.lead_source || "trusted climate news sources"}. Part of Climate River's curated climate news coverage.`;
 
   // SEO Strategy: NOINDEX all story pages
   // Climate River should rank for aggregation/discovery terms, not individual stories
@@ -66,12 +66,12 @@ export async function generateMetadata(props: {
       title: `${title} - Climate River`,
       description,
       url: `https://climateriver.org/river/${cid}`,
-      type: 'article',
+      type: "article",
     },
     twitter: {
       title: `${title} - Climate River`,
       description,
-      card: 'summary_large_image',
+      card: "summary_large_image",
     },
     alternates: {
       canonical: `https://climateriver.org/river/${cid}`,
@@ -84,46 +84,46 @@ export async function generateMetadata(props: {
         follow: true,
       },
     },
-  }
+  };
 }
 
 type Sub = {
-  article_id: number
-  title: string
-  url: string
-  source: string | null
-  author: string | null
-  published_at: string
-}
+  article_id: number;
+  title: string;
+  url: string;
+  source: string | null;
+  author: string | null;
+  published_at: string;
+};
 
 type ClusterRow = {
-  cluster_id: number
-  size: number
-  sources_count: number
-  lead_article_id: number
-  lead_title: string
-  lead_url: string
-  lead_dek: string | null
-  lead_source: string | null
-  lead_homepage: string | null
-  lead_author: string | null
-  published_at: string
-  subs: Sub[]
-}
+  cluster_id: number;
+  size: number;
+  sources_count: number;
+  lead_article_id: number;
+  lead_title: string;
+  lead_url: string;
+  lead_dek: string | null;
+  lead_source: string | null;
+  lead_homepage: string | null;
+  lead_author: string | null;
+  published_at: string;
+  subs: Sub[];
+};
 
 function hostFrom(url: string) {
   try {
-    return new URL(url).hostname.replace(/^www\./, '')
+    return new URL(url).hostname.replace(/^www\./, "");
   } catch {
-    return ''
+    return "";
   }
 }
 
 export default async function ClusterPage(props: {
-  params: Promise<{ id: string }>
+  params: Promise<{ id: string }>;
 }) {
-  const params = await props.params
-  const cid = Number(params.id)
+  const params = await props.params;
+  const cid = Number(params.id);
 
   const { rows } = await DB.query<ClusterRow>(
     `
@@ -228,10 +228,10 @@ export default async function ClusterPage(props: {
       ) AS subs
     FROM lead l
     `,
-    [cid]
-  )
+    [cid],
+  );
 
-  const r = rows[0]
+  const r = rows[0];
   if (!r) {
     return (
       <div className="mx-auto max-w-3xl px-4 sm:px-6 py-10 text-zinc-600">
@@ -240,12 +240,12 @@ export default async function ClusterPage(props: {
         </Link>
         <p className="mt-6">Cluster not found.</p>
       </div>
-    )
+    );
   }
 
   const leadClickHref = `/api/click?aid=${r.lead_article_id}&url=${encodeURIComponent(
-    r.lead_url
-  )}`
+    r.lead_url,
+  )}`;
 
   return (
     <>
@@ -254,7 +254,7 @@ export default async function ClusterPage(props: {
         description={r.lead_dek || undefined}
         datePublished={r.published_at}
         author={r.lead_author || undefined}
-        publisher={r.lead_source || 'Climate River'}
+        publisher={r.lead_source || "Climate River"}
         url={`https://climateriver.org/river/${cid}`}
       />
       <div className="mx-auto max-w-3xl px-4 sm:px-6 py-3">
@@ -264,7 +264,7 @@ export default async function ClusterPage(props: {
             ← Back to river
           </Link>
           <span>
-            {r.size} {r.size === 1 ? 'article' : 'articles'}
+            {r.size} {r.size === 1 ? "article" : "articles"}
           </span>
         </div>
 
@@ -303,8 +303,8 @@ export default async function ClusterPage(props: {
             <ul className="flex flex-col gap-4 list-none">
               {r.subs.map((s) => {
                 const href = `/api/click?aid=${s.article_id}&url=${encodeURIComponent(
-                  s.url
-                )}`
+                  s.url,
+                )}`;
                 return (
                   <li key={s.article_id}>
                     <div className="text-xs text-zinc-500 mb-1">
@@ -317,12 +317,12 @@ export default async function ClusterPage(props: {
                       {s.title}
                     </a>
                   </li>
-                )
+                );
               })}
             </ul>
           </section>
         )}
       </div>
     </>
-  )
+  );
 }

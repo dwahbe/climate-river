@@ -1,12 +1,12 @@
 interface ArticleStructuredDataProps {
-  headline: string
-  description?: string
-  datePublished: string
-  author?: string
-  publisher: string
-  publisherUrl?: string
-  url: string
-  articleCount?: number
+  headline: string;
+  description?: string;
+  datePublished: string;
+  author?: string;
+  publisher: string;
+  publisherUrl?: string;
+  url: string;
+  articleCount?: number;
 }
 
 /**
@@ -26,49 +26,49 @@ export default function ArticleStructuredData({
 }: ArticleStructuredDataProps) {
   // Build mainEntity, only including author if present
   const mainEntity: Record<string, unknown> = {
-    '@type': 'NewsArticle',
+    "@type": "NewsArticle",
     headline,
     publisher: {
-      '@type': 'Organization',
+      "@type": "Organization",
       name: publisher,
       ...(publisherUrl && { url: publisherUrl }),
     },
     datePublished,
-  }
+  };
 
   if (author) {
     mainEntity.author = {
-      '@type': 'Person',
+      "@type": "Person",
       name: author,
-    }
+    };
   }
 
   const structuredData = {
-    '@context': 'https://schema.org',
-    '@type': 'CollectionPage',
+    "@context": "https://schema.org",
+    "@type": "CollectionPage",
     name: headline,
     description:
       description ||
-      `Climate news coverage: ${headline}. Aggregated from ${articleCount || 'multiple'} sources.`,
+      `Climate news coverage: ${headline}. Aggregated from ${articleCount || "multiple"} sources.`,
     datePublished,
     dateModified: datePublished,
     url,
     isPartOf: {
-      '@type': 'WebSite',
-      name: 'Climate River',
-      url: 'https://climateriver.org',
+      "@type": "WebSite",
+      name: "Climate River",
+      url: "https://climateriver.org",
     },
     about: {
-      '@type': 'Thing',
+      "@type": "Thing",
       name: headline,
     },
     mainEntity,
-  }
+  };
 
   return (
     <script
       type="application/ld+json"
       dangerouslySetInnerHTML={{ __html: JSON.stringify(structuredData) }}
     />
-  )
+  );
 }
