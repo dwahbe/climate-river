@@ -75,6 +75,22 @@ export async function GET(req: Request) {
     })
     console.log(`✅ Rescore completed (${elapsed()}s):`, rescoreResult)
 
+    // 5b) Cluster maintenance - fix orphaned articles and merge similar clusters
+    let clusterMaintenanceResult: unknown = { skipped: 'timeout' }
+    if (hasTime()) {
+      console.log('🔧 Running cluster maintenance...')
+      clusterMaintenanceResult = await safeRun(
+        import('@/scripts/cluster-maintenance'),
+        {
+          closePool: false,
+        }
+      )
+      console.log(
+        `✅ Cluster maintenance completed (${elapsed()}s):`,
+        clusterMaintenanceResult
+      )
+    }
+
     // 6) WEB DISCOVERY
     let webDiscoverResult: unknown = { skipped: 'timeout' }
     let prefetchDiscoveredResult: unknown = { skipped: 'not_run' }
@@ -127,6 +143,7 @@ export async function GET(req: Request) {
         categorize: categorizeResult,
         prefetch: prefetchResult,
         rescore: rescoreResult,
+        clusterMaintenance: clusterMaintenanceResult,
         webDiscover: webDiscoverResult,
         prefetchDiscovered: prefetchDiscoveredResult,
       },

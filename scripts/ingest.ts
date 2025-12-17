@@ -569,6 +569,21 @@ async function ensureSemanticClusterForArticle(
       [articleId, clusterId]
     )
 
+    // Also add any unclustered similar articles to this cluster (retroactive clustering)
+    const unclusteredSimilar = similarArticles.rows.filter(
+      (a) => !a.cluster_id && a.similarity >= 0.6
+    )
+    for (const unclustered of unclusteredSimilar) {
+      await query(
+        `INSERT INTO article_clusters (article_id, cluster_id)
+         VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+        [unclustered.article_id, clusterId]
+      )
+      console.log(
+        `  ↳ Added unclustered article ${unclustered.article_id} to cluster ${clusterId} (similarity: ${unclustered.similarity.toFixed(3)})`
+      )
+    }
+
     // Update cluster_scores to potentially select a better lead article
     await updateClusterScore(clusterId)
     return
