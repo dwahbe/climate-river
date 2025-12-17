@@ -1,33 +1,33 @@
-import Link from 'next/link'
-import { notFound } from 'next/navigation'
-import RiverClusterList from '@/components/RiverClusterList'
-import { getRiverData } from '@/lib/services/riverService'
-import { getCategoryBySlug, CATEGORIES } from '@/lib/tagger'
-import { CategoryIcon } from '@/components/categoryIcons'
-import BreadcrumbStructuredData from '@/components/BreadcrumbStructuredData'
-import type { Metadata } from 'next'
+import Link from "next/link";
+import { notFound } from "next/navigation";
+import RiverClusterList from "@/components/RiverClusterList";
+import { getRiverData } from "@/lib/services/riverService";
+import { getCategoryBySlug, CATEGORIES } from "@/lib/tagger";
+import { CategoryIcon } from "@/components/categoryIcons";
+import BreadcrumbStructuredData from "@/components/BreadcrumbStructuredData";
+import type { Metadata } from "next";
 
-export const revalidate = 300
-export const runtime = 'nodejs'
+export const revalidate = 300;
+export const runtime = "nodejs";
 
 export async function generateStaticParams() {
   return CATEGORIES.map((category) => ({
     slug: category.slug,
-  }))
+  }));
 }
 
 export async function generateMetadata(props: {
-  params: Promise<{ slug: string }>
+  params: Promise<{ slug: string }>;
 }): Promise<Metadata> {
-  const params = await props.params
-  const category = getCategoryBySlug(params.slug)
+  const params = await props.params;
+  const category = getCategoryBySlug(params.slug);
 
   if (!category) {
-    return {}
+    return {};
   }
 
-  const title = `${category.name} Climate News`
-  const description = `${category.description}. Stay updated with the latest ${category.name.toLowerCase()} news and developments in climate change.`
+  const title = `${category.name} Climate News`;
+  const description = `${category.description}. Stay updated with the latest ${category.name.toLowerCase()} news and developments in climate change.`;
 
   return {
     title,
@@ -44,30 +44,30 @@ export async function generateMetadata(props: {
     alternates: {
       canonical: `https://climateriver.org/categories/${category.slug}`,
     },
-  }
+  };
 }
 
 export default async function CategoryDetailPage(props: {
-  params: Promise<{ slug: string }>
+  params: Promise<{ slug: string }>;
 }) {
-  const params = await props.params
-  const category = getCategoryBySlug(params.slug)
+  const params = await props.params;
+  const category = getCategoryBySlug(params.slug);
 
   if (!category) {
-    notFound()
+    notFound();
   }
 
   const clusters = await getRiverData({
-    view: 'top',
+    view: "top",
     category: category.slug,
-  })
+  });
 
   return (
     <>
       <BreadcrumbStructuredData
         items={[
-          { name: 'Home', url: 'https://climateriver.org' },
-          { name: 'Categories', url: 'https://climateriver.org/categories' },
+          { name: "Home", url: "https://climateriver.org" },
+          { name: "Categories", url: "https://climateriver.org/categories" },
           {
             name: category.name,
             url: `https://climateriver.org/categories/${category.slug}`,
@@ -92,5 +92,5 @@ export default async function CategoryDetailPage(props: {
         <RiverClusterList clusters={clusters} />
       </div>
     </>
-  )
+  );
 }

@@ -1,25 +1,25 @@
-import { getRiverData } from '@/lib/services/riverService'
+import { getRiverData } from "@/lib/services/riverService";
 
-export const revalidate = 300 // Cache for 5 minutes
+export const revalidate = 300; // Cache for 5 minutes
 
 export async function GET() {
-  const baseUrl = 'https://climateriver.org'
-  const now = new Date().toUTCString()
+  const baseUrl = "https://climateriver.org";
+  const now = new Date().toUTCString();
 
-  let rssItems = ''
+  let rssItems = "";
 
   try {
     const clusters = await getRiverData({
-      view: 'top',
+      view: "top",
       limit: 30,
-    })
+    });
 
     rssItems = clusters
       .map((cluster) => {
-        const pubDate = new Date(cluster.published_at).toUTCString()
+        const pubDate = new Date(cluster.published_at).toUTCString();
         const description = cluster.lead_dek
           ? escapeXml(cluster.lead_dek)
-          : `Coverage from ${cluster.sources_count} source${cluster.sources_count === 1 ? '' : 's'}`
+          : `Coverage from ${cluster.sources_count} source${cluster.sources_count === 1 ? "" : "s"}`;
 
         return `    <item>
       <title>${escapeXml(cluster.lead_title)}</title>
@@ -27,12 +27,12 @@ export async function GET() {
       <guid isPermaLink="true">${baseUrl}/river/${cluster.cluster_id}</guid>
       <pubDate>${pubDate}</pubDate>
       <description>${description}</description>
-      <source url="${escapeXml(cluster.lead_homepage || cluster.lead_url)}">${escapeXml(cluster.lead_source || 'Unknown')}</source>
-    </item>`
+      <source url="${escapeXml(cluster.lead_homepage || cluster.lead_url)}">${escapeXml(cluster.lead_source || "Unknown")}</source>
+    </item>`;
       })
-      .join('\n')
+      .join("\n");
   } catch (error) {
-    console.error('Error generating RSS feed:', error)
+    console.error("Error generating RSS feed:", error);
     // Return empty feed on error rather than failing
   }
 
@@ -53,22 +53,21 @@ export async function GET() {
     </image>
 ${rssItems}
   </channel>
-</rss>`
+</rss>`;
 
   return new Response(rss, {
     headers: {
-      'Content-Type': 'application/rss+xml; charset=utf-8',
-      'Cache-Control': 'public, max-age=300, s-maxage=300',
+      "Content-Type": "application/rss+xml; charset=utf-8",
+      "Cache-Control": "public, max-age=300, s-maxage=300",
     },
-  })
+  });
 }
 
 function escapeXml(unsafe: string): string {
   return unsafe
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&apos;')
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;");
 }
-

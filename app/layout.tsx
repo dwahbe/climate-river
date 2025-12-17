@@ -1,69 +1,69 @@
-import './global.css'
-import Link from 'next/link'
-import { Analytics } from '@vercel/analytics/react'
-import LastUpdated from '@/components/LastUpdated'
-import HeaderLogoHover from '@/components/HeaderLogoHover'
-import OrganizationStructuredData from '@/components/OrganizationStructuredData'
-import { Inclusive_Sans } from 'next/font/google'
+import "./global.css";
+import Link from "next/link";
+import { Analytics } from "@vercel/analytics/react";
+import LastUpdated from "@/components/LastUpdated";
+import HeaderLogoHover from "@/components/HeaderLogoHover";
+import OrganizationStructuredData from "@/components/OrganizationStructuredData";
+import { Inclusive_Sans } from "next/font/google";
 
 const inclusive = Inclusive_Sans({
-  subsets: ['latin'],
-  weight: ['400'],
-  variable: '--font-inclusive',
-  display: 'swap',
-})
+  subsets: ["latin"],
+  weight: ["400"],
+  variable: "--font-inclusive",
+  display: "swap",
+});
 
 export const metadata = {
-  metadataBase: new URL('https://climateriver.org'),
+  metadataBase: new URL("https://climateriver.org"),
   title: {
-    default: 'Climate River - Climate News Aggregator',
-    template: '%s | Climate River',
+    default: "Climate River - Climate News Aggregator",
+    template: "%s | Climate River",
   },
   alternates: {
     types: {
-      'application/rss+xml': 'https://climateriver.org/feed.xml',
+      "application/rss+xml": "https://climateriver.org/feed.xml",
     },
   },
   description:
-    'Climate River aggregates climate news from The Guardian, New York Times, Reuters, and other trusted sources. Stories organized by topic, ranked for credibility and timeliness. Your focused source for climate change coverage.',
+    "Climate River aggregates climate news from The Guardian, New York Times, Reuters, and other trusted sources. Stories organized by topic, ranked for credibility and timeliness. Your focused source for climate change coverage.",
   keywords: [
-    'climate change news',
-    'climate news aggregator',
-    'environmental news',
-    'climate crisis',
-    'global warming news',
-    'climate policy',
-    'renewable energy news',
-    'climate journalism',
-    'sustainability news',
-    'climate change coverage',
+    "climate change news",
+    "climate news aggregator",
+    "environmental news",
+    "climate crisis",
+    "global warming news",
+    "climate policy",
+    "renewable energy news",
+    "climate journalism",
+    "sustainability news",
+    "climate change coverage",
   ],
-  authors: [{ name: 'Dylan Wahbe', url: 'https://dylanwahbe.com' }],
-  creator: 'Dylan Wahbe',
+  authors: [{ name: "Dylan Wahbe", url: "https://dylanwahbe.com" }],
+  creator: "Dylan Wahbe",
   openGraph: {
-    type: 'website',
-    locale: 'en_US',
-    url: 'https://climateriver.org',
-    title: 'Climate River - Climate News Aggregator',
+    type: "website",
+    locale: "en_US",
+    url: "https://climateriver.org",
+    title: "Climate River - Climate News Aggregator",
     description:
-      'Climate River aggregates climate news from trusted sources like The Guardian, New York Times, and Reuters. Stories organized by topic, ranked for credibility and timeliness.',
-    siteName: 'Climate River',
+      "Climate River aggregates climate news from trusted sources like The Guardian, New York Times, and Reuters. Stories organized by topic, ranked for credibility and timeliness.",
+    siteName: "Climate River",
     images: [
       {
-        url: '/api/og',
+        url: "/api/og",
         width: 1200,
         height: 630,
-        alt: 'Climate River - Top climate news headlines',
+        alt: "Climate River - Top climate news headlines",
       },
     ],
   },
   twitter: {
-    card: 'summary_large_image',
-    title: 'Climate River - Climate News Aggregator',
+    card: "summary_large_image",
+    title: "Climate River - Climate News Aggregator",
     description:
-      'Climate news aggregated from The Guardian, NYT, Reuters, and more. Organized by story, ranked for trust.',
-    creator: '@dylanwahbe',
-    images: ['/api/og'],
+      "Climate news aggregated from The Guardian, NYT, Reuters, and more. Organized by story, ranked for trust.",
+    creator: "@dylanwahbe",
+    images: ["/api/og"],
   },
   robots: {
     index: true,
@@ -71,25 +71,25 @@ export const metadata = {
     googleBot: {
       index: true,
       follow: true,
-      'max-video-preview': -1,
-      'max-image-preview': 'large',
-      'max-snippet': -1,
+      "max-video-preview": -1,
+      "max-image-preview": "large",
+      "max-snippet": -1,
     },
   },
   icons: {
     icon: [
-      { url: '/icon.svg', type: 'image/svg+xml' },
-      { url: '/icon.svg?v=2', type: 'image/svg+xml' }, // Cache-busting version
+      { url: "/icon.svg", type: "image/svg+xml" },
+      { url: "/icon.svg?v=2", type: "image/svg+xml" }, // Cache-busting version
     ],
-    shortcut: '/icon.svg?v=2',
-    apple: '/apple-icon.png?v=2',
+    shortcut: "/icon.svg?v=2",
+    apple: "/apple-icon.png?v=2",
   },
-}
+};
 
 export default async function RootLayout({
   children,
 }: {
-  children: React.ReactNode
+  children: React.ReactNode;
 }) {
   return (
     <html lang="en" className={inclusive.className}>
@@ -142,5 +142,5 @@ export default async function RootLayout({
         <Analytics />
       </body>
     </html>
-  )
+  );
 }

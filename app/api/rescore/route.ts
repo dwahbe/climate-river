@@ -24,10 +24,13 @@ async function authorized(req: Request) {
   return isCron || (!!expected && (qToken === expected || bearer === expected));
 }
 
-type ScriptRunner = (options?: Record<string, unknown>) => Promise<unknown> | unknown;
+type ScriptRunner = (
+  options?: Record<string, unknown>,
+) => Promise<unknown> | unknown;
 
 async function runRescore() {
-  const mod: { run?: ScriptRunner; default?: ScriptRunner } = await import("@/scripts/rescore");
+  const mod: { run?: ScriptRunner; default?: ScriptRunner } =
+    await import("@/scripts/rescore");
   if (typeof mod.run === "function") return mod.run({});
   if (typeof mod.default === "function") return mod.default({});
   throw new Error("scripts/rescore.ts must export run()");
@@ -47,10 +50,7 @@ export async function GET(req: Request) {
     return NextResponse.json({ ok: true, took_ms: Date.now() - t0, result });
   } catch (e: unknown) {
     const message = e instanceof Error ? e.message : String(e);
-    return NextResponse.json(
-      { ok: false, error: message },
-      { status: 500 },
-    );
+    return NextResponse.json({ ok: false, error: message }, { status: 500 });
   }
 }
 

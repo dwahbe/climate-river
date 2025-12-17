@@ -1,5 +1,5 @@
-import Link from 'next/link'
-import type { LucideIcon } from 'lucide-react'
+import Link from "next/link";
+import type { LucideIcon } from "lucide-react";
 import {
   Landmark,
   Megaphone,
@@ -8,11 +8,11 @@ import {
   Zap,
   Microscope,
   Sparkles,
-} from 'lucide-react'
-import { CATEGORIES, type CategorySlug } from '@/lib/tagger'
-import { CategoryIcon } from '@/components/categoryIcons'
-import { getRiverData } from '@/lib/services/riverService'
-import type { Metadata } from 'next'
+} from "lucide-react";
+import { CATEGORIES, type CategorySlug } from "@/lib/tagger";
+import { CategoryIcon } from "@/components/categoryIcons";
+import { getRiverData } from "@/lib/services/riverService";
+import type { Metadata } from "next";
 
 const CATEGORY_ICONS: Record<CategorySlug, LucideIcon> = {
   government: Landmark,
@@ -21,34 +21,34 @@ const CATEGORY_ICONS: Record<CategorySlug, LucideIcon> = {
   impacts: AlertTriangle,
   tech: Zap,
   research: Microscope,
-}
+};
 
-export const runtime = 'nodejs'
+export const runtime = "nodejs";
 
 export const metadata: Metadata = {
-  title: 'Categories',
+  title: "Categories",
   description:
-    'Explore climate news by category: Government policy and regulations, Activism and protests, Business and corporate action, Climate impacts and extreme weather, Clean technology and renewables, Research and scientific discoveries.',
+    "Explore climate news by category: Government policy and regulations, Activism and protests, Business and corporate action, Climate impacts and extreme weather, Clean technology and renewables, Research and scientific discoveries.",
   openGraph: {
-    title: 'Climate News Categories',
+    title: "Climate News Categories",
     description:
-      'Explore climate news organized by category: Government, Activism, Business, Impacts, Tech, and Research.',
-    url: 'https://climateriver.org/categories',
+      "Explore climate news organized by category: Government, Activism, Business, Impacts, Tech, and Research.",
+    url: "https://climateriver.org/categories",
   },
   twitter: {
-    title: 'Climate News Categories',
-    description: 'Explore climate news organized by category.',
+    title: "Climate News Categories",
+    description: "Explore climate news organized by category.",
   },
   alternates: {
-    canonical: 'https://climateriver.org/categories',
+    canonical: "https://climateriver.org/categories",
   },
-}
+};
 
 function hostFrom(url: string) {
   try {
-    return new URL(url).hostname.replace(/^www\./, '')
+    return new URL(url).hostname.replace(/^www\./, "");
   } catch {
-    return ''
+    return "";
   }
 }
 
@@ -56,17 +56,17 @@ export default async function CategoriesPage() {
   const categoryStreams = await Promise.all(
     CATEGORIES.map(async (category) => {
       const clusters = await getRiverData({
-        view: 'top',
+        view: "top",
         category: category.slug,
         limit: 5,
-      })
+      });
 
       return {
         category,
         clusters,
-      }
-    })
-  )
+      };
+    }),
+  );
 
   return (
     <div className="mx-auto max-w-3xl px-4 sm:px-6 pt-1 sm:pt-1.5 pb-8 content">
@@ -74,8 +74,8 @@ export default async function CategoriesPage() {
         <h1 className="text-xl font-semibold tracking-tight">Categories</h1>
         <div className="flex items-center gap-2">
           {CATEGORIES.map((category) => {
-            const Icon = CATEGORY_ICONS[category.slug]
-            if (!Icon) return null
+            const Icon = CATEGORY_ICONS[category.slug];
+            if (!Icon) return null;
 
             return (
               <span
@@ -91,7 +91,7 @@ export default async function CategoriesPage() {
                   focusable="false"
                 />
               </span>
-            )
+            );
           })}
         </div>
       </div>
@@ -125,10 +125,10 @@ export default async function CategoriesPage() {
               {clusters.length > 0 ? (
                 clusters.slice(0, 5).map((cluster, index) => {
                   const leadHref = `/api/click?aid=${cluster.lead_article_id}&url=${encodeURIComponent(
-                    cluster.lead_url
-                  )}`
+                    cluster.lead_url,
+                  )}`;
                   const source =
-                    cluster.lead_source || hostFrom(cluster.lead_url)
+                    cluster.lead_source || hostFrom(cluster.lead_url);
 
                   return (
                     <li key={cluster.cluster_id} className="flex gap-3">
@@ -158,7 +158,7 @@ export default async function CategoriesPage() {
                         </p>
                       </div>
                     </li>
-                  )
+                  );
                 })
               ) : (
                 <li className="text-sm text-zinc-500">
@@ -177,5 +177,5 @@ export default async function CategoriesPage() {
         ))}
       </div>
     </div>
-  )
+  );
 }
