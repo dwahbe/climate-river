@@ -2,21 +2,21 @@
 // Maintenance script to fix clustering issues:
 // 1. Retroactively cluster unclustered articles
 // 2. Merge similar clusters that should be together
-import { query, endPool } from '@/lib/db'
+import { query, endPool } from "@/lib/db";
 
-const SIMILARITY_THRESHOLD = 0.6
+const SIMILARITY_THRESHOLD = 0.6;
 
 /**
  * Find unclustered articles that have high similarity to existing cluster members
  * and add them to appropriate clusters
  */
 async function retroactivelyClusterArticles() {
-  console.log('\n📦 Retroactively clustering orphaned articles...')
+  console.log("\n📦 Retroactively clustering orphaned articles...");
 
   // Find unclustered articles with embeddings from the last 7 days
   const { rows: unclustered } = await query<{
-    article_id: number
-    title: string
+    article_id: number;
+    title: string;
   }>(
     `
     SELECT a.id as article_id, a.title
@@ -27,19 +27,21 @@ async function retroactivelyClusterArticles() {
       AND a.fetched_at >= now() - interval '7 days'
     ORDER BY a.fetched_at DESC
     LIMIT 100
-  `
-  )
+  `,
+  );
 
-  console.log(`  Found ${unclustered.length} unclustered articles with embeddings`)
+  console.log(
+    `  Found ${unclustered.length} unclustered articles with embeddings`,
+  );
 
-  let addedCount = 0
+  let addedCount = 0;
 
   for (const article of unclustered) {
     // Find similar articles in existing clusters
     const { rows: matches } = await query<{
-      cluster_id: number
-      similarity: number
-      matched_title: string
+      cluster_id: number;
+      similarity: number;
+      matched_title: string;
     }>(
       `
       SELECT DISTINCT ON (ac.cluster_id)
@@ -55,30 +57,30 @@ async function retroactivelyClusterArticles() {
       ORDER BY ac.cluster_id, similarity DESC
       LIMIT 5
     `,
-      [article.article_id, SIMILARITY_THRESHOLD]
-    )
+      [article.article_id, SIMILARITY_THRESHOLD],
+    );
 
     if (matches.length > 0) {
       // Pick the cluster with highest similarity
-      const bestMatch = matches.sort((a, b) => b.similarity - a.similarity)[0]
+      const bestMatch = matches.sort((a, b) => b.similarity - a.similarity)[0];
 
       await query(
         `INSERT INTO article_clusters (article_id, cluster_id)
          VALUES ($1, $2) ON CONFLICT DO NOTHING`,
-        [article.article_id, bestMatch.cluster_id]
-      )
+        [article.article_id, bestMatch.cluster_id],
+      );
 
       console.log(
-        `  ✓ Added article ${article.article_id} to cluster ${bestMatch.cluster_id} (${(bestMatch.similarity * 100).toFixed(1)}% similar)`
-      )
-      console.log(`    "${article.title.slice(0, 60)}..."`)
-      console.log(`    matched: "${bestMatch.matched_title.slice(0, 60)}..."`)
-      addedCount++
+        `  ✓ Added article ${article.article_id} to cluster ${bestMatch.cluster_id} (${(bestMatch.similarity * 100).toFixed(1)}% similar)`,
+      );
+      console.log(`    "${article.title.slice(0, 60)}..."`);
+      console.log(`    matched: "${bestMatch.matched_title.slice(0, 60)}..."`);
+      addedCount++;
     }
   }
 
-  console.log(`  Added ${addedCount} articles to existing clusters`)
-  return addedCount
+  console.log(`  Added ${addedCount} articles to existing clusters`);
+  return addedCount;
 }
 
 /**
@@ -86,16 +88,16 @@ async function retroactivelyClusterArticles() {
  * Criteria: >50% of articles in cluster A have >0.6 similarity with articles in cluster B
  */
 async function mergeSimilarClusters() {
-  console.log('\n🔗 Looking for clusters to merge...')
+  console.log("\n🔗 Looking for clusters to merge...");
 
   // Find cluster pairs with high cross-similarity
   const { rows: clusterPairs } = await query<{
-    cluster1: number
-    cluster2: number
-    avg_similarity: number
-    max_similarity: number
-    sample_title1: string
-    sample_title2: string
+    cluster1: number;
+    cluster2: number;
+    avg_similarity: number;
+    max_similarity: number;
+    sample_title1: string;
+    sample_title2: string;
   }>(
     `
     WITH cluster_articles AS (
@@ -133,18 +135,20 @@ async function mergeSimilarClusters() {
     HAVING AVG(similarity) > 0.58 AND COUNT(*) >= 2
     ORDER BY avg_similarity DESC
     LIMIT 20
-  `
-  )
+  `,
+  );
 
-  console.log(`  Found ${clusterPairs.length} cluster pairs that might need merging`)
+  console.log(
+    `  Found ${clusterPairs.length} cluster pairs that might need merging`,
+  );
 
-  let mergedCount = 0
+  let mergedCount = 0;
 
   for (const pair of clusterPairs) {
     // Get cluster sizes
     const { rows: sizes } = await query<{
-      cluster_id: number
-      size: number
+      cluster_id: number;
+      size: number;
     }>(
       `
       SELECT ac.cluster_id, COUNT(*) as size
@@ -152,24 +156,28 @@ async function mergeSimilarClusters() {
       WHERE ac.cluster_id IN ($1, $2)
       GROUP BY ac.cluster_id
     `,
-      [pair.cluster1, pair.cluster2]
-    )
+      [pair.cluster1, pair.cluster2],
+    );
 
     // Merge smaller into larger (or cluster2 into cluster1 if same size)
-    const cluster1Size = sizes.find((s) => s.cluster_id === pair.cluster1)?.size ?? 0
-    const cluster2Size = sizes.find((s) => s.cluster_id === pair.cluster2)?.size ?? 0
+    const cluster1Size =
+      sizes.find((s) => s.cluster_id === pair.cluster1)?.size ?? 0;
+    const cluster2Size =
+      sizes.find((s) => s.cluster_id === pair.cluster2)?.size ?? 0;
 
     const [keepCluster, mergeCluster] =
       cluster1Size >= cluster2Size
         ? [pair.cluster1, pair.cluster2]
-        : [pair.cluster2, pair.cluster1]
+        : [pair.cluster2, pair.cluster1];
 
     console.log(
-      `\n  Merging cluster ${mergeCluster} (${cluster2Size} articles) into ${keepCluster} (${cluster1Size} articles)`
-    )
-    console.log(`    Avg similarity: ${(pair.avg_similarity * 100).toFixed(1)}%`)
-    console.log(`    "${pair.sample_title1.slice(0, 50)}..."`)
-    console.log(`    "${pair.sample_title2.slice(0, 50)}..."`)
+      `\n  Merging cluster ${mergeCluster} (${cluster2Size} articles) into ${keepCluster} (${cluster1Size} articles)`,
+    );
+    console.log(
+      `    Avg similarity: ${(pair.avg_similarity * 100).toFixed(1)}%`,
+    );
+    console.log(`    "${pair.sample_title1.slice(0, 50)}..."`);
+    console.log(`    "${pair.sample_title2.slice(0, 50)}..."`);
 
     // Move articles from mergeCluster to keepCluster
     await query(
@@ -181,26 +189,30 @@ async function mergeSimilarClusters() {
           SELECT article_id FROM article_clusters WHERE cluster_id = $1
         )
     `,
-      [keepCluster, mergeCluster]
-    )
+      [keepCluster, mergeCluster],
+    );
 
     // Delete orphaned cluster entries and the merged cluster
-    await query('DELETE FROM article_clusters WHERE cluster_id = $1', [mergeCluster])
-    await query('DELETE FROM cluster_scores WHERE cluster_id = $1', [mergeCluster])
-    await query('DELETE FROM clusters WHERE id = $1', [mergeCluster])
+    await query("DELETE FROM article_clusters WHERE cluster_id = $1", [
+      mergeCluster,
+    ]);
+    await query("DELETE FROM cluster_scores WHERE cluster_id = $1", [
+      mergeCluster,
+    ]);
+    await query("DELETE FROM clusters WHERE id = $1", [mergeCluster]);
 
-    mergedCount++
+    mergedCount++;
   }
 
-  console.log(`\n  Merged ${mergedCount} cluster pairs`)
-  return mergedCount
+  console.log(`\n  Merged ${mergedCount} cluster pairs`);
+  return mergedCount;
 }
 
 /**
  * Update cluster scores after maintenance
  */
 async function updateClusterScores() {
-  console.log('\n📊 Updating cluster scores...')
+  console.log("\n📊 Updating cluster scores...");
 
   await query(`
     INSERT INTO cluster_scores (cluster_id, lead_article_id, size, score)
@@ -222,35 +234,34 @@ async function updateClusterScores() {
       lead_article_id = EXCLUDED.lead_article_id,
       size = EXCLUDED.size,
       updated_at = NOW()
-  `)
+  `);
 
-  console.log('  ✓ Cluster scores updated')
+  console.log("  ✓ Cluster scores updated");
 }
 
 export async function run(opts: { closePool?: boolean } = {}) {
-  console.log('🔧 Cluster Maintenance')
-  console.log('═'.repeat(50))
+  console.log("🔧 Cluster Maintenance");
+  console.log("═".repeat(50));
 
-  const added = await retroactivelyClusterArticles()
-  const merged = await mergeSimilarClusters()
+  const added = await retroactivelyClusterArticles();
+  const merged = await mergeSimilarClusters();
 
   if (added > 0 || merged > 0) {
-    await updateClusterScores()
+    await updateClusterScores();
   }
 
-  console.log('\n✅ Cluster maintenance complete!')
-  console.log(`  Articles added to clusters: ${added}`)
-  console.log(`  Clusters merged: ${merged}`)
+  console.log("\n✅ Cluster maintenance complete!");
+  console.log(`  Articles added to clusters: ${added}`);
+  console.log(`  Clusters merged: ${merged}`);
 
-  if (opts.closePool) await endPool()
-  return { added, merged }
+  if (opts.closePool) await endPool();
+  return { added, merged };
 }
 
 // CLI
 if (import.meta.url === `file://${process.argv[1]}`) {
   run({ closePool: true }).catch((err) => {
-    console.error(err)
-    endPool().finally(() => process.exit(1))
-  })
+    console.error(err);
+    endPool().finally(() => process.exit(1));
+  });
 }
-
