@@ -1,16 +1,16 @@
 // scripts/rescore.ts
-import { query, endPool } from '@/lib/db'
+import { query, endPool } from "@/lib/db";
 
-const HOUR = 3600
+const HOUR = 3600;
 // Optimized decay for dynamic, fresh content (data-driven analysis)
-const HL_ARTICLE_H = 6 // 6h half-life: articles lose 50% score every 6 hours
-const HL_CLUSTER_H = 9 // 9h half-life: clusters decay 25% faster for fresher homepage
+const HL_ARTICLE_H = 6; // 6h half-life: articles lose 50% score every 6 hours
+const HL_CLUSTER_H = 9; // 9h half-life: clusters decay 25% faster for fresher homepage
 
 export async function run(opts: { closePool?: boolean } = {}) {
-  console.log('🔄 Starting rescore process...')
+  console.log("🔄 Starting rescore process...");
 
   // ensure table
-  console.log('📋 Ensuring cluster_scores table exists...')
+  console.log("📋 Ensuring cluster_scores table exists...");
   await query(`
     CREATE TABLE IF NOT EXISTS cluster_scores (
       cluster_id       bigint PRIMARY KEY REFERENCES clusters(id) ON DELETE CASCADE,
@@ -18,13 +18,13 @@ export async function run(opts: { closePool?: boolean } = {}) {
       score            double precision NOT NULL,
       lead_article_id  bigint REFERENCES articles(id)
     );
-  `)
-  console.log('✅ Table ensured')
+  `);
+  console.log("✅ Table ensured");
 
-  console.log('🔄 Starting main rescore query...')
+  console.log("🔄 Starting main rescore query...");
   console.log(
-    `⏰ Using half-lives: Articles=${HL_ARTICLE_H}h, Clusters=${HL_CLUSTER_H}h`
-  )
+    `⏰ Using half-lives: Articles=${HL_ARTICLE_H}h, Clusters=${HL_CLUSTER_H}h`,
+  );
 
   await query(
     `
@@ -164,20 +164,20 @@ export async function run(opts: { closePool?: boolean } = {}) {
           score = EXCLUDED.score,
           lead_article_id = EXCLUDED.lead_article_id;
     `,
-    [HL_ARTICLE_H, HL_CLUSTER_H]
-  )
+    [HL_ARTICLE_H, HL_CLUSTER_H],
+  );
 
-  console.log('✅ Main rescore query completed')
-  console.log('🎯 Rescore process finished successfully!')
+  console.log("✅ Main rescore query completed");
+  console.log("🎯 Rescore process finished successfully!");
 
-  if (opts.closePool) await endPool()
-  return { ok: true }
+  if (opts.closePool) await endPool();
+  return { ok: true };
 }
 
 // CLI
 if (import.meta.url === `file://${process.argv[1]}`) {
   run({ closePool: true }).catch((err) => {
-    console.error(err)
-    endPool().finally(() => process.exit(1))
-  })
+    console.error(err);
+    endPool().finally(() => process.exit(1));
+  });
 }

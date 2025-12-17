@@ -1,5 +1,5 @@
 // scripts/schema.ts
-import { query, endPool } from '@/lib/db'
+import { query, endPool } from "@/lib/db";
 
 /**
  * Idempotent schema guard.
@@ -7,7 +7,7 @@ import { query, endPool } from '@/lib/db'
  */
 export async function run() {
   // --- pgvector extension for semantic similarity ---------------------------
-  await query(`create extension if not exists vector;`)
+  await query(`create extension if not exists vector;`);
 
   // --- sources --------------------------------------------------------------
   await query(`
@@ -19,12 +19,12 @@ export async function run() {
       weight        int  not null default 1,
       slug          text
     );
-  `)
+  `);
 
   // ensure slug exists & is populated
   await query(
-    `alter table if exists sources add column if not exists slug text;`
-  )
+    `alter table if exists sources add column if not exists slug text;`,
+  );
   await query(`
     update sources
        set slug = regexp_replace(
@@ -32,8 +32,8 @@ export async function run() {
          '[^a-z0-9]+', '-', 'g'
        )
      where slug is null;
-  `)
-  await query(`create index if not exists idx_sources_slug on sources(slug);`)
+  `);
+  await query(`create index if not exists idx_sources_slug on sources(slug);`);
 
   // --- articles -------------------------------------------------------------
   await query(`
@@ -46,63 +46,63 @@ export async function run() {
       fetched_at    timestamptz not null default now(),
       dek           text
     );
-  `)
+  `);
 
   // add columns that may not exist yet
   await query(
-    `alter table if exists articles add column if not exists dek text;`
-  )
+    `alter table if exists articles add column if not exists dek text;`,
+  );
 
   // Add content columns for Defuddler-fetched article content
   await query(
-    `alter table if exists articles add column if not exists content_html text;`
-  )
+    `alter table if exists articles add column if not exists content_html text;`,
+  );
   await query(
-    `alter table if exists articles add column if not exists content_text text;`
-  )
+    `alter table if exists articles add column if not exists content_text text;`,
+  );
   await query(
-    `alter table if exists articles add column if not exists content_word_count int;`
-  )
+    `alter table if exists articles add column if not exists content_word_count int;`,
+  );
   await query(
-    `alter table if exists articles add column if not exists content_status text;`
-  )
+    `alter table if exists articles add column if not exists content_status text;`,
+  );
   await query(
-    `alter table if exists articles add column if not exists content_error text;`
-  )
+    `alter table if exists articles add column if not exists content_error text;`,
+  );
   await query(
-    `alter table if exists articles add column if not exists content_fetched_at timestamptz;`
-  )
+    `alter table if exists articles add column if not exists content_fetched_at timestamptz;`,
+  );
   await query(
-    `alter table if exists articles add column if not exists content_image text;`
-  )
+    `alter table if exists articles add column if not exists content_image text;`,
+  );
 
   // Add embedding column for semantic similarity (vector dimension 1536 for text-embedding-3-small)
   await query(
-    `alter table if exists articles add column if not exists embedding vector(1536);`
-  )
+    `alter table if exists articles add column if not exists embedding vector(1536);`,
+  );
 
   // Add rewritten title columns
   await query(
-    `alter table if exists articles add column if not exists rewritten_title text;`
-  )
+    `alter table if exists articles add column if not exists rewritten_title text;`,
+  );
   await query(
-    `alter table if exists articles add column if not exists rewritten_at timestamptz;`
-  )
+    `alter table if exists articles add column if not exists rewritten_at timestamptz;`,
+  );
   await query(
-    `alter table if exists articles add column if not exists rewrite_model text;`
-  )
+    `alter table if exists articles add column if not exists rewrite_model text;`,
+  );
   await query(
-    `alter table if exists articles add column if not exists rewrite_notes text;`
-  )
+    `alter table if exists articles add column if not exists rewrite_notes text;`,
+  );
 
   await query(`
     create index if not exists idx_articles_published_at
       on articles(published_at desc);
-  `)
+  `);
   await query(`
     create index if not exists idx_articles_content_status 
       on articles(content_status) where content_status is not null;
-  `)
+  `);
 
   // --- clusters -------------------------------------------------------------
   await query(`
@@ -111,11 +111,11 @@ export async function run() {
       key        text unique,
       created_at timestamptz not null default now()
     );
-  `)
+  `);
   // keep a unique index on (key)
   await query(
-    `create unique index if not exists idx_clusters_key on clusters(key);`
-  )
+    `create unique index if not exists idx_clusters_key on clusters(key);`,
+  );
 
   // --- article_clusters (link) ---------------------------------------------
   await query(`
@@ -124,7 +124,7 @@ export async function run() {
       cluster_id bigint references clusters(id) on delete cascade,
       primary key (article_id, cluster_id)
     );
-  `)
+  `);
 
   // --- cluster_scores (for ranking/lead selection) -------------------------
   // Kept minimal: your rescore job can fill/refresh these rows.
@@ -136,22 +136,22 @@ export async function run() {
       score           double precision not null default 0,
       updated_at      timestamptz not null default now()
     );
-  `)
+  `);
   await query(`
     create index if not exists idx_cluster_scores_score
       on cluster_scores(score desc, updated_at desc);
-  `)
+  `);
 
   // (Optional) helpful FK indexes (no-ops if they already exist)
   await query(
-    `create index if not exists idx_articles_source_id on articles(source_id);`
-  )
+    `create index if not exists idx_articles_source_id on articles(source_id);`,
+  );
   await query(
-    `create index if not exists idx_article_clusters_cluster_id on article_clusters(cluster_id);`
-  )
+    `create index if not exists idx_article_clusters_cluster_id on article_clusters(cluster_id);`,
+  );
   await query(
-    `create index if not exists idx_article_clusters_article_id on article_clusters(article_id);`
-  )
+    `create index if not exists idx_article_clusters_article_id on article_clusters(article_id);`,
+  );
 
   // --- categories (new 6-category system) ------------------------------------
   await query(`
@@ -162,7 +162,7 @@ export async function run() {
       description text,
       color text
     );
-  `)
+  `);
 
   await query(`
     create table if not exists article_categories (
@@ -172,20 +172,20 @@ export async function run() {
       is_primary boolean default false,
       primary key (article_id, category_id)
     );
-  `)
+  `);
 
   // Add is_primary column if it doesn't exist (for existing tables)
   await query(`
     alter table if exists article_categories 
     add column if not exists is_primary boolean default false;
-  `)
+  `);
 
   await query(
-    `create index if not exists idx_article_categories_category_id on article_categories(category_id);`
-  )
+    `create index if not exists idx_article_categories_category_id on article_categories(category_id);`,
+  );
   await query(
-    `create index if not exists idx_article_categories_article_id on article_categories(article_id);`
-  )
+    `create index if not exists idx_article_categories_article_id on article_categories(article_id);`,
+  );
 
   // Insert the 6 categories from lib/tagger.ts
   await query(`
@@ -197,13 +197,13 @@ export async function run() {
       ('tech', 'Tech', 'Clean technology, renewables, and climate solutions', '#10B981'),
       ('research', 'Research & Innovation', 'Climate research, studies, and scientific discoveries', '#8B5CF6')
     on conflict (slug) do nothing;
-  `)
+  `);
 
   // --- get_river_clusters function -------------------------------------------
   // Drop existing function first (it has different return type)
   await query(
-    `DROP FUNCTION IF EXISTS get_river_clusters(boolean,integer,integer,text);`
-  )
+    `DROP FUNCTION IF EXISTS get_river_clusters(boolean,integer,integer,text);`,
+  );
 
   await query(`
     create or replace function get_river_clusters(
@@ -417,16 +417,16 @@ export async function run() {
       left join source_rollup sr on sr.cluster_id = rc.cluster_id and sr.rownum = rc.rownum
       order by rc.rownum;
     $$;
-  `)
+  `);
 
-  console.log('Schema ensured ✅')
+  console.log("Schema ensured ✅");
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
   run()
     .then(() => endPool())
     .catch((err) => {
-      console.error(err)
-      endPool().finally(() => process.exit(1))
-    })
+      console.error(err);
+      endPool().finally(() => process.exit(1));
+    });
 }

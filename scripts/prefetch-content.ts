@@ -1,26 +1,26 @@
 // scripts/prefetch-content.ts
-import { query, endPool } from '@/lib/db'
-import { prefetchArticles } from '@/lib/services/readerService'
+import { query, endPool } from "@/lib/db";
+import { prefetchArticles } from "@/lib/services/readerService";
 
 type PrefetchOptions = {
-  limit?: number
-  closePool?: boolean
+  limit?: number;
+  closePool?: boolean;
   // Optionally prefetch only articles from last N hours
-  hoursAgo?: number
-}
+  hoursAgo?: number;
+};
 
 /**
  * Prefetch article content for recently ingested articles
  * This ensures content is cached before users try to read it
  */
 export async function run(opts: PrefetchOptions = {}) {
-  const startTime = Date.now()
-  const limit = opts.limit ?? 50
-  const hoursAgo = opts.hoursAgo ?? 24 // Default: last 24 hours
+  const startTime = Date.now();
+  const limit = opts.limit ?? 50;
+  const hoursAgo = opts.hoursAgo ?? 24; // Default: last 24 hours
 
   console.log(
-    `🔄 Prefetching content for up to ${limit} articles from last ${hoursAgo}h...`
-  )
+    `🔄 Prefetching content for up to ${limit} articles from last ${hoursAgo}h...`,
+  );
 
   try {
     // Find articles that:
@@ -41,30 +41,30 @@ export async function run(opts: PrefetchOptions = {}) {
       ORDER BY published_at DESC NULLS LAST, fetched_at DESC
       LIMIT $2
     `,
-      [hoursAgo, limit]
-    )
+      [hoursAgo, limit],
+    );
 
     if (rows.length === 0) {
-      console.log('✨ No articles need prefetching')
-      if (opts.closePool) await endPool()
+      console.log("✨ No articles need prefetching");
+      if (opts.closePool) await endPool();
       return {
         total: 0,
         duration: Math.round((Date.now() - startTime) / 1000),
-      }
+      };
     }
 
-    console.log(`📖 Found ${rows.length} articles to prefetch`)
+    console.log(`📖 Found ${rows.length} articles to prefetch`);
 
     // Prefetch with concurrency of 3 (balance between speed and politeness)
     await prefetchArticles(
       rows.map((r) => r.id),
-      3
-    )
+      3,
+    );
 
     // Check results
     const { rows: results } = await query<{
-      content_status: string
-      count: number
+      content_status: string;
+      count: number;
     }>(
       `
       SELECT 
@@ -74,35 +74,35 @@ export async function run(opts: PrefetchOptions = {}) {
       WHERE id = ANY($1)
       GROUP BY content_status
     `,
-      [rows.map((r) => r.id)]
-    )
+      [rows.map((r) => r.id)],
+    );
 
-    const stats: Record<string, number> = {}
+    const stats: Record<string, number> = {};
     for (const r of results) {
-      stats[r.content_status] = Number(r.count)
+      stats[r.content_status] = Number(r.count);
     }
 
-    const duration = Math.round((Date.now() - startTime) / 1000)
-    console.log(`✅ Prefetch completed in ${duration}s:`, stats)
+    const duration = Math.round((Date.now() - startTime) / 1000);
+    console.log(`✅ Prefetch completed in ${duration}s:`, stats);
 
-    if (opts.closePool) await endPool()
+    if (opts.closePool) await endPool();
 
     return {
       total: rows.length,
       stats,
       duration,
-    }
+    };
   } catch (error) {
-    console.error('❌ Prefetch failed:', error)
-    if (opts.closePool) await endPool()
-    throw error
+    console.error("❌ Prefetch failed:", error);
+    if (opts.closePool) await endPool();
+    throw error;
   }
 }
 
 // CLI support
 if (import.meta.url === `file://${process.argv[1]}`) {
   run({ closePool: true }).catch((err) => {
-    console.error(err)
-    endPool().finally(() => process.exit(1))
-  })
+    console.error(err);
+    endPool().finally(() => process.exit(1));
+  });
 }
