@@ -1,90 +1,90 @@
 // lib/services/readerService.ts
-import { query } from '@/lib/db'
+import { query } from "@/lib/db";
 
 /**
  * Convert markdown to HTML for display
  * Simple implementation - can be enhanced with a proper markdown library if needed
  */
 function markdownToHtml(markdown: string): string {
-  let html = markdown
+  let html = markdown;
 
   // Headers
-  html = html.replace(/^### (.*$)/gim, '<h3>$1</h3>')
-  html = html.replace(/^## (.*$)/gim, '<h2>$1</h2>')
-  html = html.replace(/^# (.*$)/gim, '<h1>$1</h1>')
+  html = html.replace(/^### (.*$)/gim, "<h3>$1</h3>");
+  html = html.replace(/^## (.*$)/gim, "<h2>$1</h2>");
+  html = html.replace(/^# (.*$)/gim, "<h1>$1</h1>");
 
   // Bold
-  html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-  html = html.replace(/__(.+?)__/g, '<strong>$1</strong>')
+  html = html.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
+  html = html.replace(/__(.+?)__/g, "<strong>$1</strong>");
 
   // Italic
-  html = html.replace(/\*(.+?)\*/g, '<em>$1</em>')
-  html = html.replace(/_(.+?)_/g, '<em>$1</em>')
+  html = html.replace(/\*(.+?)\*/g, "<em>$1</em>");
+  html = html.replace(/_(.+?)_/g, "<em>$1</em>");
 
   // Links
   html = html.replace(
     /\[([^\]]+)\]\(([^)]+)\)/g,
-    '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>'
-  )
+    '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>',
+  );
 
   // Images
-  html = html.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<img src="$2" alt="$1" />')
+  html = html.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<img src="$2" alt="$1" />');
 
   // Paragraphs (split by double newlines)
-  const paragraphs = html.split(/\n\n+/)
+  const paragraphs = html.split(/\n\n+/);
   html = paragraphs
     .map((p) => {
-      p = p.trim()
-      if (!p) return ''
+      p = p.trim();
+      if (!p) return "";
       // Don't wrap if already a tag
       if (
-        p.startsWith('<h') ||
-        p.startsWith('<img') ||
-        p.startsWith('<ul') ||
-        p.startsWith('<ol')
+        p.startsWith("<h") ||
+        p.startsWith("<img") ||
+        p.startsWith("<ul") ||
+        p.startsWith("<ol")
       ) {
-        return p
+        return p;
       }
-      return `<p>${p.replace(/\n/g, '<br>')}</p>`
+      return `<p>${p.replace(/\n/g, "<br>")}</p>`;
     })
-    .join('\n')
+    .join("\n");
 
-  return html
+  return html;
 }
 
 // Types
 export type ReaderSuccess = {
-  success: true
-  content: string
-  title: string
-  author?: string
-  wordCount: number
-  publishedAt?: string
-  image?: string
-}
+  success: true;
+  content: string;
+  title: string;
+  author?: string;
+  wordCount: number;
+  publishedAt?: string;
+  image?: string;
+};
 
 export type ReaderError = {
-  success: false
-  status: 'paywall' | 'timeout' | 'blocked' | 'not_found' | 'error'
-  error: string
-}
+  success: false;
+  status: "paywall" | "timeout" | "blocked" | "not_found" | "error";
+  error: string;
+};
 
-export type ReaderResult = ReaderSuccess | ReaderError
+export type ReaderResult = ReaderSuccess | ReaderError;
 
-const READER_ERROR_STATUS_SET = new Set<ReaderError['status']>([
-  'paywall',
-  'timeout',
-  'blocked',
-  'not_found',
-  'error',
-])
+const READER_ERROR_STATUS_SET = new Set<ReaderError["status"]>([
+  "paywall",
+  "timeout",
+  "blocked",
+  "not_found",
+  "error",
+]);
 
 function isReaderErrorStatus(
-  status: string | null
-): status is ReaderError['status'] {
+  status: string | null,
+): status is ReaderError["status"] {
   return (
-    !!status && READER_ERROR_STATUS_SET.has(status as ReaderError['status'])
-  )
+    !!status && READER_ERROR_STATUS_SET.has(status as ReaderError["status"])
+  );
 }
 
 // Paywall detection patterns
@@ -98,14 +98,14 @@ const PAYWALL_INDICATORS = [
   /members only/i,
   /premium content/i,
   /create a free account/i,
-]
+];
 
 const BLOCKED_INDICATORS = [
   /access denied/i,
   /403 forbidden/i,
   /cloudflare/i,
   /unusual traffic/i,
-]
+];
 
 /**
  * Detect if content appears to be a paywall message
@@ -113,19 +113,19 @@ const BLOCKED_INDICATORS = [
 function detectPaywall(html: string, text: string, wordCount: number): boolean {
   // Very short content is suspicious
   if (wordCount < 100) {
-    return PAYWALL_INDICATORS.some((pattern) => text.match(pattern))
+    return PAYWALL_INDICATORS.some((pattern) => text.match(pattern));
   }
 
   // Check for paywall indicators in first 500 chars
-  const preview = text.slice(0, 500)
-  return PAYWALL_INDICATORS.some((pattern) => preview.match(pattern))
+  const preview = text.slice(0, 500);
+  return PAYWALL_INDICATORS.some((pattern) => preview.match(pattern));
 }
 
 /**
  * Detect if we've been blocked by anti-bot measures
  */
 function detectBlocked(html: string, text: string): boolean {
-  return BLOCKED_INDICATORS.some((pattern) => text.match(pattern))
+  return BLOCKED_INDICATORS.some((pattern) => text.match(pattern));
 }
 
 /**
@@ -133,154 +133,154 @@ function detectBlocked(html: string, text: string): boolean {
  * Uses dynamic imports to reduce cold start time
  */
 async function fetchArticleContent(url: string): Promise<ReaderResult> {
-  const startTime = Date.now()
-  const TIMEOUT = 12000 // 12 seconds (increased for slower sites)
+  const startTime = Date.now();
+  const TIMEOUT = 12000; // 12 seconds (increased for slower sites)
 
   try {
     // Dynamic imports to reduce cold start
     const [{ JSDOM }, { Defuddle }] = await Promise.all([
-      import('jsdom'),
-      import('defuddle/node'),
-    ])
+      import("jsdom"),
+      import("defuddle/node"),
+    ]);
 
     // Race between fetch and timeout
     const fetchPromise = (async () => {
       // Fetch with proper headers
       const response = await fetch(url, {
         headers: {
-          'User-Agent':
-            'Mozilla/5.0 (compatible; ClimateRiverBot/1.0; +https://climateriver.org)',
+          "User-Agent":
+            "Mozilla/5.0 (compatible; ClimateRiverBot/1.0; +https://climateriver.org)",
           Accept:
-            'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-          'Accept-Language': 'en-US,en;q=0.9',
-          'Cache-Control': 'no-cache',
-          'Accept-Encoding': 'gzip, deflate, br',
+            "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+          "Accept-Language": "en-US,en;q=0.9",
+          "Cache-Control": "no-cache",
+          "Accept-Encoding": "gzip, deflate, br",
         },
-        redirect: 'follow',
+        redirect: "follow",
         signal: AbortSignal.timeout(TIMEOUT),
-      })
+      });
 
       if (!response.ok) {
         if (response.status === 404) {
           return {
             success: false,
-            status: 'not_found',
-            error: 'Article not found',
-          } as ReaderError
+            status: "not_found",
+            error: "Article not found",
+          } as ReaderError;
         }
         if (response.status === 403) {
           return {
             success: false,
-            status: 'blocked',
-            error: 'Access denied by publisher',
-          } as ReaderError
+            status: "blocked",
+            error: "Access denied by publisher",
+          } as ReaderError;
         }
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`)
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       }
 
-      const html = await response.text()
+      const html = await response.text();
 
       // Parse with JSDOM
-      const dom = new JSDOM(html, { url })
+      const dom = new JSDOM(html, { url });
 
       // Use Defuddle to extract clean content with improved configuration
       const result = await Defuddle(dom, url, {
         debug: false,
         markdown: true, // Use markdown for cleaner, more reliable extraction
-      })
+      });
 
       // Cleanup JSDOM to free memory
-      dom.window.close()
+      dom.window.close();
 
       // Since we're using markdown mode, content should already be cleaner
       // But still do minimal cleanup if needed
       if (result.content) {
-        let cleaned = result.content.trim()
+        let cleaned = result.content.trim();
 
         // Remove common markdown artifacts that might have slipped through
         cleaned = cleaned
-          .replace(/\[Advertisement\]/gi, '')
-          .replace(/\[Skip to content\]/gi, '')
-          .replace(/\[Show more\]/gi, '')
-          .replace(/\[Read more\]/gi, '')
-          .trim()
+          .replace(/\[Advertisement\]/gi, "")
+          .replace(/\[Skip to content\]/gi, "")
+          .replace(/\[Show more\]/gi, "")
+          .replace(/\[Read more\]/gi, "")
+          .trim();
 
-        result.content = cleaned
+        result.content = cleaned;
       }
 
       // Detect paywall or blocking
-      if (detectBlocked(result.content || '', result.content || '')) {
+      if (detectBlocked(result.content || "", result.content || "")) {
         return {
           success: false,
-          status: 'blocked',
-          error: 'Publisher blocked automated access',
-        } as ReaderError
+          status: "blocked",
+          error: "Publisher blocked automated access",
+        } as ReaderError;
       }
 
       if (
         detectPaywall(
-          result.content || '',
-          result.content || '',
-          result.wordCount || 0
+          result.content || "",
+          result.content || "",
+          result.wordCount || 0,
         )
       ) {
         return {
           success: false,
-          status: 'paywall',
-          error: 'Article requires subscription',
-        } as ReaderError
+          status: "paywall",
+          error: "Article requires subscription",
+        } as ReaderError;
       }
 
       // Convert markdown to HTML for display
-      const htmlContent = result.content ? markdownToHtml(result.content) : ''
+      const htmlContent = result.content ? markdownToHtml(result.content) : "";
 
       // Validate we actually got content (fixes Google News redirect issue)
-      const wordCount = result.wordCount || 0
+      const wordCount = result.wordCount || 0;
       if (!htmlContent || htmlContent.length < 100 || wordCount < 50) {
         return {
           success: false,
-          status: 'error',
+          status: "error",
           error: `Insufficient content extracted (${wordCount} words, ${htmlContent.length} chars)`,
-        } as ReaderError
+        } as ReaderError;
       }
 
       // Success!
       return {
         success: true,
         content: htmlContent,
-        title: result.title || '',
+        title: result.title || "",
         author: result.author,
         wordCount,
         publishedAt: result.published,
         image: result.image,
-      } as ReaderSuccess
-    })()
+      } as ReaderSuccess;
+    })();
 
     const timeoutPromise = new Promise<ReaderError>((resolve) =>
       setTimeout(() => {
         resolve({
           success: false,
-          status: 'timeout',
+          status: "timeout",
           error: `Request timed out after ${TIMEOUT}ms`,
-        })
-      }, TIMEOUT)
-    )
+        });
+      }, TIMEOUT),
+    );
 
-    const result = await Promise.race([fetchPromise, timeoutPromise])
+    const result = await Promise.race([fetchPromise, timeoutPromise]);
 
-    const elapsed = Date.now() - startTime
+    const elapsed = Date.now() - startTime;
     console.log(
-      `📖 Fetched ${url} in ${elapsed}ms - ${result.success ? 'SUCCESS' : result.status}`
-    )
+      `📖 Fetched ${url} in ${elapsed}ms - ${result.success ? "SUCCESS" : result.status}`,
+    );
 
-    return result
+    return result;
   } catch (error: unknown) {
-    console.error('❌ Reader fetch error:', error)
+    console.error("❌ Reader fetch error:", error);
     return {
       success: false,
-      status: 'error',
-      error: error instanceof Error ? error.message : 'Failed to fetch article',
-    }
+      status: "error",
+      error: error instanceof Error ? error.message : "Failed to fetch article",
+    };
   }
 }
 
@@ -288,21 +288,21 @@ async function fetchArticleContent(url: string): Promise<ReaderResult> {
  * Get article content from cache or fetch if needed
  */
 export async function getArticleContent(
-  articleId: number
+  articleId: number,
 ): Promise<ReaderResult & { fromCache: boolean }> {
   // Check cache first
   const cached = await query<{
-    content_html: string | null
-    content_text: string | null
-    content_word_count: number | null
-    content_status: string | null
-    content_error: string | null
-    content_fetched_at: Date | null
-    content_image: string | null
-    canonical_url: string
-    title: string
-    author: string | null
-    published_at: Date | null
+    content_html: string | null;
+    content_text: string | null;
+    content_word_count: number | null;
+    content_status: string | null;
+    content_error: string | null;
+    content_fetched_at: Date | null;
+    content_image: string | null;
+    canonical_url: string;
+    title: string;
+    author: string | null;
+    published_at: Date | null;
   }>(
     `
     SELECT 
@@ -320,28 +320,28 @@ export async function getArticleContent(
     FROM articles
     WHERE id = $1
   `,
-    [articleId]
-  )
+    [articleId],
+  );
 
   if (cached.rows.length === 0) {
     return {
       success: false,
-      status: 'not_found',
-      error: 'Article not found in database',
+      status: "not_found",
+      error: "Article not found in database",
       fromCache: false,
-    }
+    };
   }
 
-  const article = cached.rows[0]
+  const article = cached.rows[0];
 
   // Return from cache if we have it (within 7 days)
   const cacheAge = article.content_fetched_at
     ? Date.now() - article.content_fetched_at.getTime()
-    : Infinity
-  const CACHE_TTL = 7 * 24 * 60 * 60 * 1000 // 7 days
+    : Infinity;
+  const CACHE_TTL = 7 * 24 * 60 * 60 * 1000; // 7 days
 
   if (article.content_status && cacheAge < CACHE_TTL) {
-    if (article.content_status === 'success' && article.content_html) {
+    if (article.content_status === "success" && article.content_html) {
       return {
         success: true,
         content: article.content_html,
@@ -351,24 +351,24 @@ export async function getArticleContent(
         publishedAt: article.published_at?.toISOString(),
         image: article.content_image || undefined,
         fromCache: true,
-      }
+      };
     } else {
       // Cached error state
       const cachedStatus = isReaderErrorStatus(article.content_status)
         ? article.content_status
-        : 'error'
+        : "error";
       return {
         success: false,
         status: cachedStatus,
-        error: article.content_error || 'Previously failed to fetch',
+        error: article.content_error || "Previously failed to fetch",
         fromCache: true,
-      }
+      };
     }
   }
 
   // Cache miss or expired - fetch fresh content
-  console.log(`🔄 Cache miss/expired for article ${articleId}, fetching...`)
-  const result = await fetchArticleContent(article.canonical_url)
+  console.log(`🔄 Cache miss/expired for article ${articleId}, fetching...`);
+  const result = await fetchArticleContent(article.canonical_url);
 
   // Store result in database
   if (result.success) {
@@ -391,8 +391,8 @@ export async function getArticleContent(
         result.wordCount,
         result.image || null,
         articleId,
-      ]
-    )
+      ],
+    );
   } else {
     await query(
       `
@@ -403,11 +403,11 @@ export async function getArticleContent(
         content_fetched_at = NOW()
       WHERE id = $3
     `,
-      [result.status, result.error, articleId]
-    )
+      [result.status, result.error, articleId],
+    );
   }
 
-  return { ...result, fromCache: false }
+  return { ...result, fromCache: false };
 }
 
 /**
@@ -415,37 +415,37 @@ export async function getArticleContent(
  */
 export async function prefetchArticles(
   articleIds: number[],
-  concurrency = 2
+  concurrency = 2,
 ): Promise<void> {
   console.log(
-    `🔄 Prefetching ${articleIds.length} articles with concurrency ${concurrency}`
-  )
+    `🔄 Prefetching ${articleIds.length} articles with concurrency ${concurrency}`,
+  );
 
-  const queue = [...articleIds]
-  const active: Array<Promise<void>> = []
+  const queue = [...articleIds];
+  const active: Array<Promise<void>> = [];
 
   while (queue.length > 0 || active.length > 0) {
     // Fill up to concurrency limit
     while (active.length < concurrency && queue.length > 0) {
-      const id = queue.shift()!
+      const id = queue.shift()!;
       const promise = getArticleContent(id)
         .then(() => {
-          const idx = active.indexOf(promise)
-          if (idx > -1) active.splice(idx, 1)
+          const idx = active.indexOf(promise);
+          if (idx > -1) active.splice(idx, 1);
         })
         .catch((err) => {
-          console.error(`Failed to prefetch article ${id}:`, err)
-          const idx = active.indexOf(promise)
-          if (idx > -1) active.splice(idx, 1)
-        })
-      active.push(promise)
+          console.error(`Failed to prefetch article ${id}:`, err);
+          const idx = active.indexOf(promise);
+          if (idx > -1) active.splice(idx, 1);
+        });
+      active.push(promise);
     }
 
     // Wait for at least one to complete
     if (active.length > 0) {
-      await Promise.race(active)
+      await Promise.race(active);
     }
   }
 
-  console.log(`✅ Prefetch complete`)
+  console.log(`✅ Prefetch complete`);
 }

@@ -1,57 +1,57 @@
-export type ArticleLike = { title: string; summary?: string | null }
+export type ArticleLike = { title: string; summary?: string | null };
 
 /**
  * Escape special regex characters in a string for use in RegExp constructor
  */
 function escapeRegex(str: string): string {
-  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 // Refined 6-category structure for climate news
 export const CATEGORIES = [
   {
-    slug: 'government',
-    name: 'Government',
-    description: 'Government policy, regulations, and climate laws',
-    color: '#3B82F6', // blue
+    slug: "government",
+    name: "Government",
+    description: "Government policy, regulations, and climate laws",
+    color: "#3B82F6", // blue
     keywords: [
-      'epa',
-      'ferc',
-      'sec',
-      'eu',
-      'parliament',
-      'regulation',
-      'rule',
-      'mandate',
-      'standard',
-      'court',
-      'lawsuit',
-      'bill',
-      'policy',
-      'permitting',
-      'government',
-      'federal',
-      'congress',
-      'senate',
-      'biden',
-      'trump',
-      'climate law',
-      'carbon tax',
-      'emissions standard',
-      'administration',
-      'regulatory',
-      'compliance',
-      'environmental law',
-      'energy secretary',
-      'department of energy',
-      'subsidies',
-      'tax credit',
-      'legislation',
-      'executive order',
-      'white house',
-      'department',
-      'agency',
-      'commission',
+      "epa",
+      "ferc",
+      "sec",
+      "eu",
+      "parliament",
+      "regulation",
+      "rule",
+      "mandate",
+      "standard",
+      "court",
+      "lawsuit",
+      "bill",
+      "policy",
+      "permitting",
+      "government",
+      "federal",
+      "congress",
+      "senate",
+      "biden",
+      "trump",
+      "climate law",
+      "carbon tax",
+      "emissions standard",
+      "administration",
+      "regulatory",
+      "compliance",
+      "environmental law",
+      "energy secretary",
+      "department of energy",
+      "subsidies",
+      "tax credit",
+      "legislation",
+      "executive order",
+      "white house",
+      "department",
+      "agency",
+      "commission",
     ],
     patterns: [
       /(epa|ferc|sec|parliament|regulation|rule|mandate|standard|court|lawsuit|bill|policy|permitting)/i,
@@ -61,52 +61,52 @@ export const CATEGORIES = [
     ],
   },
   {
-    slug: 'justice',
-    name: 'Activism',
+    slug: "justice",
+    name: "Activism",
     description:
-      'Climate protests, rallies, strikes, and direct action by grassroots movements and activist organizations',
-    color: '#EC4899', // pink
+      "Climate protests, rallies, strikes, and direct action by grassroots movements and activist organizations",
+    color: "#EC4899", // pink
     keywords: [
       // Specific activist organizations
-      'extinction rebellion',
-      'fridays for future',
-      'sunrise movement',
-      'just stop oil',
-      'greenpeace',
-      '350.org',
-      'climate defiance',
+      "extinction rebellion",
+      "fridays for future",
+      "sunrise movement",
+      "just stop oil",
+      "greenpeace",
+      "350.org",
+      "climate defiance",
 
       // Direct action terms
-      'protest',
-      'protesters',
-      'demonstration',
-      'demonstrators',
-      'march',
-      'rally',
-      'strike',
-      'climate strike',
-      'school strike',
-      'sit-in',
-      'blockade',
-      'civil disobedience',
-      'direct action',
-      'arrested',
-      'disrupt',
-      'disruption',
+      "protest",
+      "protesters",
+      "demonstration",
+      "demonstrators",
+      "march",
+      "rally",
+      "strike",
+      "climate strike",
+      "school strike",
+      "sit-in",
+      "blockade",
+      "civil disobedience",
+      "direct action",
+      "arrested",
+      "disrupt",
+      "disruption",
 
       // Activist-specific terms
-      'activist',
-      'activists',
-      'activism',
-      'grassroots movement',
-      'climate activist',
-      'youth activist',
+      "activist",
+      "activists",
+      "activism",
+      "grassroots movement",
+      "climate activist",
+      "youth activist",
 
       // Specific movement actions
-      'occupy',
-      'encampment',
-      'hunger strike',
-      'tree sit',
+      "occupy",
+      "encampment",
+      "hunger strike",
+      "tree sit",
     ],
     patterns: [
       /(protest|protesters?|demonstration|demonstrators?|march|rally|strike)/i,
@@ -117,46 +117,46 @@ export const CATEGORIES = [
     ],
   },
   {
-    slug: 'business',
-    name: 'Business',
-    description: 'Corporate climate action, finance, and market trends',
-    color: '#06B6D4', // cyan
+    slug: "business",
+    name: "Business",
+    description: "Corporate climate action, finance, and market trends",
+    color: "#06B6D4", // cyan
     keywords: [
-      'company',
-      'corporation',
-      'business',
-      'industry',
-      'ceo',
-      'executive',
-      'sustainability',
-      'net zero',
-      'carbon neutral',
-      'emissions reduction',
-      'supply chain',
-      'manufacturing',
-      'retail',
-      'airline',
-      'shipping',
-      'automotive',
-      'investment',
-      'funding',
-      'cost',
-      'price',
-      'market',
-      'stock',
-      'bond',
-      'esg',
-      'carbon credit',
-      'carbon market',
-      'green finance',
-      'climate finance',
-      'sustainable finance',
-      'divest',
-      'pension',
-      'insurance',
-      'subsidy',
-      'tax credit',
-      'carbon pricing',
+      "company",
+      "corporation",
+      "business",
+      "industry",
+      "ceo",
+      "executive",
+      "sustainability",
+      "net zero",
+      "carbon neutral",
+      "emissions reduction",
+      "supply chain",
+      "manufacturing",
+      "retail",
+      "airline",
+      "shipping",
+      "automotive",
+      "investment",
+      "funding",
+      "cost",
+      "price",
+      "market",
+      "stock",
+      "bond",
+      "esg",
+      "carbon credit",
+      "carbon market",
+      "green finance",
+      "climate finance",
+      "sustainable finance",
+      "divest",
+      "pension",
+      "insurance",
+      "subsidy",
+      "tax credit",
+      "carbon pricing",
     ],
     patterns: [
       /(company|corporation|business|industry|ceo|executive)/i,
@@ -167,41 +167,41 @@ export const CATEGORIES = [
     ],
   },
   {
-    slug: 'impacts',
-    name: 'Impacts',
+    slug: "impacts",
+    name: "Impacts",
     description:
-      'Climate effects, extreme weather, and environmental consequences',
-    color: '#EF4444', // red
+      "Climate effects, extreme weather, and environmental consequences",
+    color: "#EF4444", // red
     keywords: [
-      'hurricane',
-      'flood',
-      'drought',
-      'wildfire',
-      'heatwave',
-      'storm',
-      'tornado',
-      'cyclone',
-      'sea level',
-      'glacier',
-      'ice sheet',
-      'arctic',
-      'coral',
-      'species',
-      'extinction',
-      'ecosystem',
-      'biodiversity',
-      'agriculture',
-      'crops',
-      'water',
-      'food security',
-      'extreme weather',
-      'climate impact',
-      'environmental damage',
-      'climate crisis',
-      'climate refugee',
-      'climate migration',
-      'climate displacement',
-      'displaced by climate',
+      "hurricane",
+      "flood",
+      "drought",
+      "wildfire",
+      "heatwave",
+      "storm",
+      "tornado",
+      "cyclone",
+      "sea level",
+      "glacier",
+      "ice sheet",
+      "arctic",
+      "coral",
+      "species",
+      "extinction",
+      "ecosystem",
+      "biodiversity",
+      "agriculture",
+      "crops",
+      "water",
+      "food security",
+      "extreme weather",
+      "climate impact",
+      "environmental damage",
+      "climate crisis",
+      "climate refugee",
+      "climate migration",
+      "climate displacement",
+      "displaced by climate",
     ],
     patterns: [
       /(hurricane|flood|drought|wildfire|heatwave|storm|tornado|cyclone)/i,
@@ -216,42 +216,42 @@ export const CATEGORIES = [
     ],
   },
   {
-    slug: 'tech',
-    name: 'Tech',
-    description: 'Clean technology, renewables, and climate solutions',
-    color: '#10B981', // green
+    slug: "tech",
+    name: "Tech",
+    description: "Clean technology, renewables, and climate solutions",
+    color: "#10B981", // green
     keywords: [
-      'technology',
-      'innovation',
-      'startup',
-      'carbon capture',
-      'ccus',
-      'direct air capture',
-      'hydrogen',
-      'electric vehicle',
-      'ev',
-      'tesla',
-      'battery',
-      'smart grid',
-      'artificial intelligence',
-      'satellite',
-      'sensor',
-      'monitoring',
-      'app',
-      'platform',
-      'software',
-      'algorithm',
-      'solar panel',
-      'wind turbine',
-      'renewable energy',
-      'grid storage',
-      'electricity generation',
-      'nuclear power',
-      'energy storage',
-      'transmission line',
-      'utility scale',
-      'clean tech',
-      'cleantech',
+      "technology",
+      "innovation",
+      "startup",
+      "carbon capture",
+      "ccus",
+      "direct air capture",
+      "hydrogen",
+      "electric vehicle",
+      "ev",
+      "tesla",
+      "battery",
+      "smart grid",
+      "artificial intelligence",
+      "satellite",
+      "sensor",
+      "monitoring",
+      "app",
+      "platform",
+      "software",
+      "algorithm",
+      "solar panel",
+      "wind turbine",
+      "renewable energy",
+      "grid storage",
+      "electricity generation",
+      "nuclear power",
+      "energy storage",
+      "transmission line",
+      "utility scale",
+      "clean tech",
+      "cleantech",
     ],
     patterns: [
       /(technology|innovation|startup|carbon capture|ccus|direct air capture)/i,
@@ -263,53 +263,53 @@ export const CATEGORIES = [
     ],
   },
   {
-    slug: 'research',
-    name: 'Research & Innovation',
-    description: 'Climate research, studies, and scientific discoveries',
-    color: '#8B5CF6', // purple
+    slug: "research",
+    name: "Research & Innovation",
+    description: "Climate research, studies, and scientific discoveries",
+    color: "#8B5CF6", // purple
     keywords: [
-      'study shows',
-      'study finds',
-      'study reveals',
-      'research shows',
-      'research finds',
-      'scientists discover',
-      'scientists find',
-      'new research',
-      'peer review',
-      'journal',
-      'published',
-      'paper',
-      'analysis shows',
-      'findings show',
-      'evidence shows',
-      'data reveals',
-      'climate model',
-      'simulation',
-      'peer-reviewed',
-      'scientific study',
-      'climate science',
-      'atmospheric science',
-      'oceanography',
-      'ipcc report',
-      'science journal',
-      'nature journal',
-      'science magazine',
-      'research paper',
-      'academic study',
-      'university research',
+      "study shows",
+      "study finds",
+      "study reveals",
+      "research shows",
+      "research finds",
+      "scientists discover",
+      "scientists find",
+      "new research",
+      "peer review",
+      "journal",
+      "published",
+      "paper",
+      "analysis shows",
+      "findings show",
+      "evidence shows",
+      "data reveals",
+      "climate model",
+      "simulation",
+      "peer-reviewed",
+      "scientific study",
+      "climate science",
+      "atmospheric science",
+      "oceanography",
+      "ipcc report",
+      "science journal",
+      "nature journal",
+      "science magazine",
+      "research paper",
+      "academic study",
+      "university research",
       // Add broader but still research-specific terms
-      'study',
-      'research',
-      'scientist',
-      'scientists',
-      'scientific',
-      'findings',
-      'data',
-      'analysis',
-      'report',
-      'university',
-      'academic',
+      "study",
+      "research",
+      "scientist",
+      "scientists",
+      "scientific",
+      "findings",
+      "data",
+      "analysis",
+      "report",
+      "university",
+      "academic",
     ],
     patterns: [
       /(study (shows|finds|reveals)|research (shows|finds)|scientists (discover|find))/i,
@@ -320,19 +320,19 @@ export const CATEGORIES = [
       // Removed: negative lookahead pattern was flawed (only worked if weather terms came after)
     ],
   },
-] as const
+] as const;
 
-export type CategorySlug = (typeof CATEGORIES)[number]['slug']
+export type CategorySlug = (typeof CATEGORIES)[number]["slug"];
 
 export interface CategoryScore {
-  slug: CategorySlug
-  confidence: number
-  reasons: string[]
+  slug: CategorySlug;
+  confidence: number;
+  reasons: string[];
 }
 
 // Category lookup helper
 export function getCategoryBySlug(slug: string) {
-  return CATEGORIES.find((c) => c.slug === slug)
+  return CATEGORIES.find((c) => c.slug === slug);
 }
 
 /**
@@ -342,7 +342,7 @@ export function getCategoryBySlug(slug: string) {
  * TODO: This is prone to both false positives and false negatives. A simple way to improve this is to use LLMs to check the article + summary.
  */
 export function isClimateRelevant(article: ArticleLike): boolean {
-  const text = `${article.title} ${article.summary || ''}`.toLowerCase()
+  const text = `${article.title} ${article.summary || ""}`.toLowerCase();
 
   const climateTerms = [
     // Core climate terms
@@ -403,9 +403,9 @@ export function isClimateRelevant(article: ArticleLike): boolean {
     /\b(esg.*climate|climate.*esg|green finance|climate finance|sustainable finance)\b/i,
     /\b(carbon credit|carbon market|carbon offset|climate risk)\b/i,
     /\b(divest.*fossil|stranded asset|climate disclosure)\b/i,
-  ]
+  ];
 
-  return climateTerms.some((pattern) => pattern.test(text))
+  return climateTerms.some((pattern) => pattern.test(text));
 }
 
 /**
@@ -416,44 +416,44 @@ export function categorizeArticle(article: ArticleLike): CategoryScore[] {
   // This prevents non-climate articles from being categorized and appearing in the river
   if (!isClimateRelevant(article)) {
     console.log(
-      `⚠️  Article filtered out (not climate-relevant): "${article.title.substring(0, 60)}..."`
-    )
-    return []
+      `⚠️  Article filtered out (not climate-relevant): "${article.title.substring(0, 60)}..."`,
+    );
+    return [];
   }
 
-  const { title, summary } = article
-  const text = `${title} ${summary || ''}`.toLowerCase()
-  const scores: CategoryScore[] = []
+  const { title, summary } = article;
+  const text = `${title} ${summary || ""}`.toLowerCase();
+  const scores: CategoryScore[] = [];
 
   for (const category of CATEGORIES) {
-    let confidence = 0
-    const reasons: string[] = []
+    let confidence = 0;
+    const reasons: string[] = [];
 
     // Check keywords (weight: 0.3 per match, max 0.9)
     // Using word boundaries to prevent partial matches (e.g., "ev" matching "evacuated")
-    let keywordMatches = 0
+    let keywordMatches = 0;
     for (const keyword of category.keywords) {
       const keywordPattern = new RegExp(
-        `\\b${escapeRegex(keyword.toLowerCase())}\\b`
-      )
+        `\\b${escapeRegex(keyword.toLowerCase())}\\b`,
+      );
       if (keywordPattern.test(text)) {
-        keywordMatches++
-        reasons.push(`keyword: ${keyword}`)
+        keywordMatches++;
+        reasons.push(`keyword: ${keyword}`);
       }
     }
-    const keywordScore = Math.min(keywordMatches * 0.3, 0.9)
-    confidence += keywordScore
+    const keywordScore = Math.min(keywordMatches * 0.3, 0.9);
+    confidence += keywordScore;
 
     // Check patterns (weight: 0.4 per match, max 1.2)
-    let patternMatches = 0
+    let patternMatches = 0;
     for (const pattern of category.patterns) {
       if (pattern.test(text)) {
-        patternMatches++
-        reasons.push(`pattern: ${pattern.source}`)
+        patternMatches++;
+        reasons.push(`pattern: ${pattern.source}`);
       }
     }
-    const patternScore = Math.min(patternMatches * 0.4, 1.2)
-    confidence += patternScore
+    const patternScore = Math.min(patternMatches * 0.4, 1.2);
+    confidence += patternScore;
 
     // Include all categories with any signal (filtering happens in storeArticleCategories)
     if (confidence > 0) {
@@ -461,10 +461,10 @@ export function categorizeArticle(article: ArticleLike): CategoryScore[] {
         slug: category.slug,
         confidence: Math.min(confidence, 1.0), // Cap at 1.0
         reasons,
-      })
+      });
     }
   }
 
   // Sort by confidence (highest first)
-  return scores.sort((a, b) => b.confidence - a.confidence)
+  return scores.sort((a, b) => b.confidence - a.confidence);
 }
