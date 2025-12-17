@@ -1,30 +1,30 @@
-'use client'
+"use client";
 
-import React from 'react'
+import React from "react";
 
 interface ClimateRiverLogoProps extends React.SVGAttributes<SVGSVGElement> {
-  animated?: boolean
-  size?: 'sm' | 'md' | 'lg' | 'xl'
-  variant?: 'monochrome' | 'colored'
+  animated?: boolean;
+  size?: "sm" | "md" | "lg" | "xl";
+  variant?: "monochrome" | "colored";
 }
 
 export default function ClimateRiverLogo({
-  className = '',
+  className = "",
   animated = false,
-  size = 'md',
-  variant = 'monochrome',
+  size = "md",
+  variant = "monochrome",
   ...svgProps
 }: ClimateRiverLogoProps) {
   const sizeClasses = {
-    sm: 'w-4 h-4',
-    md: 'w-6 h-6',
-    lg: 'w-8 h-8',
-    xl: 'w-12 h-12',
-  }
+    sm: "w-4 h-4",
+    md: "w-6 h-6",
+    lg: "w-8 h-8",
+    xl: "w-12 h-12",
+  };
 
-  const colorClass = variant === 'monochrome' ? 'text-black' : 'text-current'
-  const uniqueGradientId = React.useId().replace(/:/g, '')
-  const gradientId = `climate-gradient-${uniqueGradientId}`
+  const colorClass = variant === "monochrome" ? "text-black" : "text-current";
+  const uniqueGradientId = React.useId().replace(/:/g, "");
+  const gradientId = `climate-gradient-${uniqueGradientId}`;
 
   return (
     <svg
@@ -42,7 +42,7 @@ export default function ClimateRiverLogo({
       className={`${sizeClasses[size]} ${colorClass} ${className}`}
     >
       {/* Gradient definitions for colored variant */}
-      {variant === 'colored' && (
+      {variant === "colored" && (
         <defs>
           <linearGradient id={gradientId} x1="0%" y1="0%" x2="100%" y2="100%">
             <stop offset="0%" stopColor="#3B82F6" />
@@ -56,10 +56,10 @@ export default function ClimateRiverLogo({
       )}
 
       <path
-        fill={variant === 'colored' ? `url(#${gradientId})` : 'currentColor'}
+        fill={variant === "colored" ? `url(#${gradientId})` : "currentColor"}
         opacity="1.000000"
         stroke="none"
-        className={animated ? 'animate-flow' : ''}
+        className={animated ? "animate-flow" : ""}
         d="
 M57.575699,185.216431 
 	C39.610359,137.772995 50.559528,82.090637 97.318161,49.757851 
@@ -149,5 +149,5 @@ z"
         `}</style>
       )}
     </svg>
-  )
+  );
 }
