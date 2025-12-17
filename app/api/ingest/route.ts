@@ -8,7 +8,10 @@ import { headers } from "next/headers";
 /** --- Types for dynamic imports (keeps TS happy without ts-expect-error) --- */
 type ScriptResult = Record<string, unknown>;
 type IngestMod = {
-  run: (opts?: { limit?: number; closePool?: boolean }) => Promise<ScriptResult>;
+  run: (opts?: {
+    limit?: number;
+    closePool?: boolean;
+  }) => Promise<ScriptResult>;
 };
 type DiscoverMod = {
   run: (opts?: {
@@ -101,10 +104,7 @@ async function handle(req: Request) {
     });
   } catch (e: unknown) {
     const message = e instanceof Error ? e.message : String(e);
-    return NextResponse.json(
-      { ok: false, error: message },
-      { status: 500 },
-    );
+    return NextResponse.json({ ok: false, error: message }, { status: 500 });
   }
 }
 
