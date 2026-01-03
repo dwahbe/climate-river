@@ -5,6 +5,7 @@ import PublisherLink from "@/components/PublisherLink";
 import ShareButtons from "@/components/ShareButtons";
 import PublisherIcon from "@/components/PublisherIcon";
 import ArticleImage from "@/components/ArticleImage";
+import PreviewButton from "@/components/PreviewButton";
 import type { Cluster } from "@/lib/models/cluster";
 
 function hostFrom(url: string) {
@@ -17,9 +18,15 @@ function hostFrom(url: string) {
 
 type FeedCardProps = {
   cluster: Cluster;
+  onPreview?: (articleId: number, title: string, url: string) => void;
+  isSelected?: boolean;
 };
 
-export default function FeedCard({ cluster }: FeedCardProps) {
+export default function FeedCard({
+  cluster,
+  onPreview,
+  isSelected,
+}: FeedCardProps) {
   const publisher = cluster.lead_source || hostFrom(cluster.lead_url);
   const publisherDomain = cluster.lead_homepage
     ? hostFrom(cluster.lead_homepage)
@@ -30,7 +37,9 @@ export default function FeedCard({ cluster }: FeedCardProps) {
   const relatedCount = cluster.subs_total;
 
   return (
-    <article className="bg-white border-b border-zinc-200/80 hover:bg-zinc-50/50 transition-colors">
+    <article
+      className={`bg-white border-b border-zinc-200/80 hover:bg-zinc-50/50 transition-colors ${isSelected ? "bg-zinc-50 ring-2 ring-inset ring-zinc-200" : ""}`}
+    >
       {/* Header with padding */}
       <div className="px-4 pt-4 sm:px-5 sm:pt-5">
         <div className="flex gap-3">
@@ -53,12 +62,12 @@ export default function FeedCard({ cluster }: FeedCardProps) {
                 {cluster.lead_homepage ? (
                   <PublisherLink
                     href={cluster.lead_homepage}
-                    className="font-semibold text-zinc-900 hover:underline truncate"
+                    className="font-medium text-zinc-900 hover:underline truncate"
                   >
                     {publisher}
                   </PublisherLink>
                 ) : (
-                  <span className="font-semibold text-zinc-900 truncate">
+                  <span className="font-medium text-zinc-900 truncate">
                     {publisher}
                   </span>
                 )}
@@ -128,9 +137,17 @@ export default function FeedCard({ cluster }: FeedCardProps) {
           </div>
         )}
 
-        {/* Footer: Share buttons */}
-        <div className="flex items-center pt-1">
+        {/* Footer: Share buttons + Preview */}
+        <div className="flex items-center gap-2 pt-1">
           <ShareButtons url={cluster.lead_url} title={cluster.lead_title} />
+          <PreviewButton
+            articleId={cluster.lead_article_id}
+            articleTitle={cluster.lead_title}
+            articleUrl={cluster.lead_url}
+            contentStatus={cluster.lead_content_status}
+            contentWordCount={cluster.lead_content_word_count}
+            onPreview={onPreview}
+          />
         </div>
       </div>
     </article>
