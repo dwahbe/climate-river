@@ -230,7 +230,8 @@ export async function run() {
       subs_total integer,
       all_articles_by_source jsonb,
       lead_content_status text,
-      lead_content_word_count integer
+      lead_content_word_count integer,
+      lead_image text
     )
     language sql
     stable
@@ -250,7 +251,8 @@ export async function run() {
           coalesce(a.publisher_name, s.name) as lead_source,
           coalesce(a.publisher_homepage, s.homepage_url) as lead_homepage,
           a.content_status as lead_content_status,
-          a.content_word_count as lead_content_word_count
+          a.content_word_count as lead_content_word_count,
+          a.content_image as lead_image
         from cluster_scores cs
         join articles a on a.id = cs.lead_article_id
         left join sources s on s.id = a.source_id
@@ -411,7 +413,8 @@ export async function run() {
         coalesce(s.subs_total, 0) as subs_total,
         coalesce(sr.all_articles_by_source, '{}'::jsonb) as all_articles_by_source,
         rc.lead_content_status,
-        rc.lead_content_word_count
+        rc.lead_content_word_count,
+        rc.lead_image
       from ranked rc
       left join subs s on s.cluster_id = rc.cluster_id and s.rownum = rc.rownum
       left join source_rollup sr on sr.cluster_id = rc.cluster_id and sr.rownum = rc.rownum

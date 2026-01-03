@@ -36,6 +36,7 @@ export type Cluster = {
   all_articles_by_source: Record<string, ClusterArticle[]>;
   lead_content_status: string | null;
   lead_content_word_count: number | null;
+  lead_image: string | null;
 };
 
 export type RiverFilters = {

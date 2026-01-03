@@ -23,6 +23,7 @@ const baseCluster: Cluster = {
   all_articles_by_source: {},
   lead_content_status: null,
   lead_content_word_count: null,
+  lead_image: null,
 };
 
 describe("normalizeRiverClusters", () => {
