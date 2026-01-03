@@ -22,8 +22,10 @@ export default async function TestingPage() {
   });
 
   return (
-    <div className="mx-auto w-full max-w-3xl px-4 sm:px-6 pt-1 sm:pt-1.5">
-      <h1 className="mb-3 text-xl font-semibold tracking-tight">Top Stories</h1>
+    <div className="mx-auto w-full max-w-3xl sm:px-6 pt-1 sm:pt-1.5">
+      <h1 className="mb-3 px-4 sm:px-0 text-xl font-semibold tracking-tight">
+        Top Stories
+      </h1>
 
       {/* Feed */}
       <div className="divide-y divide-zinc-200/80">

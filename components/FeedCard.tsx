@@ -31,7 +31,8 @@ export default function FeedCard({ cluster }: FeedCardProps) {
 
   return (
     <article className="bg-white border-b border-zinc-200/80 hover:bg-zinc-50/50 transition-colors">
-      <div className="px-4 py-4 sm:px-5 sm:py-5">
+      {/* Header with padding */}
+      <div className="px-4 pt-4 sm:px-5 sm:pt-5">
         <div className="flex gap-3">
           {/* Publisher Icon */}
           <div className="flex-shrink-0 pt-0.5">
@@ -99,32 +100,37 @@ export default function FeedCard({ cluster }: FeedCardProps) {
                 {cluster.lead_dek}
               </p>
             )}
-
-            {/* Image */}
-            {hasImage && (
-              <ArticleImage src={cluster.lead_image!} href={leadClickHref} />
-            )}
-
-            {/* Related articles link */}
-            {isCluster && relatedCount > 0 && (
-              <div className="mb-3">
-                <Link
-                  href={`/river/${cluster.cluster_id}`}
-                  className="text-sm text-zinc-500 hover:text-zinc-700 hover:underline"
-                  prefetch={false}
-                >
-                  +{relatedCount} related article{relatedCount !== 1 ? "s" : ""}{" "}
-                  from {cluster.sources_count} source
-                  {cluster.sources_count !== 1 ? "s" : ""}
-                </Link>
-              </div>
-            )}
-
-            {/* Footer: Share buttons */}
-            <div className="flex items-center pt-1">
-              <ShareButtons url={cluster.lead_url} title={cluster.lead_title} />
-            </div>
           </div>
+        </div>
+      </div>
+
+      {/* Image - aligned with content column */}
+      {hasImage && (
+        <div className="pl-[68px] pr-4 sm:pl-[72px] sm:pr-5 mt-2">
+          <ArticleImage src={cluster.lead_image!} href={leadClickHref} />
+        </div>
+      )}
+
+      {/* Footer - aligned with content column */}
+      <div className="pl-[68px] pr-4 pb-4 sm:pl-[72px] sm:pr-5 sm:pb-5">
+        {/* Related articles link */}
+        {isCluster && relatedCount > 0 && (
+          <div className="mb-2 mt-1">
+            <Link
+              href={`/river/${cluster.cluster_id}`}
+              className="text-sm text-zinc-500 hover:text-zinc-700 hover:underline"
+              prefetch={false}
+            >
+              +{relatedCount} related article{relatedCount !== 1 ? "s" : ""}{" "}
+              from {cluster.sources_count} source
+              {cluster.sources_count !== 1 ? "s" : ""}
+            </Link>
+          </div>
+        )}
+
+        {/* Footer: Share buttons */}
+        <div className="flex items-center pt-1">
+          <ShareButtons url={cluster.lead_url} title={cluster.lead_title} />
         </div>
       </div>
     </article>
