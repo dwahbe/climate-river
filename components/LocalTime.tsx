@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useEffect, useMemo, useReducer } from "react";
 
 const fullFormatter = new Intl.DateTimeFormat("en-US", {
   dateStyle: "medium",
@@ -35,29 +35,24 @@ function getRelativeTime(date: Date): string {
 }
 
 export default function LocalTime({ iso }: { iso: string }) {
-  const [relativeTime, setRelativeTime] = useState<string>("");
-  const date = new Date(iso);
+  const date = useMemo(() => new Date(iso), [iso]);
   const fullTime = `${fullFormatter.format(date)} PT`;
 
+  // Force re-renders for relative time updates
+  const [, forceUpdate] = useReducer((x: number) => x + 1, 0);
+
   useEffect(() => {
-    // Set initial relative time
-    setRelativeTime(getRelativeTime(date));
-
     // Update every minute for fresh relative times
-    const interval = setInterval(() => {
-      setRelativeTime(getRelativeTime(date));
-    }, 60000);
-
+    const interval = setInterval(forceUpdate, 60000);
     return () => clearInterval(interval);
-  }, [iso]);
+  }, []);
 
-  // Show placeholder on server, relative time on client
-  if (!relativeTime) {
-    return <time dateTime={iso}>{dateOnlyFormatter.format(date)}</time>;
-  }
+  // Compute relative time on each render
+  const relativeTime = getRelativeTime(date);
 
+  // Suppress hydration mismatch by using suppressHydrationWarning
   return (
-    <time dateTime={iso} title={fullTime}>
+    <time dateTime={iso} title={fullTime} suppressHydrationWarning>
       {relativeTime}
     </time>
   );
