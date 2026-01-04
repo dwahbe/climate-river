@@ -4,12 +4,6 @@ import { isClimateRelevant } from "@/lib/tagger";
 import { generateText } from "ai";
 import { openai } from "@ai-sdk/openai";
 
-type ClusterContextItem = {
-  article_id: number;
-  title: string;
-  source: string | null;
-};
-
 type Row = {
   id: number;
   title: string;
@@ -18,8 +12,6 @@ type Row = {
   content_text: string | null;
   content_html: string | null;
   content_status: string | null;
-  cluster_id: number | null;
-  cluster_context: ClusterContextItem[] | null;
 };
 
 /* ------------------------- Content Extraction with Safety Checks ------------------------- */
@@ -103,7 +95,6 @@ function buildPrompt(input: {
   dek?: string | null;
   contentSnippet?: string | null;
   previewExcerpt?: string | null;
-  clusterContext?: ClusterContextItem[];
 }) {
   const lines = [
     "Rewrite this climate news headline in the style of Techmeme - dense, factual, scannable, with all key details.",
@@ -173,20 +164,6 @@ function buildPrompt(input: {
     lines.push(
       `Preview article excerpt (from Climate River reader): ${input.previewExcerpt}`,
     );
-  }
-
-  if (input.clusterContext && input.clusterContext.length > 0) {
-    lines.push("");
-    lines.push("OTHER COVERAGE (cluster context):");
-    lines.push(
-      "  (Treat these as verified related reports; reuse their exact figures if relevant)",
-    );
-    for (const related of input.clusterContext.slice(0, 3)) {
-      const sourceLabel = related.source
-        ? `${related.source}:`
-        : "Related article:";
-      lines.push(`- ${sourceLabel} ${related.title}`);
-    }
   }
 
   lines.push("");
@@ -493,7 +470,6 @@ async function generateWithOpenAI(
     dek?: string | null;
     contentSnippet?: string | null;
     previewExcerpt?: string | null;
-    clusterContext?: ClusterContextItem[];
   },
   abortMs = 20000,
   retries = 2,
@@ -524,14 +500,6 @@ async function generateWithOpenAI(
       notesParts.push("no_preview");
     }
 
-    if (input.clusterContext && input.clusterContext.length > 0) {
-      notesParts.push(
-        `with_cluster:${Math.min(input.clusterContext.length, 5)}`,
-      );
-    } else {
-      notesParts.push("no_cluster");
-    }
-
     return {
       text: sanitized,
       model,
@@ -540,16 +508,10 @@ async function generateWithOpenAI(
   } catch (error: unknown) {
     console.error("❌ Error generating text with AI SDK:", error);
     const message = error instanceof Error ? error.message : "unknown_error";
-    const failureParts = [
-      `failed:${message}`,
-      input.clusterContext && input.clusterContext.length > 0
-        ? `with_cluster:${Math.min(input.clusterContext.length, 5)}`
-        : "no_cluster",
-    ];
     return {
       text: null,
       model,
-      notes: failureParts.join(":"),
+      notes: `failed:${message}`,
     };
   }
 }
@@ -593,35 +555,8 @@ async function fetchBatch(limit = 40) {
         a.canonical_url,
         a.content_text,
         a.content_html,
-        a.content_status,
-        cluster_map.cluster_id,
-        cluster_ctx.cluster_context
+        a.content_status
       from articles a
-      left join lateral (
-        select ac.cluster_id
-        from article_clusters ac
-        where ac.article_id = a.id
-        order by ac.cluster_id desc
-        limit 1
-      ) cluster_map on true
-      left join lateral (
-        select jsonb_agg(item) as cluster_context
-        from (
-          select jsonb_build_object(
-            'article_id', a2.id,
-            'title', coalesce(a2.rewritten_title, a2.title),
-            'source', coalesce(a2.publisher_name, s2.name)
-          ) as item
-          from article_clusters ac2
-          join articles a2 on a2.id = ac2.article_id
-          left join sources s2 on s2.id = a2.source_id
-          where cluster_map.cluster_id is not null
-            and ac2.cluster_id = cluster_map.cluster_id
-            and ac2.article_id <> a.id
-          order by a2.published_at desc
-          limit 5
-        ) as cluster_items
-      ) cluster_ctx on true
       left join lateral (
         select cs.score
         from cluster_scores cs
@@ -663,26 +598,6 @@ async function processOne(r: Row) {
       ? extractContentSnippet(null, r.content_html, 1500, r.id)
       : null;
 
-  const clusterContext: ClusterContextItem[] = Array.isArray(r.cluster_context)
-    ? (() => {
-        const seen = new Set<string>();
-        const items: ClusterContextItem[] = [];
-        for (const item of r.cluster_context) {
-          if (!item || !item.title) continue;
-          const normalizedSource = item.source ?? null;
-          const dedupeKey = `${normalizedSource?.toLowerCase() || ""}|${item.title}`;
-          if (seen.has(dedupeKey)) continue;
-          seen.add(dedupeKey);
-          items.push({
-            article_id: item.article_id,
-            title: item.title,
-            source: normalizedSource,
-          });
-        }
-        return items;
-      })()
-    : [];
-
   // Track what happened with content
   let contentNote = "";
   if (!r.content_status) {
@@ -693,11 +608,7 @@ async function processOne(r: Row) {
     contentNote = ":content_rejected"; // Had content but failed quality checks
   }
 
-  const clusterTitles = clusterContext
-    .map((item) => item.title)
-    .filter(Boolean);
-
-  // For validating numbers exist: check all source material
+  // For validating numbers exist: check only this article's own content
   const sourceQuant = buildSourceQuantContext([
     r.title,
     r.dek,
@@ -705,18 +616,14 @@ async function processOne(r: Row) {
     previewExcerpt,
     r.content_text,
     r.content_html,
-    ...clusterTitles,
   ]);
 
-  const aggregatedClusterTitles =
-    clusterTitles.length > 0 ? clusterTitles.join(" ") : "";
   const climateSummaryParts = [
     r.dek,
     contentSnippet,
     previewExcerpt,
     r.content_text,
     r.content_html,
-    aggregatedClusterTitles,
   ].filter(
     (part): part is string =>
       typeof part === "string" && part.trim().length > 0,
@@ -753,7 +660,6 @@ async function processOne(r: Row) {
     dek: r.dek,
     contentSnippet,
     previewExcerpt,
-    clusterContext,
   });
   const draft = llm.text || "";
 
