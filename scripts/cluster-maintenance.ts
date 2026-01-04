@@ -209,10 +209,12 @@ async function mergeSimilarClusters() {
 }
 
 /**
- * Update cluster scores after maintenance
+ * Update cluster metadata (lead article, size) after maintenance.
+ * NOTE: Does NOT update score - that's handled by rescore.ts which has the
+ * proper scoring algorithm. We only update lead_article_id and size here.
  */
-async function updateClusterScores() {
-  console.log("\n📊 Updating cluster scores...");
+async function updateClusterMetadata() {
+  console.log("\n📊 Updating cluster metadata...");
 
   await query(`
     INSERT INTO cluster_scores (cluster_id, lead_article_id, size, score)
@@ -225,7 +227,7 @@ async function updateClusterScores() {
        ORDER BY a.published_at DESC, a.id DESC
        LIMIT 1) as lead_article_id,
       COUNT(*) as size,
-      EXTRACT(EPOCH FROM NOW()) as score
+      0 as score  -- Placeholder; rescore.ts will calculate proper score
     FROM article_clusters ac
     JOIN articles a ON a.id = ac.article_id
     WHERE a.fetched_at >= now() - interval '7 days'
@@ -234,9 +236,10 @@ async function updateClusterScores() {
       lead_article_id = EXCLUDED.lead_article_id,
       size = EXCLUDED.size,
       updated_at = NOW()
+      -- NOTE: Do NOT update score here - rescore.ts handles that
   `);
 
-  console.log("  ✓ Cluster scores updated");
+  console.log("  ✓ Cluster metadata updated");
 }
 
 export async function run(opts: { closePool?: boolean } = {}) {
@@ -247,7 +250,7 @@ export async function run(opts: { closePool?: boolean } = {}) {
   const merged = await mergeSimilarClusters();
 
   if (added > 0 || merged > 0) {
-    await updateClusterScores();
+    await updateClusterMetadata();
   }
 
   console.log("\n✅ Cluster maintenance complete!");

@@ -1445,6 +1445,10 @@ async function getOrCreateSourceForResult(
       ? resultSource
       : humanizeHost(host);
 
+  // Default weight of 2 for web-discovered sources (lower than curated RSS sources)
+  // This prevents random/low-quality sites from ranking as high as major outlets
+  const DEFAULT_WEB_DISCOVERED_WEIGHT = 2;
+
   const inserted = await query<{ id: number }>(
     `
       INSERT INTO sources (name, homepage_url, feed_url, weight, slug)
@@ -1452,11 +1456,11 @@ async function getOrCreateSourceForResult(
       ON CONFLICT (feed_url) DO UPDATE
         SET name = EXCLUDED.name,
             homepage_url = EXCLUDED.homepage_url,
-            weight = EXCLUDED.weight,
             slug = EXCLUDED.slug
+        -- NOTE: Don't override weight on conflict - preserve any manual adjustments
       RETURNING id
     `,
-    [publisherName, homepage, feedUrl, 4, slug],
+    [publisherName, homepage, feedUrl, DEFAULT_WEB_DISCOVERED_WEIGHT, slug],
   );
 
   const sourceId = inserted.rows[0]?.id;

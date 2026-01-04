@@ -447,10 +447,11 @@ async function insertArticle(
   return row.rows[0]?.id;
 }
 
-// Update cluster scores when new articles are added
-async function updateClusterScore(clusterId: number) {
+// Update cluster metadata (lead article, size) when new articles are added
+// NOTE: Does NOT update score - that's handled by rescore.ts which has the
+// proper scoring algorithm with freshness decay, source weights, etc.
+async function updateClusterMetadata(clusterId: number) {
   try {
-    // Simplified cluster scoring - just update lead article and size
     await query(
       `
       INSERT INTO cluster_scores (cluster_id, lead_article_id, size, score)
@@ -465,7 +466,7 @@ async function updateClusterScore(clusterId: number) {
         (SELECT COUNT(*) 
          FROM article_clusters 
          WHERE cluster_id = $1) as size,
-        EXTRACT(EPOCH FROM NOW()) as score  -- Simple timestamp score
+        0 as score  -- Placeholder; rescore.ts calculates proper score
       ON CONFLICT (cluster_id) DO UPDATE SET
         lead_article_id = (SELECT a.id 
                           FROM articles a
@@ -477,15 +478,16 @@ async function updateClusterScore(clusterId: number) {
                 FROM article_clusters 
                 WHERE cluster_id = $1),
         updated_at = NOW()
+        -- NOTE: Do NOT update score here - rescore.ts handles that
     `,
       [clusterId],
     );
   } catch (error) {
     console.error(
-      `Failed to update cluster score for cluster ${clusterId}:`,
+      `Failed to update cluster metadata for cluster ${clusterId}:`,
       error,
     );
-    // Don't fail the whole process if scoring fails
+    // Don't fail the whole process if metadata update fails
   }
 }
 
@@ -602,7 +604,7 @@ async function ensureSemanticClusterForArticle(
     }
 
     // Update cluster_scores to potentially select a better lead article
-    await updateClusterScore(clusterId);
+    await updateClusterMetadata(clusterId);
     return;
   }
 
@@ -640,7 +642,7 @@ async function ensureSemanticClusterForArticle(
     );
 
     // Initialize cluster_scores for the new cluster
-    await updateClusterScore(clusterId);
+    await updateClusterMetadata(clusterId);
     return;
   }
 
