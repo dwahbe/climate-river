@@ -260,6 +260,9 @@ export async function run() {
           and a.canonical_url not like 'https://news.google.com%'
           and a.canonical_url not like 'https://news.yahoo.com%'
           and a.canonical_url not like 'https://www.msn.com%'
+          -- CRITICAL FIX: Exclude articles with bad dates (published_at ≈ fetched_at)
+          -- These are old articles where date parsing failed and NOW() was used as fallback
+          and abs(extract(epoch from (a.published_at - a.fetched_at))) > 60
       ),
       category_filtered as (
         select c.*

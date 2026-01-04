@@ -1081,12 +1081,41 @@ function normalizePublishedDate(
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
+// Validate that a date is reasonable for a news article
+function isValidArticleDate(date: Date | null): {
+  valid: boolean;
+  reason?: string;
+} {
+  if (!date) return { valid: false, reason: "missing date" };
+
+  const now = new Date();
+  const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+  const oneMinuteFromNow = new Date(now.getTime() + 60 * 1000);
+
+  // Reject future dates (with 1 minute grace for clock skew)
+  if (date > oneMinuteFromNow) {
+    return { valid: false, reason: `future date: ${date.toISOString()}` };
+  }
+
+  // Warn if date is very close to now (within 30 seconds) - likely a fallback to NOW()
+  if (Math.abs(date.getTime() - now.getTime()) < 30 * 1000) {
+    return { valid: false, reason: "date suspiciously close to current time" };
+  }
+
+  // Web discovery should only get articles from the last 7 days
+  if (date < sevenDaysAgo) {
+    return { valid: false, reason: `too old: ${date.toISOString()}` };
+  }
+
+  return { valid: true };
+}
+
 function isResultFresh(result: WebSearchResult, cutoffMs: number): boolean {
   const publishedAt = normalizePublishedDate(result.publishedDate);
   if (!publishedAt) {
-    // If no date available, assume it's fresh (let dedup handle old articles)
-    // This is important for Tavily results which often lack dates
-    return true;
+    // CRITICAL: Reject articles without dates to prevent old content from appearing as new
+    // This was causing 10-month-old articles to appear as "2 days ago"
+    return false;
   }
   return publishedAt.getTime() >= cutoffMs;
 }
@@ -1490,6 +1519,17 @@ async function insertWebDiscoveredArticle(
   publisherHomepage?: string | null,
 ): Promise<number | null> {
   try {
+    // Validate the published date
+    const publishedDate = normalizePublishedDate(result.publishedDate);
+    const dateValidation = isValidArticleDate(publishedDate);
+
+    if (!dateValidation.valid) {
+      console.log(
+        `⚠️  Skipping web-discovered article with invalid date (${dateValidation.reason}): "${result.title.substring(0, 60)}..."`,
+      );
+      return null;
+    }
+
     const { rows } = await query<{ id: number }>(
       `
       INSERT INTO articles (
@@ -1510,7 +1550,7 @@ async function insertWebDiscoveredArticle(
         result.title,
         result.url,
         result.snippet,
-        normalizePublishedDate(result.publishedDate) ?? new Date(),
+        publishedDate, // Now guaranteed to be valid, no fallback needed
         publisherName ?? null,
         publisherHomepage ?? null,
       ],

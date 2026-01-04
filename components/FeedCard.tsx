@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Sparkles } from "lucide-react";
+import { Sparkles, Layers } from "lucide-react";
 import LocalTime from "@/components/LocalTime";
 import PublisherLink from "@/components/PublisherLink";
 import ShareButtons from "@/components/ShareButtons";
@@ -122,17 +122,20 @@ export default function FeedCard({
 
       {/* Footer - aligned with content column */}
       <div className="pl-[68px] pr-4 pb-4 sm:pl-[72px] sm:pr-5 sm:pb-5">
-        {/* Related articles link */}
+        {/* Related articles button */}
         {isCluster && relatedCount > 0 && (
-          <div className="mb-2 mt-1">
+          <div className="mt-3 mb-3">
             <Link
               href={`/river/${cluster.cluster_id}`}
-              className="text-sm text-zinc-500 hover:text-zinc-700 hover:underline"
+              className="inline-flex items-center gap-2 py-2 px-4 bg-zinc-100 hover:bg-zinc-200/80 rounded-full transition-colors"
               prefetch={false}
             >
-              +{relatedCount} related article{relatedCount !== 1 ? "s" : ""}{" "}
-              from {cluster.sources_count} source
-              {cluster.sources_count !== 1 ? "s" : ""}
+              <Layers className="h-4 w-4 text-zinc-500" aria-hidden="true" />
+              <span className="text-sm font-medium text-zinc-700">
+                See {relatedCount} more headline{relatedCount !== 1 ? "s" : ""}{" "}
+                from {cluster.sources_count} source
+                {cluster.sources_count !== 1 ? "s" : ""}
+              </span>
             </Link>
           </div>
         )}

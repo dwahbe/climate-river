@@ -390,6 +390,39 @@ function parseDateMaybe(s?: string) {
   return d.isValid() ? d.toDate() : null;
 }
 
+// Validate that a date is reasonable for a news article (not future, not too old)
+function isValidArticleDate(date: Date | null): {
+  valid: boolean;
+  reason?: string;
+} {
+  if (!date) return { valid: false, reason: "missing date" };
+
+  const now = new Date();
+  const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+  const oneMinuteFromNow = new Date(now.getTime() + 60 * 1000);
+
+  // Reject future dates (with 1 minute grace for clock skew)
+  if (date > oneMinuteFromNow) {
+    return { valid: false, reason: `future date: ${date.toISOString()}` };
+  }
+
+  // Warn if date is very close to now (within 30 seconds) - likely a fallback to NOW()
+  if (Math.abs(date.getTime() - now.getTime()) < 30 * 1000) {
+    return {
+      valid: false,
+      reason:
+        "date suspiciously close to current time (likely parsing failure)",
+    };
+  }
+
+  // Reject articles older than 30 days for RSS ingestion
+  if (date < thirtyDaysAgo) {
+    return { valid: false, reason: `too old: ${date.toISOString()}` };
+  }
+
+  return { valid: true };
+}
+
 async function insertArticle(
   sourceId: number,
   title: string,
@@ -400,6 +433,17 @@ async function insertArticle(
   // defaulted param must NOT be optional
   pub: { name?: string; homepage?: string } = {},
 ) {
+  // Parse and validate the date
+  const parsedDate = parseDateMaybe(publishedAt);
+  const dateValidation = isValidArticleDate(parsedDate);
+
+  if (!dateValidation.valid) {
+    console.log(
+      `⚠️  Skipping article with invalid date (${dateValidation.reason}): "${title.substring(0, 60)}..."`,
+    );
+    return null;
+  }
+
   // ENHANCED DEDUPLICATION: Check for existing articles with same/similar title
   const titleCheck = await query<{ id: number; canonical_url: string }>(
     `SELECT id, canonical_url FROM articles 
@@ -436,7 +480,7 @@ async function insertArticle(
       sourceId,
       title,
       url,
-      parseDateMaybe(publishedAt),
+      parsedDate,
       dek ?? null,
       author ?? null,
       pub.name ?? null,
