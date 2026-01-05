@@ -1,5 +1,8 @@
+"use client";
+
+import { useState } from "react";
 import Link from "next/link";
-import { Sparkles, Layers } from "lucide-react";
+import { Sparkles, Layers, ChevronDown } from "lucide-react";
 import LocalTime from "@/components/LocalTime";
 import PublisherLink from "@/components/PublisherLink";
 import ShareButtons from "@/components/ShareButtons";
@@ -27,6 +30,7 @@ export default function FeedCard({
   onPreview,
   isSelected,
 }: FeedCardProps) {
+  const [isExpanded, setIsExpanded] = useState(false);
   const publisher = cluster.lead_source || hostFrom(cluster.lead_url);
   const publisherDomain = cluster.lead_homepage
     ? hostFrom(cluster.lead_homepage)
@@ -110,28 +114,6 @@ export default function FeedCard({
               </p>
             )}
 
-            {/* Sub-articles (Techmeme-style) */}
-            {cluster.subs.length > 0 && (
-              <div className="mt-3 space-y-2.5">
-                {cluster.subs.slice(0, 2).map((sub) => (
-                  <div
-                    key={sub.article_id}
-                    className="pl-3 border-l border-zinc-200"
-                  >
-                    <div className="text-xs text-zinc-400 mb-0.5">
-                      {sub.source || hostFrom(sub.url)}
-                      {sub.author && <span> · {sub.author}</span>}
-                    </div>
-                    <a
-                      href={`/api/click?aid=${sub.article_id}&url=${encodeURIComponent(sub.url)}`}
-                      className="text-[15px] leading-snug text-zinc-600 hover:text-zinc-900 hover:underline"
-                    >
-                      {sub.title}
-                    </a>
-                  </div>
-                ))}
-              </div>
-            )}
           </div>
         </div>
       </div>
@@ -145,20 +127,54 @@ export default function FeedCard({
 
       {/* Footer - aligned with content column */}
       <div className="pl-[68px] pr-4 pb-4 sm:pl-[72px] sm:pr-5 sm:pb-5">
-        {/* Related articles button - only show if more than 2 subs exist */}
-        {isCluster && relatedCount > 2 && (
+        {/* Related coverage dropdown */}
+        {isCluster && relatedCount > 0 && (
           <div className="mt-3 mb-3">
-            <Link
-              href={`/river/${cluster.cluster_id}`}
+            <button
+              onClick={() => setIsExpanded(!isExpanded)}
               className="inline-flex items-center gap-2 py-2 px-4 bg-zinc-100 hover:bg-zinc-200/80 rounded-full transition-colors"
-              prefetch={false}
             >
               <Layers className="h-4 w-4 text-zinc-500" aria-hidden="true" />
               <span className="text-sm font-medium text-zinc-700">
-                See {relatedCount - 2} more headline
-                {relatedCount - 2 !== 1 ? "s" : ""}
+                See related coverage
               </span>
-            </Link>
+              <ChevronDown
+                className={`h-4 w-4 text-zinc-500 transition-transform duration-200 ${isExpanded ? "rotate-180" : ""}`}
+                aria-hidden="true"
+              />
+            </button>
+
+            {/* Expanded sub-articles */}
+            {isExpanded && (
+              <div className="mt-3 space-y-2.5">
+                {cluster.subs.slice(0, 3).map((sub) => (
+                  <div
+                    key={sub.article_id}
+                    className="pl-3 border-l-2 border-zinc-200"
+                  >
+                    <div className="text-xs text-zinc-400 mb-0.5">
+                      {sub.source || hostFrom(sub.url)}
+                      {sub.author && <span> · {sub.author}</span>}
+                    </div>
+                    <a
+                      href={`/api/click?aid=${sub.article_id}&url=${encodeURIComponent(sub.url)}`}
+                      className="text-[15px] leading-snug text-zinc-600 hover:text-zinc-900 hover:underline"
+                    >
+                      {sub.title}
+                    </a>
+                  </div>
+                ))}
+                {relatedCount > 3 && (
+                  <Link
+                    href={`/river/${cluster.cluster_id}`}
+                    className="inline-block text-sm text-zinc-500 hover:text-zinc-700 hover:underline pl-3"
+                    prefetch={false}
+                  >
+                    +{relatedCount - 3} more →
+                  </Link>
+                )}
+              </div>
+            )}
           </div>
         )}
 

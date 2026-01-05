@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback } from "react";
-import { Share2, Link2, Check } from "lucide-react";
+import { Upload, Link2, Check } from "lucide-react";
 
 type ShareButtonsProps = {
   url: string;
@@ -60,7 +60,7 @@ export default function ShareButtons({ url, title }: ShareButtonsProps) {
         className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-zinc-500 hover:text-zinc-700 hover:bg-zinc-100 rounded-full transition-colors"
         aria-label="Share article"
       >
-        <Share2 className="w-4 h-4" />
+        <Upload className="w-4 h-4" />
         <span className="hidden sm:inline">Share</span>
       </button>
       <button
