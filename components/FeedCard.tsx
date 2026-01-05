@@ -105,9 +105,32 @@ export default function FeedCard({
 
             {/* Dek/Description */}
             {cluster.lead_dek && (
-              <p className="text-[15px] text-zinc-600 leading-relaxed mb-3 line-clamp-2">
+              <p className="text-[15px] text-zinc-600 leading-relaxed mb-2 line-clamp-2">
                 {cluster.lead_dek}
               </p>
+            )}
+
+            {/* Sub-articles (Techmeme-style) */}
+            {cluster.subs.length > 0 && (
+              <div className="mt-3 space-y-2.5">
+                {cluster.subs.slice(0, 2).map((sub) => (
+                  <div
+                    key={sub.article_id}
+                    className="pl-3 border-l border-zinc-200"
+                  >
+                    <div className="text-xs text-zinc-400 mb-0.5">
+                      {sub.source || hostFrom(sub.url)}
+                      {sub.author && <span> · {sub.author}</span>}
+                    </div>
+                    <a
+                      href={`/api/click?aid=${sub.article_id}&url=${encodeURIComponent(sub.url)}`}
+                      className="text-[15px] leading-snug text-zinc-600 hover:text-zinc-900 hover:underline"
+                    >
+                      {sub.title}
+                    </a>
+                  </div>
+                ))}
+              </div>
             )}
           </div>
         </div>
@@ -122,8 +145,8 @@ export default function FeedCard({
 
       {/* Footer - aligned with content column */}
       <div className="pl-[68px] pr-4 pb-4 sm:pl-[72px] sm:pr-5 sm:pb-5">
-        {/* Related articles button */}
-        {isCluster && relatedCount > 0 && (
+        {/* Related articles button - only show if more than 2 subs exist */}
+        {isCluster && relatedCount > 2 && (
           <div className="mt-3 mb-3">
             <Link
               href={`/river/${cluster.cluster_id}`}
@@ -132,9 +155,8 @@ export default function FeedCard({
             >
               <Layers className="h-4 w-4 text-zinc-500" aria-hidden="true" />
               <span className="text-sm font-medium text-zinc-700">
-                See {relatedCount} more headline{relatedCount !== 1 ? "s" : ""}{" "}
-                from {cluster.sources_count} source
-                {cluster.sources_count !== 1 ? "s" : ""}
+                See {relatedCount - 2} more headline
+                {relatedCount - 2 !== 1 ? "s" : ""}
               </span>
             </Link>
           </div>
