@@ -11,11 +11,11 @@ type SelectedArticle = {
   url: string;
 } | null;
 
-type TestingFeedProps = {
+type HomeFeedProps = {
   clusters: Cluster[];
 };
 
-export default function TestingFeed({ clusters }: TestingFeedProps) {
+export default function HomeFeed({ clusters }: HomeFeedProps) {
   const [selectedArticle, setSelectedArticle] = useState<SelectedArticle>(null);
 
   const handlePreview = (articleId: number, title: string, url: string) => {

@@ -1,5 +1,5 @@
 import { getRiverData } from "@/lib/services/riverService";
-import TestingFeed from "@/components/TestingFeed";
+import HomeFeed from "@/components/HomeFeed";
 import ItemListStructuredData from "@/components/ItemListStructuredData";
 import type { Metadata } from "next";
 
@@ -50,7 +50,7 @@ export default async function RiverPage() {
     <>
       <ItemListStructuredData clusters={clusters} />
       <div className="w-full pt-1 sm:pt-1.5">
-        <TestingFeed clusters={clusters} />
+        <HomeFeed clusters={clusters} />
       </div>
     </>
   );
