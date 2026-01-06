@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { Sparkles, Layers, ChevronDown } from "lucide-react";
+import { Sparkles, ChevronDown } from "lucide-react";
 import LocalTime from "@/components/LocalTime";
 import PublisherLink from "@/components/PublisherLink";
 import ShareButtons from "@/components/ShareButtons";
@@ -39,6 +39,11 @@ export default function FeedCard({
   const hasImage = !!cluster.lead_image;
   const isCluster = cluster.size > 1;
   const relatedCount = cluster.subs_total;
+
+  // Get unique outlet domains from subs for the stacked avatars
+  const subDomains = [
+    ...new Set(cluster.subs.map((sub) => hostFrom(sub.url)).filter(Boolean)),
+  ].slice(0, 3);
 
   return (
     <article
@@ -113,7 +118,6 @@ export default function FeedCard({
                 {cluster.lead_dek}
               </p>
             )}
-
           </div>
         </div>
       </div>
@@ -134,7 +138,15 @@ export default function FeedCard({
               onClick={() => setIsExpanded(!isExpanded)}
               className="inline-flex items-center gap-2 py-2 px-4 bg-zinc-100 hover:bg-zinc-200/80 rounded-full transition-colors"
             >
-              <Layers className="h-4 w-4 text-zinc-500" aria-hidden="true" />
+              {subDomains.length > 0 && (
+                <div className="flex -space-x-2" aria-hidden="true">
+                  {subDomains.map((domain, i) => (
+                    <div key={domain} style={{ zIndex: subDomains.length - i }}>
+                      <PublisherIcon domain={domain} name={domain} size={20} />
+                    </div>
+                  ))}
+                </div>
+              )}
               <span className="text-sm font-medium text-zinc-700">
                 See related coverage
               </span>

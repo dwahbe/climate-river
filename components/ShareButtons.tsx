@@ -61,7 +61,7 @@ export default function ShareButtons({ url, title }: ShareButtonsProps) {
         aria-label="Share article"
       >
         <Upload className="w-4 h-4" />
-        <span className="hidden sm:inline">Share</span>
+        <span>Share</span>
       </button>
       <button
         onClick={copyToClipboard}
@@ -71,12 +71,12 @@ export default function ShareButtons({ url, title }: ShareButtonsProps) {
         {copied ? (
           <>
             <Check className="w-4 h-4 text-emerald-500" />
-            <span className="hidden sm:inline text-emerald-600">Copied</span>
+            <span className="text-emerald-600">Copied</span>
           </>
         ) : (
           <>
             <Link2 className="w-4 h-4" />
-            <span className="hidden sm:inline">Copy link</span>
+            <span>Copy link</span>
           </>
         )}
       </button>
