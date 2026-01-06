@@ -47,7 +47,7 @@ export default function FeedCard({
 
   return (
     <article
-      className={`bg-white border-b border-zinc-200/80 hover:bg-zinc-50/50 transition-colors ${isSelected ? "bg-zinc-50 ring-2 ring-inset ring-zinc-200" : ""}`}
+      className={`bg-white border-b border-zinc-200/80 ${isSelected ? "bg-zinc-50 ring-2 ring-inset ring-zinc-200" : ""}`}
     >
       {/* Header with padding */}
       <div className="px-4 pt-4 sm:px-5 sm:pt-5">
@@ -182,7 +182,7 @@ export default function FeedCard({
                     className="inline-block text-sm text-zinc-500 hover:text-zinc-700 hover:underline pl-3"
                     prefetch={false}
                   >
-                    +{relatedCount - 3} more →
+                    +{relatedCount - 3} more articles
                   </Link>
                 )}
               </div>

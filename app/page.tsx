@@ -1,5 +1,5 @@
 import { getRiverData } from "@/lib/services/riverService";
-import RiverClusterList from "@/components/RiverClusterList";
+import TestingFeed from "@/components/TestingFeed";
 import ItemListStructuredData from "@/components/ItemListStructuredData";
 import type { Metadata } from "next";
 
@@ -43,14 +43,14 @@ export const metadata: Metadata = {
 export default async function RiverPage() {
   const clusters = await getRiverData({
     view: "top",
+    limit: 20,
   });
 
   return (
     <>
       <ItemListStructuredData clusters={clusters} />
-      <div className="mx-auto w-full max-w-3xl px-4 sm:px-6 pt-1 sm:pt-1.5">
-        <h1 className="mb-3 text-xl font-semibold tracking-tight">Top news</h1>
-        <RiverClusterList clusters={clusters} />
+      <div className="w-full pt-1 sm:pt-1.5">
+        <TestingFeed clusters={clusters} />
       </div>
     </>
   );
