@@ -1,42 +1,40 @@
-'use client'
+"use client";
 
-import { useState, useEffect } from 'react'
-import { Eye } from 'lucide-react'
-import ReaderView from './ReaderView'
+import { Eye, EyeOff } from "lucide-react";
 
 type PreviewButtonProps = {
-  articleId: number
-  articleTitle: string
-  articleUrl: string
-  contentStatus?: string | null
-  contentWordCount?: number | null
-  onPreview?: (articleId: number, title: string, url: string) => void
-}
+  articleId: number;
+  articleTitle: string;
+  articleUrl: string;
+  contentStatus?: string | null;
+  contentWordCount?: number | null;
+  onPreview?: (articleId: number, title: string, url: string) => void;
+};
 
 /**
  * Known paywall/difficult sites where reader mode typically fails
  */
 const KNOWN_PAYWALL_DOMAINS = [
-  'nytimes.com',
-  'wsj.com',
-  'ft.com',
-  'economist.com',
-  'bloomberg.com',
-  'washingtonpost.com',
-  'newyorker.com',
-  'theathletic.com',
-  'foreignpolicy.com',
-]
+  "nytimes.com",
+  "wsj.com",
+  "ft.com",
+  "economist.com",
+  "bloomberg.com",
+  "washingtonpost.com",
+  "newyorker.com",
+  "theathletic.com",
+  "foreignpolicy.com",
+];
 
 /**
  * Check if URL is from a known paywall site
  */
 function isKnownPaywall(url: string): boolean {
   try {
-    const hostname = new URL(url).hostname.toLowerCase()
-    return KNOWN_PAYWALL_DOMAINS.some((domain) => hostname.includes(domain))
+    const hostname = new URL(url).hostname.toLowerCase();
+    return KNOWN_PAYWALL_DOMAINS.some((domain) => hostname.includes(domain));
   } catch {
-    return false
+    return false;
   }
 }
 
@@ -46,27 +44,27 @@ function isKnownPaywall(url: string): boolean {
 function shouldShowButton(
   articleUrl: string,
   contentStatus: string | null | undefined,
-  contentWordCount: number | null | undefined
+  contentWordCount: number | null | undefined,
 ): boolean {
   if (isKnownPaywall(articleUrl)) {
-    return false
+    return false;
   }
 
-  if (!contentStatus) return true
+  if (!contentStatus) return true;
 
-  if (['paywall', 'blocked', 'timeout', 'error'].includes(contentStatus)) {
-    return false
+  if (["paywall", "blocked", "timeout", "error"].includes(contentStatus)) {
+    return false;
   }
 
   if (
-    contentStatus === 'success' &&
+    contentStatus === "success" &&
     contentWordCount &&
     contentWordCount < 100
   ) {
-    return false
+    return false;
   }
 
-  return true
+  return true;
 }
 
 export default function PreviewButton({
@@ -77,51 +75,37 @@ export default function PreviewButton({
   contentWordCount,
   onPreview,
 }: PreviewButtonProps) {
-  const [isDrawerOpen, setIsDrawerOpen] = useState(false)
-  const [isMobile, setIsMobile] = useState(false)
-
-  useEffect(() => {
-    const checkMobile = () => setIsMobile(window.innerWidth < 1024)
-    checkMobile()
-    window.addEventListener('resize', checkMobile)
-    return () => window.removeEventListener('resize', checkMobile)
-  }, [])
-
-  if (!shouldShowButton(articleUrl, contentStatus, contentWordCount)) {
-    return null
-  }
+  const isAvailable = shouldShowButton(
+    articleUrl,
+    contentStatus,
+    contentWordCount,
+  );
 
   const handleClick = () => {
-    if (isMobile || !onPreview) {
-      // Mobile: use drawer
-      setIsDrawerOpen(true)
-    } else {
-      // Desktop: use side panel via callback
-      onPreview(articleId, articleTitle, articleUrl)
-    }
+    if (!isAvailable || !onPreview) return;
+    onPreview(articleId, articleTitle, articleUrl);
+  };
+
+  if (!isAvailable) {
+    return (
+      <span
+        className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-zinc-300 cursor-not-allowed"
+        title="Article preview not available"
+      >
+        <EyeOff className="w-4 h-4" />
+        <span>Preview</span>
+      </span>
+    );
   }
 
   return (
-    <>
-      <button
-        onClick={handleClick}
-        className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-zinc-500 hover:text-zinc-700 hover:bg-zinc-100 rounded-full transition-colors"
-        aria-label="Preview article"
-      >
-        <Eye className="w-4 h-4" />
-        <span>Preview</span>
-      </button>
-
-      {/* Mobile drawer */}
-      {isMobile && (
-        <ReaderView
-          articleId={articleId}
-          articleTitle={articleTitle}
-          articleUrl={articleUrl}
-          isOpen={isDrawerOpen}
-          onClose={() => setIsDrawerOpen(false)}
-        />
-      )}
-    </>
-  )
+    <button
+      onClick={handleClick}
+      className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-zinc-500 hover:text-zinc-700 hover:bg-zinc-100 rounded-full transition-colors"
+      aria-label="Preview article"
+    >
+      <Eye className="w-4 h-4" />
+      <span>Preview</span>
+    </button>
+  );
 }

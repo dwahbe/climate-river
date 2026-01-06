@@ -108,9 +108,7 @@ export default function RiverClusterList({
         const secondaries = cluster.subs ?? [];
         const isCluster = cluster.size > 1;
         const publisher = cluster.lead_source || hostFrom(cluster.lead_url);
-        const leadClickHref = `/api/click?aid=${cluster.lead_article_id}&url=${encodeURIComponent(
-          cluster.lead_url,
-        )}`;
+        const leadPing = `/api/click?aid=${cluster.lead_article_id}`;
         const articleIndex = buildArticleIndex(cluster.all_articles_by_source);
         const leadArticles = publisher
           ? findArticlesForSource(articleIndex, publisher, cluster.lead_url)
@@ -166,7 +164,8 @@ export default function RiverClusterList({
 
             <h3 className="text-[18px] sm:text-[19px] md:text-[20px] font-semibold leading-snug text-pretty">
               <a
-                href={leadClickHref}
+                href={cluster.lead_url}
+                ping={leadPing}
                 className="no-underline hover:underline text-zinc-950 hover:text-zinc-900 focus-visible:underline rounded transition"
               >
                 {cluster.lead_title}
@@ -194,9 +193,6 @@ export default function RiverClusterList({
                 </Link>
                 <span> </span>
                 {secondaries.map((subLink, index) => {
-                  const href = `/api/click?aid=${subLink.article_id}&url=${encodeURIComponent(
-                    subLink.url,
-                  )}`;
                   const sourceName = subLink.source || hostFrom(subLink.url);
                   const articlesForSource = findArticlesForSource(
                     articleIndex,
@@ -219,7 +215,8 @@ export default function RiverClusterList({
                         articles={articlesForSource}
                       >
                         <a
-                          href={href}
+                          href={subLink.url}
+                          ping={`/api/click?aid=${subLink.article_id}`}
                           className="no-underline hover:underline text-zinc-700 hover:text-zinc-900 transition-colors"
                         >
                           {linkLabel}

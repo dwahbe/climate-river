@@ -285,13 +285,39 @@ function hostFromUrl(url: string | undefined): string | null {
   }
 }
 
+// Common TLDs to strip when humanizing hostnames
+const COMMON_TLDS = new Set([
+  "com",
+  "org",
+  "net",
+  "edu",
+  "gov",
+  "io",
+  "co",
+  "us",
+  "uk",
+  "ca",
+  "au",
+  "de",
+  "fr",
+  "info",
+  "biz",
+]);
+
 function humanizeHost(host: string): string {
-  return host
-    .split(".")
-    .filter(
-      (segment, idx, arr) =>
-        idx === 0 || idx === arr.length - 1 || arr.length <= 2,
-    )
+  const segments = host.split(".");
+
+  // Filter out common TLDs and "www"
+  const meaningful = segments.filter(
+    (seg) => !COMMON_TLDS.has(seg.toLowerCase()) && seg.toLowerCase() !== "www",
+  );
+
+  // If we filtered everything, just use the first segment
+  if (meaningful.length === 0) {
+    return segments[0]?.charAt(0).toUpperCase() + segments[0]?.slice(1) || host;
+  }
+
+  return meaningful
     .map((segment) => segment.charAt(0).toUpperCase() + segment.slice(1))
     .join(" ");
 }

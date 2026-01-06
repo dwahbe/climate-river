@@ -124,9 +124,6 @@ export default async function CategoriesPage() {
             <ol className="mt-5 space-y-2.5 list-none">
               {clusters.length > 0 ? (
                 clusters.slice(0, 5).map((cluster, index) => {
-                  const leadHref = `/api/click?aid=${cluster.lead_article_id}&url=${encodeURIComponent(
-                    cluster.lead_url,
-                  )}`;
                   const source =
                     cluster.lead_source || hostFrom(cluster.lead_url);
 
@@ -137,7 +134,8 @@ export default async function CategoriesPage() {
                       </span>
                       <div>
                         <a
-                          href={leadHref}
+                          href={cluster.lead_url}
+                          ping={`/api/click?aid=${cluster.lead_article_id}`}
                           className="text-sm font-medium leading-snug text-zinc-900 hover:underline decoration-zinc-300 hover:decoration-zinc-500 text-pretty"
                         >
                           {cluster.lead_title}

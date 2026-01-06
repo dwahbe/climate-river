@@ -2,13 +2,17 @@
 
 import { useState, useEffect } from "react";
 import Image from "next/image";
-import { X } from "lucide-react";
+import { X, ChevronLeft, ChevronRight } from "lucide-react";
 
 type ReaderPanelProps = {
   articleId: number | null;
   articleTitle: string;
   articleUrl: string;
   onClose: () => void;
+  onPrev?: () => void;
+  onNext?: () => void;
+  hasPrev?: boolean;
+  hasNext?: boolean;
 };
 
 type ReaderData = {
@@ -25,6 +29,10 @@ export default function ReaderPanel({
   articleTitle,
   articleUrl,
   onClose,
+  onPrev,
+  onNext,
+  hasPrev = false,
+  hasNext = false,
 }: ReaderPanelProps) {
   const [data, setData] = useState<ReaderData | null>(null);
   const [loading, setLoading] = useState(false);
@@ -89,16 +97,34 @@ export default function ReaderPanel({
       {/* Header */}
       <div className="p-5 border-b border-zinc-200 bg-zinc-50/50">
         <div className="flex items-start justify-between gap-3 mb-2">
-          <h2 className="text-lg font-semibold text-zinc-900">
+          <h2 className="text-lg font-semibold text-zinc-900 flex-1 min-w-0">
             {data?.title || articleTitle}
           </h2>
-          <button
-            onClick={onClose}
-            className="flex-shrink-0 p-2 hover:bg-zinc-100 rounded-md transition -mt-1 -mr-2"
-            aria-label="Close reader view"
-          >
-            <X className="w-5 h-5 text-zinc-600" />
-          </button>
+          <div className="flex items-center gap-1 flex-shrink-0 -mt-1 -mr-2">
+            <button
+              onClick={onPrev}
+              disabled={!hasPrev}
+              className="p-2 hover:bg-zinc-100 rounded-md transition disabled:opacity-30 disabled:cursor-not-allowed"
+              aria-label="Previous article"
+            >
+              <ChevronLeft className="w-5 h-5 text-zinc-600" />
+            </button>
+            <button
+              onClick={onNext}
+              disabled={!hasNext}
+              className="p-2 hover:bg-zinc-100 rounded-md transition disabled:opacity-30 disabled:cursor-not-allowed"
+              aria-label="Next article"
+            >
+              <ChevronRight className="w-5 h-5 text-zinc-600" />
+            </button>
+            <button
+              onClick={onClose}
+              className="p-2 hover:bg-zinc-100 rounded-md transition"
+              aria-label="Close reader view"
+            >
+              <X className="w-5 h-5 text-zinc-600" />
+            </button>
+          </div>
         </div>
         <div className="flex flex-wrap items-center gap-2 text-xs text-zinc-600">
           {data?.author && <span>{data.author}</span>}

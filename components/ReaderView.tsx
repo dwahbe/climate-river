@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import Image from "next/image";
 import { Drawer } from "vaul";
-import { X } from "lucide-react";
+import { X, ChevronLeft, ChevronRight } from "lucide-react";
 
 type ReaderViewProps = {
   articleId: number;
@@ -11,6 +11,11 @@ type ReaderViewProps = {
   articleUrl: string;
   isOpen: boolean;
   onClose: () => void;
+  mode?: "mobile" | "tablet";
+  onPrev?: () => void;
+  onNext?: () => void;
+  hasPrev?: boolean;
+  hasNext?: boolean;
 };
 
 type ReaderData = {
@@ -28,19 +33,18 @@ export default function ReaderView({
   articleUrl,
   isOpen,
   onClose,
+  mode = "mobile",
+  onPrev,
+  onNext,
+  hasPrev = false,
+  hasNext = false,
 }: ReaderViewProps) {
   const [data, setData] = useState<ReaderData | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [isMobile, setIsMobile] = useState(false);
 
-  // Detect mobile on mount
-  useEffect(() => {
-    const checkMobile = () => setIsMobile(window.innerWidth < 768);
-    checkMobile();
-    window.addEventListener("resize", checkMobile);
-    return () => window.removeEventListener("resize", checkMobile);
-  }, []);
+  const isMobile = mode === "mobile";
+  const isTablet = mode === "tablet";
 
   // Calculate read time (roughly 200 words per minute)
   const readTimeMinutes = data?.wordCount
@@ -138,31 +142,89 @@ export default function ReaderView({
     </>
   );
 
+  // Tablet: right side panel
+  if (isTablet) {
+    if (!isOpen) return null;
+
+    return (
+      <div className="fixed inset-0 z-50">
+        <div
+          className="absolute inset-0 bg-black/40 animate-[fadeIn_150ms_ease-out]"
+          onClick={handleClose}
+          aria-hidden="true"
+        />
+        <div className="absolute right-0 top-0 bottom-0 w-[85%] max-w-xl pointer-events-none animate-[slideInRight_200ms_ease-out]">
+          <div className="bg-white shadow-2xl h-full flex flex-col overflow-hidden pointer-events-auto rounded-l-2xl">
+            {/* Header */}
+            <div className="p-5 border-b border-zinc-200 bg-zinc-50/50">
+              <div className="flex items-start justify-between gap-3 mb-2">
+                <h2 className="text-lg font-semibold text-zinc-900 line-clamp-2 flex-1 min-w-0">
+                  {data?.title || articleTitle}
+                </h2>
+                <div className="flex items-center gap-1 flex-shrink-0 -mt-1 -mr-2">
+                  <button
+                    onClick={onPrev}
+                    disabled={!hasPrev}
+                    className="p-2 hover:bg-zinc-100 rounded-md transition disabled:opacity-30 disabled:cursor-not-allowed"
+                    aria-label="Previous article"
+                  >
+                    <ChevronLeft className="w-5 h-5 text-zinc-600" />
+                  </button>
+                  <button
+                    onClick={onNext}
+                    disabled={!hasNext}
+                    className="p-2 hover:bg-zinc-100 rounded-md transition disabled:opacity-30 disabled:cursor-not-allowed"
+                    aria-label="Next article"
+                  >
+                    <ChevronRight className="w-5 h-5 text-zinc-600" />
+                  </button>
+                  <button
+                    onClick={handleClose}
+                    className="p-2 hover:bg-zinc-100 rounded-md transition"
+                    aria-label="Close reader view"
+                  >
+                    <X className="w-5 h-5 text-zinc-600" />
+                  </button>
+                </div>
+              </div>
+              <div className="flex flex-wrap items-center gap-2 text-xs text-zinc-600">
+                {data?.author && <span>{data.author}</span>}
+                {data?.author && <span className="text-zinc-400">•</span>}
+                {readTimeMinutes && <span>{readTimeMinutes} min read</span>}
+                {readTimeMinutes && <span className="text-zinc-400">•</span>}
+                <a
+                  href={articleUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="hover:underline text-zinc-700 hover:text-zinc-900"
+                >
+                  Read on original site →
+                </a>
+              </div>
+            </div>
+
+            {/* Content */}
+            <div className="flex-1 overflow-y-auto px-5 py-6">
+              <ReaderContent />
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Mobile: bottom drawer
   return (
-    <Drawer.Root
-      open={isOpen}
-      onOpenChange={handleClose}
-      direction={isMobile ? "bottom" : "right"}
-    >
+    <Drawer.Root open={isOpen} onOpenChange={handleClose} direction="bottom">
       <Drawer.Portal>
         <Drawer.Overlay className="fixed inset-0 bg-black/40 z-40" />
-        <Drawer.Content
-          className={
-            isMobile
-              ? "bg-white flex flex-col rounded-t-[10px] h-[90%] mt-24 fixed bottom-0 left-0 right-0 z-50 overflow-hidden"
-              : "bg-white rounded-l-[16px] overflow-hidden bg-clip-padding right-0 top-0 bottom-0 fixed z-50 outline-none w-[45%] flex shadow-2xl"
-          }
-        >
+        <Drawer.Content className="bg-white flex flex-col rounded-t-[10px] h-[90%] mt-24 fixed bottom-0 left-0 right-0 z-50 overflow-hidden">
           <div className="h-full w-full flex flex-col relative">
             {/* Mobile drag handle */}
-            {isMobile && (
-              <div className="mx-auto w-12 h-1.5 flex-shrink-0 rounded-full bg-zinc-300 mt-4 mb-4 relative z-10" />
-            )}
+            <div className="mx-auto w-12 h-1.5 flex-shrink-0 rounded-full bg-zinc-300 mt-4 mb-4 relative z-10" />
 
             {/* Header */}
-            <div
-              className={`flex items-start justify-between gap-4 ${isMobile ? "px-4 pb-4 -mt-2" : "p-6"} border-b border-zinc-200 bg-zinc-50/50`}
-            >
+            <div className="flex items-start justify-between gap-3 px-4 pb-4 -mt-2 border-b border-zinc-200 bg-zinc-50/50">
               <div className="flex-1 min-w-0">
                 <Drawer.Title className="text-lg font-semibold text-zinc-900 mb-2 line-clamp-2">
                   {data?.title || articleTitle}
@@ -182,21 +244,28 @@ export default function ReaderView({
                   </a>
                 </Drawer.Description>
               </div>
-              {!isMobile && (
+              <div className="flex items-center gap-1 flex-shrink-0 -mt-1 -mr-1">
                 <button
-                  onClick={handleClose}
-                  className="flex-shrink-0 p-2 hover:bg-zinc-100 rounded-md transition"
-                  aria-label="Close reader view"
+                  onClick={onPrev}
+                  disabled={!hasPrev}
+                  className="p-2 hover:bg-zinc-100 rounded-md transition disabled:opacity-30 disabled:cursor-not-allowed"
+                  aria-label="Previous article"
                 >
-                  <X className="w-5 h-5 text-zinc-600" />
+                  <ChevronLeft className="w-5 h-5 text-zinc-600" />
                 </button>
-              )}
+                <button
+                  onClick={onNext}
+                  disabled={!hasNext}
+                  className="p-2 hover:bg-zinc-100 rounded-md transition disabled:opacity-30 disabled:cursor-not-allowed"
+                  aria-label="Next article"
+                >
+                  <ChevronRight className="w-5 h-5 text-zinc-600" />
+                </button>
+              </div>
             </div>
 
             {/* Content */}
-            <div
-              className={`flex-1 overflow-y-auto ${isMobile ? "px-4 py-6" : "px-6 py-8"}`}
-            >
+            <div className="flex-1 overflow-y-auto px-4 py-6">
               <ReaderContent />
             </div>
           </div>

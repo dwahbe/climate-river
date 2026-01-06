@@ -243,9 +243,7 @@ export default async function ClusterPage(props: {
     );
   }
 
-  const leadClickHref = `/api/click?aid=${r.lead_article_id}&url=${encodeURIComponent(
-    r.lead_url,
-  )}`;
+  const leadPing = `/api/click?aid=${r.lead_article_id}`;
 
   return (
     <>
@@ -276,7 +274,8 @@ export default async function ClusterPage(props: {
 
           <h1 className="text-xl font-semibold leading-tight mb-3 text-pretty">
             <a
-              href={leadClickHref}
+              href={r.lead_url}
+              ping={leadPing}
               className="text-zinc-900 hover:underline decoration-zinc-300"
             >
               {r.lead_title}
@@ -301,24 +300,20 @@ export default async function ClusterPage(props: {
               Related articles
             </h2>
             <ul className="flex flex-col gap-4 list-none">
-              {r.subs.map((s) => {
-                const href = `/api/click?aid=${s.article_id}&url=${encodeURIComponent(
-                  s.url,
-                )}`;
-                return (
-                  <li key={s.article_id}>
-                    <div className="text-xs text-zinc-500 mb-1">
-                      {s.source ?? hostFrom(s.url)}
-                    </div>
-                    <a
-                      href={href}
-                      className="block text-zinc-900 hover:underline decoration-zinc-300 leading-snug text-pretty"
-                    >
-                      {s.title}
-                    </a>
-                  </li>
-                );
-              })}
+              {r.subs.map((s) => (
+                <li key={s.article_id}>
+                  <div className="text-xs text-zinc-500 mb-1">
+                    {s.source ?? hostFrom(s.url)}
+                  </div>
+                  <a
+                    href={s.url}
+                    ping={`/api/click?aid=${s.article_id}`}
+                    className="block text-zinc-900 hover:underline decoration-zinc-300 leading-snug text-pretty"
+                  >
+                    {s.title}
+                  </a>
+                </li>
+              ))}
             </ul>
           </section>
         )}

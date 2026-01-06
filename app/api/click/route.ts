@@ -1,25 +1,25 @@
 // app/api/click/route.ts
+// Uses HTML ping attribute pattern (like Google search results)
+// Links use: <a href="originalUrl" ping="/api/click?aid=123">
+// Benefits: users can right-click copy original links, no redirect hop
 import { NextRequest, NextResponse } from "next/server";
 import { query } from "@/lib/db";
 
-export const runtime = "nodejs"; // ensure pooled pg works
+export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-export async function GET(req: NextRequest) {
+export async function POST(req: NextRequest) {
   const url = new URL(req.url);
   const aid = url.searchParams.get("aid");
-  const target = url.searchParams.get("url");
 
-  // Minimal validation
-  if (!aid || !target) {
-    return new NextResponse("Bad Request", { status: 400 });
+  if (!aid || isNaN(Number(aid))) {
+    return new NextResponse(null, { status: 400 });
   }
 
-  // Log asynchronously; don’t block redirect
+  // Fire and forget - don't block the response
   query(`INSERT INTO article_events (article_id, event) VALUES ($1,'click')`, [
     Number(aid),
   ]).catch(() => {});
 
-  // Safe 302 to the external article
-  return NextResponse.redirect(target, { status: 302 });
+  return new NextResponse(null, { status: 204 });
 }

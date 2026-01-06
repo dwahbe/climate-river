@@ -35,7 +35,7 @@ export default function FeedCard({
   const publisherDomain = cluster.lead_homepage
     ? hostFrom(cluster.lead_homepage)
     : hostFrom(cluster.lead_url);
-  const leadClickHref = `/api/click?aid=${cluster.lead_article_id}&url=${encodeURIComponent(cluster.lead_url)}`;
+  const leadPing = `/api/click?aid=${cluster.lead_article_id}`;
   const hasImage = !!cluster.lead_image;
   const isCluster = cluster.size > 1;
   const relatedCount = cluster.subs_total;
@@ -103,9 +103,10 @@ export default function FeedCard({
             </div>
 
             {/* Title */}
-            <h2 className="text-[17px] sm:text-lg font-semibold leading-snug text-zinc-900 mb-1.5">
+            <h2 className="text-[17px] sm:text-lg font-semibold leading-snug text-zinc-900 mb-1.5 text-pretty">
               <a
-                href={leadClickHref}
+                href={cluster.lead_url}
+                ping={leadPing}
                 className="hover:underline decoration-zinc-400 underline-offset-2 transition-colors"
               >
                 {cluster.lead_title}
@@ -114,7 +115,7 @@ export default function FeedCard({
 
             {/* Dek/Description */}
             {cluster.lead_dek && (
-              <p className="text-[15px] text-zinc-600 leading-relaxed mb-2 line-clamp-2">
+              <p className="text-[15px] text-zinc-600 leading-relaxed mb-2 line-clamp-2 text-pretty">
                 {cluster.lead_dek}
               </p>
             )}
@@ -125,7 +126,11 @@ export default function FeedCard({
       {/* Image - aligned with content column */}
       {hasImage && (
         <div className="pl-[68px] pr-4 sm:pl-[72px] sm:pr-5 mt-2">
-          <ArticleImage src={cluster.lead_image!} href={leadClickHref} />
+          <ArticleImage
+            src={cluster.lead_image!}
+            href={cluster.lead_url}
+            ping={leadPing}
+          />
         </div>
       )}
 
@@ -169,7 +174,8 @@ export default function FeedCard({
                       {sub.author && <span> · {sub.author}</span>}
                     </div>
                     <a
-                      href={`/api/click?aid=${sub.article_id}&url=${encodeURIComponent(sub.url)}`}
+                      href={sub.url}
+                      ping={`/api/click?aid=${sub.article_id}`}
                       className="text-[15px] leading-snug text-zinc-600 hover:text-zinc-900 hover:underline"
                     >
                       {sub.title}
@@ -190,9 +196,8 @@ export default function FeedCard({
           </div>
         )}
 
-        {/* Footer: Share buttons + Preview */}
+        {/* Footer: Preview + Share buttons */}
         <div className="flex items-center gap-2 pt-1">
-          <ShareButtons url={cluster.lead_url} title={cluster.lead_title} />
           <PreviewButton
             articleId={cluster.lead_article_id}
             articleTitle={cluster.lead_title}
@@ -201,6 +206,7 @@ export default function FeedCard({
             contentWordCount={cluster.lead_content_word_count}
             onPreview={onPreview}
           />
+          <ShareButtons url={cluster.lead_url} title={cluster.lead_title} />
         </div>
       </div>
     </article>
