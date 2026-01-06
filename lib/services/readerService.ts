@@ -1,55 +1,117 @@
 // lib/services/readerService.ts
 import { query } from "@/lib/db";
+import sanitize from "sanitize-html";
 
 /**
- * Convert markdown to HTML for display
- * Simple implementation - can be enhanced with a proper markdown library if needed
+ * Sanitize HTML content from Defuddle extraction
+ * Allows semantic article elements while stripping noise
  */
-function markdownToHtml(markdown: string): string {
-  let html = markdown;
+function sanitizeContent(html: string): string {
+  const cleaned = sanitize(html, {
+    allowedTags: [
+      // Headings
+      "h1",
+      "h2",
+      "h3",
+      "h4",
+      "h5",
+      "h6",
+      // Text structure
+      "p",
+      "br",
+      "hr",
+      // Lists
+      "ul",
+      "ol",
+      "li",
+      // Emphasis
+      "strong",
+      "b",
+      "em",
+      "i",
+      // Links and media
+      "a",
+      "img",
+      "figure",
+      "figcaption",
+      // Quotes
+      "blockquote",
+      "q",
+      "cite",
+      // Code (in case of technical articles)
+      "pre",
+      "code",
+      // Tables (some articles have data tables)
+      "table",
+      "thead",
+      "tbody",
+      "tr",
+      "th",
+      "td",
+    ],
+    allowedAttributes: {
+      a: ["href", "target", "rel"],
+      img: ["src", "alt", "width", "height"],
+      td: ["colspan", "rowspan"],
+      th: ["colspan", "rowspan"],
+    },
+    // Force safe link attributes
+    transformTags: {
+      a: (tagName, attribs) => ({
+        tagName,
+        attribs: {
+          ...attribs,
+          target: "_blank",
+          rel: "noopener noreferrer",
+        },
+      }),
+    },
+    // Remove empty tags
+    exclusiveFilter: (frame) => {
+      const emptyTags = [
+        "p",
+        "div",
+        "span",
+        "h1",
+        "h2",
+        "h3",
+        "h4",
+        "h5",
+        "h6",
+      ];
+      return (
+        emptyTags.includes(frame.tag) &&
+        !frame.text.trim() &&
+        !frame.mediaChildren
+      );
+    },
+    // Don't encode entities - keep readable
+    disallowedTagsMode: "discard",
+  });
 
-  // Headers
-  html = html.replace(/^### (.*$)/gim, "<h3>$1</h3>");
-  html = html.replace(/^## (.*$)/gim, "<h2>$1</h2>");
-  html = html.replace(/^# (.*$)/gim, "<h1>$1</h1>");
-
-  // Bold
-  html = html.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>");
-  html = html.replace(/__(.+?)__/g, "<strong>$1</strong>");
-
-  // Italic
-  html = html.replace(/\*(.+?)\*/g, "<em>$1</em>");
-  html = html.replace(/_(.+?)_/g, "<em>$1</em>");
-
-  // Links
-  html = html.replace(
-    /\[([^\]]+)\]\(([^)]+)\)/g,
-    '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>',
+  // Additional cleanup for common boilerplate patterns
+  return (
+    cleaned
+      .replace(/\[Advertisement\]/gi, "")
+      .replace(/\[Skip to content\]/gi, "")
+      .replace(/\[Show more\]/gi, "")
+      .replace(/\[Read more\]/gi, "")
+      .replace(/Share this article/gi, "")
+      .replace(/Follow us on/gi, "")
+      .replace(/Subscribe to our newsletter/gi, "")
+      // Clean up excessive whitespace
+      .replace(/\n{3,}/g, "\n\n")
+      .trim()
   );
+}
 
-  // Images
-  html = html.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<img src="$2" alt="$1" />');
-
-  // Paragraphs (split by double newlines)
-  const paragraphs = html.split(/\n\n+/);
-  html = paragraphs
-    .map((p) => {
-      p = p.trim();
-      if (!p) return "";
-      // Don't wrap if already a tag
-      if (
-        p.startsWith("<h") ||
-        p.startsWith("<img") ||
-        p.startsWith("<ul") ||
-        p.startsWith("<ol")
-      ) {
-        return p;
-      }
-      return `<p>${p.replace(/\n/g, "<br>")}</p>`;
-    })
-    .join("\n");
-
-  return html;
+/**
+ * Extract plain text from HTML for word count and paywall detection
+ */
+function htmlToText(html: string): string {
+  return sanitize(html, { allowedTags: [], allowedAttributes: {} })
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 // Types
@@ -110,7 +172,7 @@ const BLOCKED_INDICATORS = [
 /**
  * Detect if content appears to be a paywall message
  */
-function detectPaywall(html: string, text: string, wordCount: number): boolean {
+function detectPaywall(text: string, wordCount: number): boolean {
   // Very short content is suspicious
   if (wordCount < 100) {
     return PAYWALL_INDICATORS.some((pattern) => text.match(pattern));
@@ -124,7 +186,7 @@ function detectPaywall(html: string, text: string, wordCount: number): boolean {
 /**
  * Detect if we've been blocked by anti-bot measures
  */
-function detectBlocked(html: string, text: string): boolean {
+function detectBlocked(text: string): boolean {
   return BLOCKED_INDICATORS.some((pattern) => text.match(pattern));
 }
 
@@ -178,38 +240,28 @@ async function fetchArticleContent(url: string): Promise<ReaderResult> {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       }
 
-      const html = await response.text();
+      const rawHtml = await response.text();
 
       // Parse with JSDOM
-      const dom = new JSDOM(html, { url });
+      const dom = new JSDOM(rawHtml, { url });
 
-      // Use Defuddle to extract clean content with improved configuration
+      // Use Defuddle to extract content in HTML mode (not markdown)
+      // This avoids mixed HTML/markdown output that's hard to process
       const result = await Defuddle(dom, url, {
         debug: false,
-        markdown: true, // Use markdown for cleaner, more reliable extraction
+        markdown: false, // Use HTML mode for cleaner, more consistent output
       });
 
       // Cleanup JSDOM to free memory
       dom.window.close();
 
-      // Since we're using markdown mode, content should already be cleaner
-      // But still do minimal cleanup if needed
-      if (result.content) {
-        let cleaned = result.content.trim();
-
-        // Remove common markdown artifacts that might have slipped through
-        cleaned = cleaned
-          .replace(/\[Advertisement\]/gi, "")
-          .replace(/\[Skip to content\]/gi, "")
-          .replace(/\[Show more\]/gi, "")
-          .replace(/\[Read more\]/gi, "")
-          .trim();
-
-        result.content = cleaned;
-      }
+      // Sanitize the extracted HTML
+      const htmlContent = result.content ? sanitizeContent(result.content) : "";
+      const textContent = htmlToText(htmlContent);
+      const wordCount = textContent.split(/\s+/).filter(Boolean).length;
 
       // Detect paywall or blocking
-      if (detectBlocked(result.content || "", result.content || "")) {
+      if (detectBlocked(textContent)) {
         return {
           success: false,
           status: "blocked",
@@ -217,13 +269,7 @@ async function fetchArticleContent(url: string): Promise<ReaderResult> {
         } as ReaderError;
       }
 
-      if (
-        detectPaywall(
-          result.content || "",
-          result.content || "",
-          result.wordCount || 0,
-        )
-      ) {
+      if (detectPaywall(textContent, wordCount)) {
         return {
           success: false,
           status: "paywall",
@@ -231,11 +277,7 @@ async function fetchArticleContent(url: string): Promise<ReaderResult> {
         } as ReaderError;
       }
 
-      // Convert markdown to HTML for display
-      const htmlContent = result.content ? markdownToHtml(result.content) : "";
-
       // Validate we actually got content (fixes Google News redirect issue)
-      const wordCount = result.wordCount || 0;
       if (!htmlContent || htmlContent.length < 100 || wordCount < 50) {
         return {
           success: false,
@@ -372,6 +414,7 @@ export async function getArticleContent(
 
   // Store result in database
   if (result.success) {
+    const textContent = htmlToText(result.content);
     await query(
       `
       UPDATE articles
@@ -387,7 +430,7 @@ export async function getArticleContent(
     `,
       [
         result.content,
-        result.content, // TODO: strip HTML for content_text
+        textContent,
         result.wordCount,
         result.image || null,
         articleId,
