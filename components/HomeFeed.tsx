@@ -80,7 +80,7 @@ export default function HomeFeed({ clusters }: HomeFeedProps) {
       className={
         isOpen
           ? "lg:flex lg:justify-center lg:gap-6"
-          : "mx-auto max-w-3xl px-4 sm:px-6"
+          : "mx-auto max-w-3xl sm:px-6"
       }
     >
       {/* Feed Column */}
@@ -89,11 +89,7 @@ export default function HomeFeed({ clusters }: HomeFeedProps) {
           isOpen ? "max-w-3xl sm:px-6 lg:flex-shrink-0" : ""
         }`}
       >
-        <h1
-          className={`mb-3 text-xl font-semibold tracking-tight ${
-            isOpen ? "px-4 sm:px-0" : ""
-          }`}
-        >
+        <h1 className="mb-3 px-4 sm:px-0 text-xl font-semibold tracking-tight">
           Top Stories
         </h1>
 
