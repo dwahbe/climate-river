@@ -69,16 +69,13 @@ export default function ShareButtons({ url, title }: ShareButtonsProps) {
         aria-label={copied ? "Link copied" : "Copy link"}
       >
         {copied ? (
-          <>
-            <Check className="w-4 h-4 text-emerald-500" />
-            <span className="text-emerald-600">Copied</span>
-          </>
+          <Check className="w-4 h-4 text-emerald-500" />
         ) : (
-          <>
-            <Link2 className="w-4 h-4" />
-            <span>Copy link</span>
-          </>
+          <Link2 className="w-4 h-4" />
         )}
+        <span className={`min-w-[3.5rem] ${copied ? "text-emerald-600" : ""}`}>
+          {copied ? "Copied" : "Copy link"}
+        </span>
       </button>
     </div>
   );
