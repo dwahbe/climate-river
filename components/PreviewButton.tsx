@@ -109,7 +109,7 @@ export default function PreviewButton({
         aria-label="Preview article"
       >
         <Eye className="w-4 h-4" />
-        <span className="hidden sm:inline">Preview</span>
+        <span>Preview</span>
       </button>
 
       {/* Mobile drawer */}
