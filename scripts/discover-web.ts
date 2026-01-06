@@ -285,8 +285,9 @@ function hostFromUrl(url: string | undefined): string | null {
   }
 }
 
-// Common TLDs to strip when humanizing hostnames
+// Common TLDs and country codes to strip when humanizing hostnames
 const COMMON_TLDS = new Set([
+  // Generic TLDs
   "com",
   "org",
   "net",
@@ -294,14 +295,40 @@ const COMMON_TLDS = new Set([
   "gov",
   "io",
   "co",
+  "info",
+  "biz",
+  // Country codes
   "us",
   "uk",
   "ca",
   "au",
   "de",
   "fr",
-  "info",
-  "biz",
+  "nz",
+  "ie",
+  "in",
+  "pk",
+  "sg",
+  "hk",
+  "za",
+  "my",
+  "ph",
+  "br",
+  "mx",
+  "jp",
+  "kr",
+  "cn",
+  "tw",
+  "th",
+  "vn",
+  "id",
+  "ae",
+  "sa",
+  "il",
+  "eg",
+  "ng",
+  "ke",
+  "gh",
 ]);
 
 function humanizeHost(host: string): string {
