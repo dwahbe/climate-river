@@ -76,14 +76,24 @@ export default function HomeFeed({ clusters }: HomeFeedProps) {
   const isOpen = !!selectedArticle;
 
   return (
-    <div className="lg:flex lg:justify-center lg:gap-6">
+    <div
+      className={
+        isOpen
+          ? "lg:flex lg:justify-center lg:gap-6"
+          : "mx-auto max-w-3xl px-4 sm:px-6"
+      }
+    >
       {/* Feed Column */}
       <div
-        className={`w-full max-w-3xl sm:px-6 transition-all duration-300 ease-in-out ${
-          isOpen ? "lg:flex-shrink-0" : ""
+        className={`w-full transition-all duration-300 ease-in-out ${
+          isOpen ? "max-w-3xl sm:px-6 lg:flex-shrink-0" : ""
         }`}
       >
-        <h1 className="mb-3 px-4 sm:px-0 text-xl font-semibold tracking-tight">
+        <h1
+          className={`mb-3 text-xl font-semibold tracking-tight ${
+            isOpen ? "px-4 sm:px-0" : ""
+          }`}
+        >
           Top Stories
         </h1>
 
