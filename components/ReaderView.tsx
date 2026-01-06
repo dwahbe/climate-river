@@ -52,11 +52,12 @@ export default function ReaderView({
     : null;
 
   useEffect(() => {
-    if (!isOpen || data) return;
+    if (!isOpen) return;
 
     const fetchContent = async () => {
       setLoading(true);
       setError(null);
+      setData(null);
 
       try {
         const res = await fetch(`/api/reader/${articleId}`);
@@ -85,7 +86,7 @@ export default function ReaderView({
     };
 
     fetchContent();
-  }, [isOpen, articleId, data]);
+  }, [isOpen, articleId]);
 
   const handleClose = () => {
     onClose();
