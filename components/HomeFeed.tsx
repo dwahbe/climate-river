@@ -79,14 +79,14 @@ export default function HomeFeed({ clusters }: HomeFeedProps) {
     <div
       className={
         isOpen
-          ? "lg:flex lg:justify-center lg:gap-6"
+          ? "lg:flex lg:gap-8 max-w-[1400px] mx-auto px-4 lg:px-6"
           : "mx-auto max-w-3xl sm:px-6"
       }
     >
-      {/* Feed Column */}
+      {/* Feed Column - shrinks when reader is open to give reader priority */}
       <div
         className={`w-full transition-all duration-300 ease-in-out ${
-          isOpen ? "max-w-3xl sm:px-6 lg:flex-shrink-0" : ""
+          isOpen ? "lg:w-[480px] lg:min-w-[400px] lg:shrink-0" : ""
         }`}
       >
         <h1 className="mb-3 px-4 sm:px-0 text-xl font-semibold tracking-tight">
@@ -111,10 +111,10 @@ export default function HomeFeed({ clusters }: HomeFeedProps) {
         )}
       </div>
 
-      {/* Reader Panel - Desktop only */}
+      {/* Reader Panel - Desktop only, takes remaining space */}
       <div
         className={`hidden lg:block sticky top-0 h-screen transition-all duration-300 ease-in-out overflow-hidden ${
-          isOpen ? "w-[700px] flex-shrink-0 pr-6 opacity-100" : "w-0 opacity-0"
+          isOpen ? "flex-1 min-w-[450px] opacity-100" : "w-0 opacity-0"
         }`}
       >
         <div className="h-full bg-white overflow-hidden">
