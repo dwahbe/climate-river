@@ -3,7 +3,12 @@ import { query, endPool } from "@/lib/db";
 import { categorizeAndStoreArticle } from "@/lib/categorizer";
 
 export async function run(
-  opts: { limit?: number; closePool?: boolean; recategorizeAll?: boolean } = {},
+  opts: {
+    limit?: number;
+    closePool?: boolean;
+    recategorizeAll?: boolean;
+    withContentOnly?: boolean;
+  } = {},
 ) {
   const start = Date.now();
   console.log("🏷️  Starting bulk categorization...");
@@ -12,30 +17,49 @@ export async function run(
   // Either articles with no categories, or all articles if limit is specified
   const limit = opts.limit || 1000; // Default to 1000 articles
 
-  const { rows } = await query<{
-    id: number;
-    title: string;
-    dek: string | null;
-  }>(
-    opts.recategorizeAll
-      ? `
-      SELECT a.id, a.title, a.dek
+  // Build query based on options
+  let sql: string;
+  if (opts.recategorizeAll) {
+    sql = `
+      SELECT a.id, a.title, a.dek, a.content_text
       FROM articles a
       WHERE a.published_at >= now() - interval '30 days'
       ORDER BY a.published_at DESC
       LIMIT $1
-    `
-      : `
-      SELECT a.id, a.title, a.dek
+    `;
+  } else if (opts.withContentOnly) {
+    // Only retry articles that have content now - avoids wasting API calls
+    // on articles that would fail climate check again with just title+dek
+    sql = `
+      SELECT a.id, a.title, a.dek, a.content_text
+      FROM articles a
+      LEFT JOIN article_categories ac ON ac.article_id = a.id
+      WHERE ac.article_id IS NULL
+        AND a.published_at >= now() - interval '30 days'
+        AND a.content_status = 'success'
+      ORDER BY a.published_at DESC
+      LIMIT $1
+    `;
+  } else {
+    sql = `
+      SELECT a.id, a.title, a.dek, a.content_text
       FROM articles a
       LEFT JOIN article_categories ac ON ac.article_id = a.id
       WHERE ac.article_id IS NULL
         AND a.published_at >= now() - interval '30 days'
       ORDER BY a.published_at DESC
       LIMIT $1
-    `,
-    [limit],
-  );
+    `;
+  }
+
+  // Include content_text for improved climate relevance checks
+  // Articles with prefetched content may pass climate check even if title alone didn't
+  const { rows } = await query<{
+    id: number;
+    title: string;
+    dek: string | null;
+    content_text: string | null;
+  }>(sql, [limit]);
 
   console.log(
     `📊 Found ${rows.length} articles to ${opts.recategorizeAll ? "re-" : ""}categorize`,
@@ -49,10 +73,17 @@ export async function run(
     processed++;
 
     try {
+      // Combine dek and content_text for better categorization
+      // This helps articles pass climate check when content has climate terms but title doesn't
+      const summary = [article.dek, article.content_text]
+        .filter(Boolean)
+        .join(" ")
+        .slice(0, 2000); // Limit to reasonable length
+
       await categorizeAndStoreArticle(
         article.id,
         article.title,
-        article.dek || undefined,
+        summary || undefined,
       );
       succeeded++;
 
@@ -93,6 +124,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
 type CliOptions = {
   limit?: number;
   recategorizeAll?: boolean;
+  withContentOnly?: boolean;
 };
 
 function parseCliArgs(argv: string[]): CliOptions {
@@ -130,6 +162,11 @@ function parseCliArgs(argv: string[]): CliOptions {
 
     if (arg === "--recategorize-all" || arg === "--recat-all") {
       opts.recategorizeAll = true;
+      continue;
+    }
+
+    if (arg === "--with-content-only" || arg === "--content-only") {
+      opts.withContentOnly = true;
       continue;
     }
   }

@@ -68,6 +68,19 @@ export async function GET(req: Request) {
     });
     console.log(`✅ Prefetch completed (${elapsed()}s):`, prefetchResult);
 
+    // 4b) Re-categorize after prefetch - catches articles with content that failed initial categorization
+    // Only retry articles that now have content (content_status='success')
+    console.log("🏷️  Re-categorizing articles with new content...");
+    const recategorizeResult = await safeRun(import("@/scripts/categorize"), {
+      limit: 30,
+      withContentOnly: true,
+      closePool: false,
+    });
+    console.log(
+      `✅ Re-categorize completed (${elapsed()}s):`,
+      recategorizeResult,
+    );
+
     // 5) Rescore clusters - fast
     console.log("🔢 Running rescore...");
     const rescoreResult = await safeRun(import("@/scripts/rescore"), {
@@ -142,6 +155,7 @@ export async function GET(req: Request) {
         ingest: ingestResult,
         categorize: categorizeResult,
         prefetch: prefetchResult,
+        recategorize: recategorizeResult,
         rescore: rescoreResult,
         clusterMaintenance: clusterMaintenanceResult,
         webDiscover: webDiscoverResult,
