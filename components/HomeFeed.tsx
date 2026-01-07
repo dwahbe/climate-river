@@ -1,92 +1,90 @@
-"use client";
+'use client'
 
-import { useState, useEffect } from "react";
-import FeedCard from "@/components/FeedCard";
-import ReaderPanel from "@/components/ReaderPanel";
-import ReaderView from "@/components/ReaderView";
-import type { Cluster } from "@/lib/models/cluster";
+import { useState, useEffect } from 'react'
+import FeedCard from '@/components/FeedCard'
+import ReaderPanel from '@/components/ReaderPanel'
+import ReaderView from '@/components/ReaderView'
+import type { Cluster } from '@/lib/models/cluster'
 
 type SelectedArticle = {
-  id: number;
-  title: string;
-  url: string;
-} | null;
+  id: number
+  title: string
+  url: string
+} | null
 
 type HomeFeedProps = {
-  clusters: Cluster[];
-};
+  clusters: Cluster[]
+}
 
-type DeviceType = "mobile" | "tablet" | "desktop";
+type DeviceType = 'mobile' | 'tablet' | 'desktop'
 
 export default function HomeFeed({ clusters }: HomeFeedProps) {
-  const [selectedArticle, setSelectedArticle] = useState<SelectedArticle>(null);
-  const [deviceType, setDeviceType] = useState<DeviceType>("desktop");
+  const [selectedArticle, setSelectedArticle] = useState<SelectedArticle>(null)
+  const [deviceType, setDeviceType] = useState<DeviceType>('desktop')
 
   useEffect(() => {
     const checkDevice = () => {
-      const width = window.innerWidth;
+      const width = window.innerWidth
       if (width < 768) {
-        setDeviceType("mobile");
+        setDeviceType('mobile')
       } else if (width < 1024) {
-        setDeviceType("tablet");
+        setDeviceType('tablet')
       } else {
-        setDeviceType("desktop");
+        setDeviceType('desktop')
       }
-    };
-    checkDevice();
-    window.addEventListener("resize", checkDevice);
-    return () => window.removeEventListener("resize", checkDevice);
-  }, []);
+    }
+    checkDevice()
+    window.addEventListener('resize', checkDevice)
+    return () => window.removeEventListener('resize', checkDevice)
+  }, [])
 
   const handlePreview = (articleId: number, title: string, url: string) => {
-    setSelectedArticle({ id: articleId, title, url });
-  };
+    setSelectedArticle({ id: articleId, title, url })
+  }
 
   const handleClosePreview = () => {
-    setSelectedArticle(null);
-  };
+    setSelectedArticle(null)
+  }
 
   // Find current index for navigation
   const currentIndex = selectedArticle
     ? clusters.findIndex((c) => c.lead_article_id === selectedArticle.id)
-    : -1;
+    : -1
 
   const handlePrev = () => {
     if (currentIndex > 0) {
-      const prev = clusters[currentIndex - 1];
+      const prev = clusters[currentIndex - 1]
       setSelectedArticle({
         id: prev.lead_article_id,
         title: prev.lead_title,
         url: prev.lead_url,
-      });
+      })
     }
-  };
+  }
 
   const handleNext = () => {
     if (currentIndex < clusters.length - 1) {
-      const next = clusters[currentIndex + 1];
+      const next = clusters[currentIndex + 1]
       setSelectedArticle({
         id: next.lead_article_id,
         title: next.lead_title,
         url: next.lead_url,
-      });
+      })
     }
-  };
+  }
 
-  const isOpen = !!selectedArticle;
+  const isOpen = !!selectedArticle
 
   return (
     <div
-      className={
-        isOpen
-          ? "lg:flex lg:gap-8 max-w-[1400px] mx-auto px-4 lg:px-6"
-          : "mx-auto max-w-3xl sm:px-6"
-      }
+      className={`mx-auto sm:px-6 ${
+        isOpen ? 'lg:flex lg:gap-8 lg:max-w-[1400px] lg:px-6' : 'max-w-3xl'
+      }`}
     >
       {/* Feed Column - shrinks when reader is open to give reader priority */}
       <div
         className={`w-full transition-all duration-300 ease-in-out ${
-          isOpen ? "lg:w-[480px] lg:min-w-[400px] lg:shrink-0" : ""
+          isOpen ? 'lg:w-[480px] lg:min-w-[400px] lg:shrink-0' : ''
         }`}
       >
         <h1 className="mb-3 px-4 sm:px-0 text-xl font-semibold tracking-tight">
@@ -114,7 +112,7 @@ export default function HomeFeed({ clusters }: HomeFeedProps) {
       {/* Reader Panel - Desktop only, takes remaining space */}
       <div
         className={`hidden lg:block sticky top-0 h-screen transition-all duration-300 ease-in-out overflow-hidden ${
-          isOpen ? "flex-1 min-w-[450px] opacity-100" : "w-0 opacity-0"
+          isOpen ? 'flex-1 min-w-[450px] opacity-100' : 'w-0 opacity-0'
         }`}
       >
         <div className="h-full bg-white overflow-hidden">
@@ -134,7 +132,7 @@ export default function HomeFeed({ clusters }: HomeFeedProps) {
       </div>
 
       {/* Reader View - Mobile/Tablet */}
-      {deviceType !== "desktop" && selectedArticle && (
+      {deviceType !== 'desktop' && selectedArticle && (
         <ReaderView
           articleId={selectedArticle.id}
           articleTitle={selectedArticle.title}
@@ -149,5 +147,5 @@ export default function HomeFeed({ clusters }: HomeFeedProps) {
         />
       )}
     </div>
-  );
+  )
 }

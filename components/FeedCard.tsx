@@ -47,7 +47,7 @@ export default function FeedCard({
 
   return (
     <article
-      className={`bg-white border-b border-zinc-200/80 ${isSelected ? "bg-zinc-50 ring-2 ring-inset ring-zinc-200" : ""}`}
+      className={`bg-white border-b border-zinc-200/80 ${isSelected ? "lg:bg-zinc-50 lg:ring-2 lg:ring-inset lg:ring-zinc-200" : ""}`}
     >
       {/* Header with padding */}
       <div className="px-4 pt-4 sm:px-5 sm:pt-5">
