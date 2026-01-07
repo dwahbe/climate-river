@@ -114,6 +114,17 @@ body {
   }
 }
 
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateX(32px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
 /* Apple Reader View-inspired prose styling */
 .prose-reader {
   /* Base: 17px like Apple Reader default */
