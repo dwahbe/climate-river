@@ -3,11 +3,35 @@ import { query } from "@/lib/db";
 import sanitize from "sanitize-html";
 
 /**
+ * Strip leading image from content if we have a separate lead image
+ * Prevents duplicate image display (once as hero, once in content)
+ */
+function stripLeadingImage(html: string, leadImage?: string): string {
+  if (!leadImage) return html;
+
+  // If we have a lead image, strip everything up to and including the first figure/img
+  // This handles various junk that can appear before the image (hr, skip links, etc)
+  const figureMatch = html.match(
+    /^[\s\S]*?(<figure[^>]*>[\s\S]*?<\/figure>|<img[^>]*>)\s*/i,
+  );
+
+  if (figureMatch) {
+    // Remove everything up to and including the matched figure/img
+    return html.slice(figureMatch[0].length);
+  }
+
+  return html;
+}
+
+/**
  * Sanitize HTML content from Defuddle extraction
  * Allows semantic article elements while stripping noise
  */
-function sanitizeContent(html: string): string {
-  const cleaned = sanitize(html, {
+function sanitizeContent(html: string, leadImage?: string): string {
+  // First strip any leading image that matches the extracted lead image
+  const withoutLeadingDupe = stripLeadingImage(html, leadImage);
+
+  const cleaned = sanitize(withoutLeadingDupe, {
     allowedTags: [
       // Headings
       "h1",
@@ -255,8 +279,10 @@ async function fetchArticleContent(url: string): Promise<ReaderResult> {
       // Cleanup JSDOM to free memory
       dom.window.close();
 
-      // Sanitize the extracted HTML
-      const htmlContent = result.content ? sanitizeContent(result.content) : "";
+      // Sanitize the extracted HTML, passing lead image to strip duplicates
+      const htmlContent = result.content
+        ? sanitizeContent(result.content, result.image)
+        : "";
       const textContent = htmlToText(htmlContent);
       const wordCount = textContent.split(/\s+/).filter(Boolean).length;
 

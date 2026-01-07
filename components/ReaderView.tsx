@@ -43,7 +43,6 @@ export default function ReaderView({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const isMobile = mode === "mobile";
   const isTablet = mode === "tablet";
 
   // Calculate read time (roughly 200 words per minute)
@@ -135,7 +134,7 @@ export default function ReaderView({
             </figure>
           )}
           <article
-            className={`prose prose-zinc max-w-none ${isMobile ? "" : "prose-lg"}`}
+            className="prose prose-zinc prose-reader max-w-none"
             dangerouslySetInnerHTML={{ __html: data.content }}
           />
         </>

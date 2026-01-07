@@ -113,3 +113,72 @@ body {
     transform: translateX(0);
   }
 }
+
+/* Apple Reader View-inspired prose styling */
+.prose-reader {
+  /* Base: 17px like Apple Reader default */
+  font-size: 1.0625rem;
+  line-height: 1.58;
+  letter-spacing: -0.003em;
+}
+
+.prose-reader p {
+  margin-top: 1.25em;
+  margin-bottom: 1.25em;
+}
+
+.prose-reader h1 {
+  font-size: 1.75em;
+  margin-top: 0;
+  margin-bottom: 0.6em;
+  line-height: 1.2;
+}
+
+.prose-reader h2 {
+  font-size: 1.375em;
+  margin-top: 1.5em;
+  margin-bottom: 0.5em;
+  line-height: 1.3;
+}
+
+.prose-reader h3 {
+  font-size: 1.125em;
+  margin-top: 1.4em;
+  margin-bottom: 0.4em;
+  line-height: 1.4;
+}
+
+.prose-reader blockquote {
+  font-style: italic;
+  border-left: 3px solid #d4d4d8;
+  padding-left: 1em;
+  margin: 1.5em 0;
+}
+
+.prose-reader ul,
+.prose-reader ol {
+  margin-top: 1em;
+  margin-bottom: 1em;
+  padding-left: 1.5em;
+}
+
+.prose-reader li {
+  margin-top: 0.375em;
+  margin-bottom: 0.375em;
+}
+
+.prose-reader img {
+  margin-top: 1.5em;
+  margin-bottom: 1.5em;
+}
+
+.prose-reader figure {
+  margin-top: 1.5em;
+  margin-bottom: 1.5em;
+}
+
+.prose-reader figcaption {
+  font-size: 0.875em;
+  color: #71717a;
+  margin-top: 0.5em;
+}
