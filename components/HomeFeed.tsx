@@ -76,10 +76,10 @@ export default function HomeFeed({ clusters }: HomeFeedProps) {
   const isOpen = !!selectedArticle;
 
   return (
-    <div className="max-w-3xl mx-auto sm:px-6 lg:max-w-none lg:px-6">
+    <>
       <div className="lg:flex lg:gap-8 lg:justify-center">
         {/* Feed Column */}
-        <div className="w-full lg:w-[640px] lg:shrink-0">
+        <div className="mx-auto max-w-3xl sm:px-6 lg:shrink-0">
           <h1 className="mb-3 px-4 sm:px-0 text-xl font-semibold tracking-tight">
             Top Stories
           </h1>
@@ -138,6 +138,6 @@ export default function HomeFeed({ clusters }: HomeFeedProps) {
           hasNext={currentIndex < clusters.length - 1}
         />
       )}
-    </div>
+    </>
   );
 }
