@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import RiverClusterList from "@/components/RiverClusterList";
 import { getRiverData } from "@/lib/services/riverService";
-import { getCategoryBySlug, CATEGORIES } from "@/lib/tagger";
+import { getCategoryBySlug } from "@/lib/tagger";
 import { CategoryIcon } from "@/components/categoryIcons";
 import BreadcrumbStructuredData from "@/components/BreadcrumbStructuredData";
 import type { Metadata } from "next";
