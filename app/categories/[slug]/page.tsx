@@ -9,12 +9,10 @@ import type { Metadata } from "next";
 
 export const revalidate = 300;
 export const runtime = "nodejs";
+export const dynamicParams = true;
 
-export async function generateStaticParams() {
-  return CATEGORIES.map((category) => ({
-    slug: category.slug,
-  }));
-}
+// Skip static generation at build time to avoid DB timeout
+// Pages render on-demand with ISR caching (revalidate=300)
 
 export async function generateMetadata(props: {
   params: Promise<{ slug: string }>;
