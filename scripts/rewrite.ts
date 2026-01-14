@@ -105,6 +105,8 @@ function buildPrompt(input: {
     "- Add specific WHAT with details; only cite numbers that were provided",
     "- End with WHY/IMPACT in natural clause",
     "- Use commas to separate clauses, not complex sentence structures",
+    "- Write what WAS FOUND, HAPPENED, or CHANGED - never what was 'reported on'",
+    "- The headline IS the news, not a description of coverage",
     "",
     "SPECIFICITY REQUIRED:",
     "- ONLY include numbers or quantitative claims that appear in the supplied material (title, summary, excerpt, preview article, or cluster context)",
@@ -136,6 +138,16 @@ function buildPrompt(input: {
     '  Example: "Fashion for Good releases decarbonization blueprint, offering practical factory-level guidance"',
     '  Example: "Indigenous groups blockade COP30 entrance, protesting lack of forest protection commitments"',
     "",
+    "BAD vs GOOD (avoid vague meta-headlines):",
+    '- BAD: "Study raises concerns about microplastics in human bodies"',
+    '- GOOD: "Study finds microplastics in 87% of human tissue samples, highest concentrations in lungs"',
+    "",
+    '- BAD: "Report shows climate barometer falls, citing challenges"',
+    '- GOOD: "RBC Climate Barometer drops 12 points to 47, lowest since 2021"',
+    "",
+    '- BAD: "Company announces progress on wind project"',
+    '- GOOD: "Ørsted resumes 2.6GW Ocean Wind project after 9th Circuit blocks permit freeze"',
+    "",
     "STYLE RULES:",
     "- Present tense, active voice",
     "- 120-160 characters ideal (Techmeme density)",
@@ -146,6 +158,8 @@ function buildPrompt(input: {
     "- No questions, puns, or editorial voice",
     '- Match certainty level of source: if source states fact ("Trump Won"), rewrite as fact ("Trump wins"), never as speculation',
     '- FORBIDDEN WORDS: "likely", "expected to", "set to", "poised to" - these will cause rejection',
+    '- FORBIDDEN META-PATTERNS: "reports on", "raises concerns", "citing challenges", "sparking debate", "health implications", "building momentum"',
+    "- If you can't state the specific finding/action/change, the headline will be rejected",
     '- "may"/"could" OK only for scientific projections about future events',
     "",
     "SOURCE MATERIAL:",
@@ -158,6 +172,16 @@ function buildPrompt(input: {
 
   if (input.contentSnippet) {
     lines.push(`Article excerpt: ${input.contentSnippet}`);
+    lines.push("");
+    lines.push(
+      "CONTENT AVAILABLE - You MUST extract at least one specific detail from the article excerpt:",
+    );
+    lines.push("- A number, percentage, or measurement");
+    lines.push("- A specific name, location, or entity");
+    lines.push("- A concrete finding, action, or outcome");
+    lines.push(
+      "Do NOT write a generic summary when specific details exist in the excerpt above.",
+    );
   }
 
   if (input.previewExcerpt) {
@@ -380,19 +404,30 @@ function passesChecks(
     return false;
   }
 
-  // Word count check - allow shorter if more specific
+  // Word count check - allow Techmeme-style density (shorter but denser)
+  // Lowered thresholds since vaguePatterns validation catches actual quality issues
   const originalWords = original.split(/\s+/).length;
   const draftWords = t.split(/\s+/).length;
 
-  if (hasContent) {
-    // With content, allow slightly shorter if more specific (90% threshold)
-    if (draftWords < originalWords * 0.9) {
-      console.warn(`⚠️  Headline shorter than original despite having content`);
+  // Very long originals (>30 words) are likely social media posts, not headlines
+  // Use much lower threshold since we're condensing a post into a headline
+  const isLikelySocialPost = originalWords > 30;
+
+  if (isLikelySocialPost) {
+    // Social posts: just ensure we have a reasonable headline (8+ words)
+    if (draftWords < 8) {
+      console.warn(`⚠️  Headline too short for social post condensation`);
+      return false;
+    }
+  } else if (hasContent) {
+    // Normal headline with content: allow denser headlines (70% threshold)
+    if (draftWords < originalWords * 0.7) {
+      console.warn(`⚠️  Headline too compressed despite having content`);
       return false;
     }
   } else {
-    // Without content, allow reasonable compression
-    if (draftWords < originalWords * 0.6) {
+    // Normal headline without content: allow Techmeme-style compression (50% threshold)
+    if (draftWords < originalWords * 0.5) {
       console.warn(`⚠️  Headline too compressed`);
       return false;
     }
@@ -451,6 +486,43 @@ function passesChecks(
 
   if (weakPatterns.some((p) => p.test(t))) {
     console.warn(`⚠️  Rejected weak hedging language: "${t.slice(0, 50)}..."`);
+    return false;
+  }
+
+  // Check for vague/meta-reporting patterns that produce headlines about articles, not news
+  const vaguePatterns = [
+    // Meta-reporting (headline about article, not news)
+    /\breports on\b/i,
+    /\breports that\b/i,
+    /\bcovers\b/i,
+    /\bexplores\b/i,
+    /\bdiscusses\b/i,
+
+    // Vague concern/debate language
+    /\braising concerns\b/i,
+    /\bsparking debate\b/i,
+    /\bprompting questions\b/i,
+    /\bdrawing attention\b/i,
+
+    // Empty citations
+    /\bciting challenges\b/i,
+    /\bciting concerns\b/i,
+    /\bciting issues\b/i,
+    /\bciting ongoing\b/i,
+
+    // Hollow momentum phrases
+    /\bbuild(s|ing)? (new )?momentum\b/i,
+    /\bgain(s|ing)? traction\b/i,
+    /\bmake(s|ing)? progress\b/i,
+
+    // Generic implications
+    /\bhealth implications\b/i,
+    /\bbroader implications\b/i,
+    /\bongoing research\b/i,
+  ];
+
+  if (vaguePatterns.some((p) => p.test(t))) {
+    console.warn(`⚠️  Rejected vague/meta-reporting pattern: "${t.slice(0, 50)}..."`);
     return false;
   }
 
