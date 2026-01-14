@@ -522,7 +522,9 @@ function passesChecks(
   ];
 
   if (vaguePatterns.some((p) => p.test(t))) {
-    console.warn(`⚠️  Rejected vague/meta-reporting pattern: "${t.slice(0, 50)}..."`);
+    console.warn(
+      `⚠️  Rejected vague/meta-reporting pattern: "${t.slice(0, 50)}..."`,
+    );
     return false;
   }
 
