@@ -71,19 +71,19 @@ export default function FeedCard({
                 {cluster.lead_homepage ? (
                   <PublisherLink
                     href={cluster.lead_homepage}
-                    className="font-medium text-zinc-900 hover:underline truncate"
+                    className="font-medium text-zinc-900 hover:underline flex-shrink-0"
                   >
                     {publisher}
                   </PublisherLink>
                 ) : (
-                  <span className="font-medium text-zinc-900 truncate">
+                  <span className="font-medium text-zinc-900 flex-shrink-0">
                     {publisher}
                   </span>
                 )}
                 {cluster.lead_author && (
                   <>
-                    <span className="text-zinc-300">·</span>
-                    <span className="text-zinc-500 truncate">
+                    <span className="text-zinc-300 flex-shrink-0">·</span>
+                    <span className="text-zinc-500 truncate min-w-0">
                       {cluster.lead_author}
                     </span>
                   </>
