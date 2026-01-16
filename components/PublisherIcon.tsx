@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import { useState } from "react";
 
 type PublisherIconProps = {
@@ -34,7 +35,7 @@ export default function PublisherIcon({
   if (hasError || !domain) {
     return (
       <div
-        className="flex items-center justify-center rounded-full bg-gradient-to-br from-zinc-100 to-zinc-200 text-zinc-600 font-semibold text-sm"
+        className="flex items-center justify-center rounded-full bg-linear-to-br from-zinc-100 to-zinc-200 text-zinc-600 font-semibold text-sm"
         style={{ width: size, height: size }}
         aria-hidden="true"
       >
@@ -48,7 +49,7 @@ export default function PublisherIcon({
       className="relative rounded-full overflow-hidden bg-zinc-100 ring-1 ring-zinc-200/50"
       style={{ width: size, height: size }}
     >
-      <img
+      <Image
         src={faviconUrl}
         alt=""
         width={size}

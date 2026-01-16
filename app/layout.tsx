@@ -98,7 +98,7 @@ export default async function RootLayout({
       </head>
       <body className="min-h-full bg-zinc-50 text-zinc-900 antialiased overflow-x-hidden overscroll-x-none">
         <nav className="bg-white border-b border-zinc-100">
-          <div className="mx-auto max-w-3xl px-4 sm:px-6">
+          <div className="mx-auto max-w-5xl px-4 sm:px-6">
             {/* Two columns: left / right — all vertically centered */}
             <div className="flex md:items-center md:justify-between max-md:flex-col gap-2 py-3 sm:py-4">
               {/* Left: brand + navigation */}
@@ -134,7 +134,7 @@ export default async function RootLayout({
           </div>
         </nav>
 
-        <main className="mx-auto max-w-5xl w-full md:px-4 py-6 content">
+        <main className="mx-auto max-w-5xl w-full px-4 sm:px-6 py-6 content">
           {children}
         </main>
 

@@ -1,5 +1,3 @@
-/* eslint-env node */
-
 const DEFAULT_ALLOWED_ORIGINS = [
   "https://climateriver.org",
   "https://www.climateriver.org",
@@ -27,6 +25,15 @@ function resolveAllowedOrigins() {
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   experimental: { serverActions: { allowedOrigins: resolveAllowedOrigins() } },
+  images: {
+    remotePatterns: [
+      {
+        protocol: "https",
+        hostname: "www.google.com",
+        pathname: "/s2/favicons",
+      },
+    ],
+  },
 
   async redirects() {
     return [

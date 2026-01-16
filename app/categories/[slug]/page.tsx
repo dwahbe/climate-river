@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import RiverClusterList from "@/components/RiverClusterList";
+import FeedCardGrid from "@/components/FeedCardGrid";
 import { getRiverData } from "@/lib/services/riverService";
 import { getCategoryBySlug } from "@/lib/tagger";
 import { CategoryIcon } from "@/components/categoryIcons";
@@ -72,7 +72,7 @@ export default async function CategoryDetailPage(props: {
           },
         ]}
       />
-      <div className="mx-auto max-w-3xl px-4 sm:px-6 pt-1 sm:pt-1.5 pb-8">
+      <div className="w-full pt-1 sm:pt-1.5 pb-10">
         <Link
           href="/categories"
           className="text-sm text-zinc-500 hover:underline"
@@ -87,7 +87,10 @@ export default async function CategoryDetailPage(props: {
             style={{ color: category.color }}
           />
         </h1>
-        <RiverClusterList clusters={clusters} />
+        <FeedCardGrid
+          clusters={clusters}
+          emptyMessage="No stories available right now."
+        />
       </div>
     </>
   );

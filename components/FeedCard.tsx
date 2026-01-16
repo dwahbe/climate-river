@@ -23,14 +23,17 @@ type FeedCardProps = {
   cluster: Cluster;
   onPreview?: (articleId: number, title: string, url: string) => void;
   isSelected?: boolean;
+  variant?: "list" | "grid";
 };
 
 export default function FeedCard({
   cluster,
   onPreview,
   isSelected,
+  variant = "list",
 }: FeedCardProps) {
   const [isExpanded, setIsExpanded] = useState(false);
+  const isGrid = variant === "grid";
   const publisher = cluster.lead_source || hostFrom(cluster.lead_url);
   const publisherDomain = cluster.lead_homepage
     ? hostFrom(cluster.lead_homepage)
@@ -47,13 +50,13 @@ export default function FeedCard({
 
   return (
     <article
-      className={`bg-white border-b border-zinc-200/80 ${isSelected ? "lg:bg-zinc-50 lg:ring-2 lg:ring-inset lg:ring-zinc-200" : ""}`}
+      className={`bg-white ${isGrid ? "flex h-full flex-col rounded-xl border border-zinc-200/80 shadow-sm" : "border-b border-zinc-200/80"} ${!isGrid && isSelected ? "lg:bg-zinc-50 lg:ring-2 lg:ring-inset lg:ring-zinc-200" : ""}`}
     >
       {/* Header with padding */}
       <div className="px-4 pt-4 sm:px-5 sm:pt-5">
         <div className="flex gap-3">
           {/* Publisher Icon */}
-          <div className="flex-shrink-0 pt-0.5">
+          <div className="shrink-0 pt-0.5">
             {cluster.lead_homepage ? (
               <PublisherLink href={cluster.lead_homepage} className="block">
                 <PublisherIcon domain={publisherDomain} name={publisher} />
@@ -71,18 +74,18 @@ export default function FeedCard({
                 {cluster.lead_homepage ? (
                   <PublisherLink
                     href={cluster.lead_homepage}
-                    className="font-medium text-zinc-900 hover:underline flex-shrink-0"
+                    className="font-medium text-zinc-900 hover:underline shrink-0"
                   >
                     {publisher}
                   </PublisherLink>
                 ) : (
-                  <span className="font-medium text-zinc-900 flex-shrink-0">
+                  <span className="font-medium text-zinc-900 shrink-0">
                     {publisher}
                   </span>
                 )}
                 {cluster.lead_author && (
                   <>
-                    <span className="text-zinc-300 flex-shrink-0">·</span>
+                    <span className="text-zinc-300 shrink-0">·</span>
                     <span className="text-zinc-500 truncate min-w-0">
                       {cluster.lead_author}
                     </span>
@@ -90,14 +93,14 @@ export default function FeedCard({
                 )}
                 {cluster.lead_was_rewritten && (
                   <span
-                    className="inline-flex items-center text-amber-500 flex-shrink-0"
+                    className="inline-flex items-center text-amber-500 shrink-0"
                     title="Rewritten for improved context by Climate River"
                   >
                     <Sparkles className="h-3.5 w-3.5" aria-hidden="true" />
                   </span>
                 )}
               </div>
-              <span className="text-xs text-zinc-400 whitespace-nowrap flex-shrink-0">
+              <span className="text-xs text-zinc-400 whitespace-nowrap shrink-0">
                 <LocalTime iso={cluster.published_at} />
               </span>
             </div>
