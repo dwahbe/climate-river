@@ -27,7 +27,7 @@ export default function HomeFeed({ clusters }: HomeFeedProps) {
       const width = window.innerWidth;
       if (width < 768) {
         setDeviceType("mobile");
-      } else if (width < 1024) {
+      } else if (width < 1280) {
         setDeviceType("tablet");
       } else {
         setDeviceType("desktop");
@@ -77,9 +77,9 @@ export default function HomeFeed({ clusters }: HomeFeedProps) {
 
   return (
     <>
-      <div className="lg:flex lg:gap-8 lg:justify-center">
+      <div className="xl:flex xl:gap-8 xl:justify-center">
         {/* Feed Column */}
-        <div className="mx-auto max-w-3xl sm:px-6 lg:shrink-0">
+        <div className="mx-auto max-w-3xl sm:px-6 xl:shrink-0">
           <h1 className="mb-3 px-4 sm:px-0 text-xl font-semibold tracking-tight">
             Top Stories
           </h1>
@@ -104,7 +104,7 @@ export default function HomeFeed({ clusters }: HomeFeedProps) {
 
         {/* Reader Panel - Desktop only */}
         {isOpen && (
-          <div className="hidden lg:block w-[500px] shrink-0 sticky top-0 h-screen">
+          <div className="hidden xl:block w-[500px] shrink-0 sticky top-0 h-screen">
             <div className="h-full bg-white overflow-hidden animate-[slideInRight_200ms_ease-out]">
               {selectedArticle && (
                 <ReaderPanel
