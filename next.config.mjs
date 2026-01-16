@@ -24,7 +24,9 @@ function resolveAllowedOrigins() {
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  experimental: { serverActions: { allowedOrigins: resolveAllowedOrigins() } },
+  experimental: {
+    serverActions: { allowedOrigins: resolveAllowedOrigins() },
+  },
   images: {
     remotePatterns: [
       {
