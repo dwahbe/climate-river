@@ -48,8 +48,10 @@ export default async function CategoriesPage() {
 
   return (
     <div className="w-full pt-1 sm:pt-1.5 pb-10">
-      <h1 className="text-xl font-semibold tracking-tight">Categories</h1>
-      <p className="mt-2 text-sm text-zinc-600">
+      <h1 className="px-4 sm:px-0 text-xl font-semibold tracking-tight">
+        Categories
+      </h1>
+      <p className="mt-2 px-4 sm:px-0 text-sm text-zinc-600">
         Explore the climate beats where we curate the most consequential
         reporting in real time.
       </p>

@@ -45,7 +45,7 @@ export default function CategoryIndexClient({
         categories={categories}
         selectedSlug={selectedSlug}
         onSelect={setSelectedSlug}
-        className="mt-4"
+        className="mt-4 px-4 sm:px-0"
       />
 
       <div className="mt-8 space-y-10">

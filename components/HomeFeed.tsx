@@ -84,7 +84,7 @@ export default function HomeFeed({ clusters }: HomeFeedProps) {
             Top Stories
           </h1>
 
-          <div className="divide-y divide-zinc-200/80">
+          <div className="divide-y divide-zinc-200/80 -mx-4 sm:mx-0">
             {clusters.map((cluster) => (
               <FeedCard
                 key={cluster.cluster_id}
