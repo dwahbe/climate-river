@@ -57,7 +57,7 @@ export default function CategoryIndexClient({
 
           return (
             <section key={slug} className="space-y-4">
-              <div>
+              <div className="px-4 sm:px-0">
                 <h2 className="text-base font-semibold tracking-tight text-zinc-900">
                   {category.name}
                   <CategoryIcon
@@ -78,7 +78,7 @@ export default function CategoryIndexClient({
 
               <Link
                 href={`/categories/${category.slug}`}
-                className="inline-flex items-center gap-1 text-sm font-medium text-sky-600 hover:text-sky-700"
+                className="inline-flex items-center gap-1 px-4 sm:px-0 text-sm font-medium text-sky-600 hover:text-sky-700"
               >
                 View more stories <span aria-hidden="true">→</span>
               </Link>
