@@ -4,7 +4,7 @@ import type { PoolConfig } from "pg";
 const { Pool } = pg;
 import type { ConnectionOptions } from "tls";
 
-let _pool: Pool | undefined;
+let _pool: InstanceType<typeof Pool> | undefined;
 const isProd = process.env.NODE_ENV === "production";
 
 function parsePgUrl(url: string) {
