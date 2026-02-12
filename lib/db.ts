@@ -1,5 +1,7 @@
 // lib/db.ts
-import { Pool, PoolConfig } from "pg";
+import pg from "pg";
+import type { PoolConfig } from "pg";
+const { Pool } = pg;
 import type { ConnectionOptions } from "tls";
 
 let _pool: Pool | undefined;
