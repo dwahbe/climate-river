@@ -7,7 +7,9 @@ import { query, endPool } from "@/lib/db";
  */
 export async function run() {
   // --- pgvector extension for semantic similarity ---------------------------
-  await query(`create extension if not exists vector;`);
+  // Use 'extensions' schema to avoid Supabase lint warning
+  await query(`create schema if not exists extensions;`);
+  await query(`create extension if not exists vector schema extensions;`);
 
   // --- sources --------------------------------------------------------------
   await query(`
@@ -235,6 +237,7 @@ export async function run() {
     )
     language sql
     stable
+    set search_path = ''
     as $$
       with candidate_clusters as (
         select
