@@ -22,6 +22,14 @@ export async function getRiverData(filters: RiverFilters): Promise<Cluster[]> {
     return normalizeRiverClusters(clusters);
   } catch (error) {
     console.error("Service error in getRiverData:", error);
+
+    // During build/prerender, return empty array so the build succeeds.
+    // ISR will populate the page on the first real request.
+    if (process.env.NEXT_PHASE === "phase-production-build") {
+      console.warn("Returning empty clusters during build (upstream unreachable)");
+      return [];
+    }
+
     throw error;
   }
 }
