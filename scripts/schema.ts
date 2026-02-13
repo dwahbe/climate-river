@@ -201,6 +201,43 @@ export async function run() {
     on conflict (slug) do nothing;
   `);
 
+  // --- pipeline_runs (operational health tracking) ---------------------------
+  await query(`
+    create table if not exists pipeline_runs (
+      id          bigserial primary key,
+      job_name    text not null,
+      started_at  timestamptz not null default now(),
+      finished_at timestamptz,
+      duration_ms int,
+      status      text not null default 'running',
+      stats       jsonb,
+      error_msg   text
+    );
+  `);
+  await query(`
+    create index if not exists idx_pipeline_runs_job_started
+      on pipeline_runs(job_name, started_at desc);
+  `);
+
+  // RLS: pipeline_runs is internal-only, block all PostgREST access
+  await query(`alter table pipeline_runs enable row level security;`);
+
+  // --- source feed health columns -------------------------------------------
+  await query(
+    `alter table if exists sources add column if not exists last_fetched_at timestamptz;`,
+  );
+  await query(
+    `alter table if exists sources add column if not exists last_fetch_status text;`,
+  );
+  await query(
+    `alter table if exists sources add column if not exists last_fetch_count int;`,
+  );
+
+  // --- category embeddings (persist across cold starts) ---------------------
+  await query(
+    `alter table if exists categories add column if not exists embedding vector(1536);`,
+  );
+
   // --- get_river_clusters function -------------------------------------------
   // Drop existing function first (it has different return type)
   await query(
@@ -237,7 +274,7 @@ export async function run() {
     )
     language sql
     stable
-    set search_path = ''
+    set search_path = 'public'
     as $$
       with candidate_clusters as (
         select

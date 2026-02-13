@@ -5,7 +5,7 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 import { NextResponse } from "next/server";
-import { authorized, safeRun } from "@/lib/cron";
+import { authorized, safeRun, logPipelineRun } from "@/lib/cron";
 
 export async function GET(req: Request) {
   if (!(await authorized(req))) {
@@ -27,15 +27,25 @@ export async function GET(req: Request) {
     });
     console.log("✅ Cleanup completed:", result);
 
+    await logPipelineRun({
+      job: "cleanup",
+      durationMs: Date.now() - t0,
+      status: "success",
+      stats: result,
+    });
+
     return NextResponse.json({ ok: true, took_ms: Date.now() - t0, result });
   } catch (err: unknown) {
     console.error("Cleanup cron failed:", err);
+    const message = err instanceof Error ? err.message : String(err);
+    await logPipelineRun({
+      job: "cleanup",
+      durationMs: Date.now() - t0,
+      status: "error",
+      error: message,
+    });
     return NextResponse.json(
-      {
-        ok: false,
-        error: err instanceof Error ? err.message : String(err),
-        took_ms: Date.now() - t0,
-      },
+      { ok: false, error: message, took_ms: Date.now() - t0 },
       { status: 500 },
     );
   }

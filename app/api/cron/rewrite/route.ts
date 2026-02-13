@@ -5,7 +5,7 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
 import { NextResponse } from "next/server";
-import { authorized, safeRun } from "@/lib/cron";
+import { authorized, safeRun, logPipelineRun } from "@/lib/cron";
 
 export async function GET(req: Request) {
   if (!(await authorized(req))) {
@@ -32,6 +32,13 @@ export async function GET(req: Request) {
     });
     console.log("✅ Rewrite completed:", rewriteResult);
 
+    await logPipelineRun({
+      job: "rewrite",
+      durationMs: Date.now() - t0,
+      status: "success",
+      stats: rewriteResult,
+    });
+
     return NextResponse.json({
       ok: true,
       took_ms: Date.now() - t0,
@@ -40,6 +47,12 @@ export async function GET(req: Request) {
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     console.error("❌ Rewrite cron job failed:", message);
+    await logPipelineRun({
+      job: "rewrite",
+      durationMs: Date.now() - t0,
+      status: "error",
+      error: message,
+    });
     return NextResponse.json(
       { ok: false, error: message, took_ms: Date.now() - t0 },
       { status: 500 },

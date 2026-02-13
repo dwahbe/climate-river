@@ -1,5 +1,6 @@
 // lib/cron.ts - Shared utilities for cron job routes
 import { headers } from "next/headers";
+import { query } from "./db";
 
 export type ScriptOptions = Record<string, unknown> | undefined;
 export type ScriptRunner<R = unknown> = (
@@ -56,5 +57,59 @@ export async function safeRun<R = unknown>(
     console.error("❌ Script execution failed:", error);
     const message = error instanceof Error ? error.message : String(error);
     return { ok: false, error: message };
+  }
+}
+
+// ---------- Pipeline run tracking ----------
+
+let _tableChecked = false;
+
+async function ensurePipelineTable() {
+  if (_tableChecked) return;
+  try {
+    await query(`
+      create table if not exists pipeline_runs (
+        id          bigserial primary key,
+        job_name    text not null,
+        started_at  timestamptz not null default now(),
+        finished_at timestamptz,
+        duration_ms int,
+        status      text not null default 'running',
+        stats       jsonb,
+        error_msg   text
+      );
+    `);
+    _tableChecked = true;
+  } catch {
+    // Don't break cron jobs if table creation fails
+  }
+}
+
+/**
+ * Log a completed pipeline run. Fault-tolerant — never throws.
+ */
+export async function logPipelineRun(opts: {
+  job: string;
+  durationMs: number;
+  status: "success" | "partial" | "error";
+  stats?: unknown;
+  error?: string;
+}): Promise<void> {
+  try {
+    await ensurePipelineTable();
+    await query(
+      `INSERT INTO pipeline_runs (job_name, started_at, finished_at, duration_ms, status, stats, error_msg)
+       VALUES ($1, NOW() - make_interval(secs => $2::double precision / 1000), NOW(), $2, $3, $4, $5)`,
+      [
+        opts.job,
+        opts.durationMs,
+        opts.status,
+        opts.stats ? JSON.stringify(opts.stats) : null,
+        opts.error ?? null,
+      ],
+    );
+  } catch (err) {
+    // Never let logging break a cron job
+    console.error("Failed to log pipeline run:", err);
   }
 }

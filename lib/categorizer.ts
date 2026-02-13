@@ -12,30 +12,49 @@ import {
 import { embed } from "ai";
 import { openai } from "@ai-sdk/openai";
 
-// Cache for category embeddings to avoid repeated API calls
+// In-memory cache for category embeddings (survives within a warm instance)
 const categoryEmbeddingsCache = new Map<string, number[]>();
 
 /**
- * Generate embeddings for category representative texts
- * This creates semantic "anchors" for each category
+ * Get or generate category embedding with multi-tier caching:
+ * 1. In-memory Map (warm instance)
+ * 2. Database categories.embedding column (persists across cold starts)
+ * 3. Generate via OpenAI and store in both tiers
  */
 async function getCategoryEmbedding(
   categorySlug: CategorySlug,
 ): Promise<number[] | null> {
-  // Check cache first
+  // Tier 1: in-memory cache
   if (categoryEmbeddingsCache.has(categorySlug)) {
     return categoryEmbeddingsCache.get(categorySlug) || null;
   }
 
+  // Tier 2: check database
+  try {
+    const stored = await query<{ embedding: string }>(
+      `SELECT embedding FROM categories WHERE slug = $1 AND embedding IS NOT NULL`,
+      [categorySlug],
+    );
+    if (stored.rows.length > 0 && stored.rows[0].embedding) {
+      const parsed = JSON.parse(stored.rows[0].embedding);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        categoryEmbeddingsCache.set(categorySlug, parsed);
+        return parsed;
+      }
+    }
+  } catch {
+    // DB read failed — fall through to generate
+  }
+
+  // Tier 3: generate via OpenAI and persist
   const category = CATEGORIES.find((c) => c.slug === categorySlug);
   if (!category) return null;
 
   try {
-    // Create representative text for the category
     const representativeText = [
       category.name,
       category.description,
-      ...category.keywords.slice(0, 10), // Use top keywords
+      ...category.keywords.slice(0, 10),
     ].join(" ");
 
     const { embedding } = await embed({
@@ -43,7 +62,19 @@ async function getCategoryEmbedding(
       value: representativeText,
     });
 
+    // Store in memory
     categoryEmbeddingsCache.set(categorySlug, embedding);
+
+    // Persist to DB for next cold start
+    try {
+      await query(
+        `UPDATE categories SET embedding = $2 WHERE slug = $1`,
+        [categorySlug, JSON.stringify(embedding)],
+      );
+    } catch {
+      // DB write failed — embedding still works from memory this invocation
+    }
+
     return embedding;
   } catch (error) {
     console.error(

@@ -696,6 +696,24 @@ async function ensureSemanticClusterForArticle(
   );
 }
 
+// ---------- Source health tracking ----------
+async function updateSourceHealth(
+  sourceId: number,
+  status: "ok" | "error" | "empty",
+  count: number,
+) {
+  try {
+    await query(
+      `UPDATE sources
+       SET last_fetched_at = NOW(), last_fetch_status = $2, last_fetch_count = $3
+       WHERE id = $1`,
+      [sourceId, status, count],
+    );
+  } catch {
+    // Never break ingestion if health tracking fails
+  }
+}
+
 // ---------- Ingest one feed ----------
 async function ingestFromFeed(feedUrl: string, sourceId: number, limit = 20) {
   let feed;
@@ -704,6 +722,7 @@ async function ingestFromFeed(feedUrl: string, sourceId: number, limit = 20) {
   } catch (e: unknown) {
     const message = e instanceof Error ? e.message : String(e);
     console.warn(`Feed error for ${feedUrl}: ${message}`);
+    await updateSourceHealth(sourceId, "error", 0);
     return { scanned: 0, inserted: 0 };
   }
 
@@ -777,6 +796,11 @@ async function ingestFromFeed(feedUrl: string, sourceId: number, limit = 20) {
     }
   }
 
+  await updateSourceHealth(
+    sourceId,
+    inserted > 0 ? "ok" : "empty",
+    inserted,
+  );
   return { scanned: slice.length, inserted };
 }
 

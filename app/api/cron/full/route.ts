@@ -5,7 +5,7 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 300; // 5 minutes for comprehensive job
 
 import { NextResponse } from "next/server";
-import { authorized, safeRun } from "@/lib/cron";
+import { authorized, safeRun, logPipelineRun } from "@/lib/cron";
 
 export async function GET(req: Request) {
   if (!(await authorized(req))) {
@@ -147,29 +147,37 @@ export async function GET(req: Request) {
 
     console.log(`🎯 Full cron job completed in ${elapsed()}s!`);
 
-    return NextResponse.json({
-      ok: true,
-      took_ms: Date.now() - t0,
-      result: {
-        discover: discoverResult,
-        ingest: ingestResult,
-        categorize: categorizeResult,
-        prefetch: prefetchResult,
-        recategorize: recategorizeResult,
-        rescore: rescoreResult,
-        clusterMaintenance: clusterMaintenanceResult,
-        webDiscover: webDiscoverResult,
-        prefetchDiscovered: prefetchDiscoveredResult,
-      },
+    const result = {
+      discover: discoverResult,
+      ingest: ingestResult,
+      categorize: categorizeResult,
+      prefetch: prefetchResult,
+      recategorize: recategorizeResult,
+      rescore: rescoreResult,
+      clusterMaintenance: clusterMaintenanceResult,
+      webDiscover: webDiscoverResult,
+      prefetchDiscovered: prefetchDiscoveredResult,
+    };
+
+    await logPipelineRun({
+      job: "full",
+      durationMs: Date.now() - t0,
+      status: "success",
+      stats: result,
     });
+
+    return NextResponse.json({ ok: true, took_ms: Date.now() - t0, result });
   } catch (err: unknown) {
     console.error("Full cron job failed:", err);
+    const message = err instanceof Error ? err.message : String(err);
+    await logPipelineRun({
+      job: "full",
+      durationMs: Date.now() - t0,
+      status: "error",
+      error: message,
+    });
     return NextResponse.json(
-      {
-        ok: false,
-        error: err instanceof Error ? err.message : String(err),
-        took_ms: Date.now() - t0,
-      },
+      { ok: false, error: message, took_ms: Date.now() - t0 },
       { status: 500 },
     );
   }

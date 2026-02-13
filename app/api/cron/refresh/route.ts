@@ -5,7 +5,7 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 120; // 2 minutes for refresh
 
 import { NextResponse } from "next/server";
-import { authorized, safeRun } from "@/lib/cron";
+import { authorized, safeRun, logPipelineRun } from "@/lib/cron";
 
 export async function GET(req: Request) {
   if (!(await authorized(req))) {
@@ -118,21 +118,32 @@ export async function GET(req: Request) {
 
     console.log("🔄 Refresh cron job completed!");
 
-    return NextResponse.json({
-      ok: true,
-      took_ms: Date.now() - t0,
-      result: {
-        ingest: ingestResult,
-        categorize: categorizeResult,
-        prefetch: prefetchResult,
-        recategorize: recategorizeResult,
-        rescore: rescoreResult,
-        webDiscover: webDiscoverResult,
-        prefetchDiscovered: prefetchDiscoveredResult,
-      },
+    const result = {
+      ingest: ingestResult,
+      categorize: categorizeResult,
+      prefetch: prefetchResult,
+      recategorize: recategorizeResult,
+      rescore: rescoreResult,
+      webDiscover: webDiscoverResult,
+      prefetchDiscovered: prefetchDiscoveredResult,
+    };
+
+    await logPipelineRun({
+      job: "refresh",
+      durationMs: Date.now() - t0,
+      status: "success",
+      stats: result,
     });
+
+    return NextResponse.json({ ok: true, took_ms: Date.now() - t0, result });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
+    await logPipelineRun({
+      job: "refresh",
+      durationMs: Date.now() - t0,
+      status: "error",
+      error: message,
+    });
     return NextResponse.json({ ok: false, error: message }, { status: 500 });
   }
 }
