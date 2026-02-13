@@ -591,7 +591,7 @@ async function callOpenAIWebSearch(
 CRITICAL: Your response MUST be ONLY a valid JSON array. No text before or after.
 
 Required format:
-[{"title":"Article Title","url":"https://...","snippet":"Brief summary","publishedDate":"2025-11-25T12:00:00Z","source":"Outlet Name"}]
+[{"title":"Article Title","url":"https://...","snippet":"Brief summary","publishedDate":"${new Date().toISOString().split("T")[0]}T12:00:00Z","source":"Outlet Name"}]
 
 Rules:
 - Only include articles from the past 72 hours
@@ -1488,9 +1488,20 @@ async function getOrCreateSourceForResult(
     };
   }
 
+  const homepage = `https://${host}`;
+
+  // Check in-memory cache first to avoid DB round-trip
+  const cached = sourceCache.get(host);
+  if (cached) {
+    return {
+      sourceId: cached,
+      publisherName: null,
+      publisherHomepage: homepage,
+    };
+  }
+
   const slug = slugifyHost(host);
   const feedUrl = `web://${host}`;
-  const homepage = `https://${host}`;
 
   // Check if we already have this source with a proper name
   const existing = await query<{ id: number; name: string }>(
@@ -1992,8 +2003,9 @@ async function runBroadClimateDiscovery({
   let browseCost = 0;
 
   // Broad climate search queries - varied to capture different types of content
+  const currentYear = new Date().getFullYear();
   const broadQueries = [
-    "climate change policy legislation 2025",
+    `climate change policy legislation ${currentYear}`,
     "renewable energy solar wind investment",
     "carbon emissions reduction net zero",
     "climate science research report",

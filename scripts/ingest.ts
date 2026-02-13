@@ -754,7 +754,14 @@ async function ingestFromFeed(feedUrl: string, sourceId: number, limit = 20) {
     if (articleId) {
       inserted++;
       // Use semantic clustering instead of keyword-based clustering
-      await ensureSemanticClusterForArticle(articleId, title);
+      try {
+        await ensureSemanticClusterForArticle(articleId, title);
+      } catch (error) {
+        console.error(
+          `  ❌ CLUSTERING FAILED for article ${articleId}: ${error instanceof Error ? error.message : String(error)}`,
+        );
+        // Don't fail the whole feed if clustering fails — cluster-maintenance cron will pick it up
+      }
 
       // Categorize the article using hybrid approach
       try {
@@ -765,7 +772,7 @@ async function ingestFromFeed(feedUrl: string, sourceId: number, limit = 20) {
           `  ❌ CATEGORIZATION FAILED for article ${articleId}: ${error instanceof Error ? error.message : String(error)}`,
         );
         console.error(`     Title: "${title}"`);
-        // Don't fail the whole ingestion if categorization fails, but make it visible
+        // Don't fail the whole ingestion if categorization fails — categorize cron will retry
       }
     }
   }

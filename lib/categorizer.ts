@@ -111,10 +111,14 @@ interface HybridScoreInternal extends CategoryScore {
  * Primary category selection prioritizes strong rule-based signals to
  * ensure articles with clear keyword matches (like disaster headlines)
  * aren't overridden by semantic similarity to other categories.
+ *
+ * When articleId is provided, reuses the stored embedding from the DB
+ * instead of making a redundant OpenAI API call.
  */
 export async function categorizeArticleHybrid(
   title: string,
   summary?: string,
+  articleId?: number,
 ): Promise<CategoryScore[]> {
   if (!isClimateRelevant({ title, summary })) {
     return [];
@@ -122,13 +126,39 @@ export async function categorizeArticleHybrid(
   // Start with rule-based categorization
   const ruleBasedScores = categorizeArticle({ title, summary });
 
-  // Get article embedding for semantic comparison
-  const articleEmbedding = await generateArticleEmbedding(title, summary);
+  // Try to reuse stored embedding from DB before generating a new one
+  let articleEmbedding: number[] | null = null;
+
+  if (articleId) {
+    try {
+      const stored = await query<{ embedding: string }>(
+        `SELECT embedding FROM articles WHERE id = $1 AND embedding IS NOT NULL`,
+        [articleId],
+      );
+      if (stored.rows.length > 0 && stored.rows[0].embedding) {
+        // pgvector returns vectors as "[0.1,0.2,...]" — valid JSON
+        const parsed = JSON.parse(stored.rows[0].embedding);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          articleEmbedding = parsed;
+        }
+      }
+    } catch {
+      // Parse failure or DB error — fall through to generate
+    }
+  }
+
+  // Fall back to generating a new embedding only if none stored
+  if (!articleEmbedding) {
+    console.log(
+      `  ⚡ Generating new embedding for article ${articleId ?? "?"}: "${title.slice(0, 50)}..."`,
+    );
+    articleEmbedding = await generateArticleEmbedding(title, summary);
+  }
 
   if (!articleEmbedding) {
-    // Fallback to rule-based only if embedding generation fails
+    // Fallback to rule-based only if no embedding available at all
     console.warn(
-      `Failed to generate article embedding for "${title}", using rule-based only`,
+      `No embedding available for "${title}", using rule-based only`,
     );
     return ruleBasedScores;
   }
@@ -278,7 +308,7 @@ export async function categorizeAndStoreArticle(
   summary?: string,
 ): Promise<void> {
   try {
-    const scores = await categorizeArticleHybrid(title, summary);
+    const scores = await categorizeArticleHybrid(title, summary, articleId);
     await storeArticleCategories(articleId, scores);
   } catch (error) {
     console.error(`Error categorizing article ${articleId}:`, error);
