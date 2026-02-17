@@ -13,6 +13,7 @@ bun run test         # Node.js test runner via tsx
 bun run ingest       # Ingest RSS feeds
 bun run rescore      # Recalculate cluster scores
 bun run rewrite      # Rewrite headlines
+bun scripts/rewrite.ts --dry-run --limit 10  # Dry-run (no DB writes)
 bun run categorize   # Categorize articles
 bun run schema       # Init/validate DB schema
 ```
@@ -59,7 +60,7 @@ Three-tier cron strategy orchestrated via Vercel cron jobs:
 
 1. **Full** (3x/day, 5min): discover + ingest + categorize + prefetch + rescore + web discovery
 2. **Refresh** (6x/day, 2min): ingest + categorize + prefetch + rescore + conditional web discovery
-3. **Rewrite** (16x/day, 1min): headline rewriting (gpt-4o-mini, Techmeme-style)
+3. **Rewrite** (16x/day, 1min): headline rewriting (gpt-4.1-mini, Techmeme-style, with retry)
 
 ### API Authorization
 
@@ -88,6 +89,7 @@ All cron/admin endpoints require either:
 - Path alias: `@/*` maps to project root
 - Scripts run with `bun scripts/<name>.ts`
 - No pre-commit hooks; lint/build manually before pushing
+- After making changes, check if `CLAUDE.md` or `README.md` need updating (e.g. new scripts, changed models, architectural shifts). Only update if actually needed.
 
 ## Environment Variables
 
