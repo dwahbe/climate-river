@@ -1,6 +1,5 @@
 // app/api/cron/full/route.ts
 // Full pipeline cron - runs 3×/day for comprehensive processing
-export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 300; // 5 minutes for comprehensive job
 

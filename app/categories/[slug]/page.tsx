@@ -8,7 +8,6 @@ import BreadcrumbStructuredData from "@/components/BreadcrumbStructuredData";
 import type { Metadata } from "next";
 
 export const revalidate = 300;
-export const runtime = "nodejs";
 export const dynamicParams = true;
 
 // Skip static generation at build time to avoid DB timeout

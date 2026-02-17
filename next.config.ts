@@ -1,10 +1,12 @@
+import type { NextConfig } from "next";
+
 const DEFAULT_ALLOWED_ORIGINS = [
   "https://climateriver.org",
   "https://www.climateriver.org",
   "http://localhost:3000",
 ];
 
-function resolveAllowedOrigins() {
+function resolveAllowedOrigins(): string[] {
   const env = globalThis.process?.env ?? {};
   const envOrigins =
     env.SERVER_ACTIONS_ALLOWED_ORIGINS?.split(",").map((origin) =>
@@ -17,15 +19,15 @@ function resolveAllowedOrigins() {
     ...envOrigins,
     vercelOrigin,
     ...DEFAULT_ALLOWED_ORIGINS,
-  ].filter(Boolean);
+  ].filter(Boolean) as string[];
 
   return Array.from(new Set(merged));
 }
 
-/** @type {import('next').NextConfig} */
-const nextConfig = {
+const nextConfig: NextConfig = {
   experimental: {
     serverActions: { allowedOrigins: resolveAllowedOrigins() },
+    useCache: true,
   },
   images: {
     remotePatterns: [

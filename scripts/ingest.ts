@@ -796,11 +796,7 @@ async function ingestFromFeed(feedUrl: string, sourceId: number, limit = 20) {
     }
   }
 
-  await updateSourceHealth(
-    sourceId,
-    inserted > 0 ? "ok" : "empty",
-    inserted,
-  );
+  await updateSourceHealth(sourceId, inserted > 0 ? "ok" : "empty", inserted);
   return { scanned: slice.length, inserted };
 }
 

@@ -1,6 +1,5 @@
 // app/api/admin/health/route.ts
 // Pipeline health dashboard — shows recent runs, staleness, and costs
-export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";

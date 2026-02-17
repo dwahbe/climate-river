@@ -1,6 +1,5 @@
 // app/api/cron/refresh/route.ts
 // Quick refresh cron - runs 6×/day for fast content updates
-export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 120; // 2 minutes for refresh
 

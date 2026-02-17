@@ -67,10 +67,10 @@ async function getCategoryEmbedding(
 
     // Persist to DB for next cold start
     try {
-      await query(
-        `UPDATE categories SET embedding = $2 WHERE slug = $1`,
-        [categorySlug, JSON.stringify(embedding)],
-      );
+      await query(`UPDATE categories SET embedding = $2 WHERE slug = $1`, [
+        categorySlug,
+        JSON.stringify(embedding),
+      ]);
     } catch {
       // DB write failed — embedding still works from memory this invocation
     }

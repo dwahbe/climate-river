@@ -51,9 +51,7 @@ export async function run(
     [retentionDays],
   );
   const staleCount = staleRows[0].count;
-  console.log(
-    `\n  Total articles:     ${articlesBefore.toLocaleString()}`,
-  );
+  console.log(`\n  Total articles:     ${articlesBefore.toLocaleString()}`);
   console.log(
     `  Articles > ${retentionDays}d old: ${staleCount.toLocaleString()}`,
   );

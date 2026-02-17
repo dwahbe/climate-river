@@ -1,6 +1,5 @@
 // app/api/cron/rewrite/route.ts
 // Dedicated rewrite cron - runs 16x/day for headline rewrites
-export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 

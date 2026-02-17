@@ -2,7 +2,6 @@
 import { NextResponse } from "next/server";
 import { getArticleContent } from "@/lib/services/readerService";
 
-export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 10; // Vercel timeout (10s on hobby, can increase on Pro)
 

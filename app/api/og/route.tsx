@@ -2,8 +2,6 @@ import { ImageResponse } from "next/og";
 import { NextRequest } from "next/server";
 import { getRiverData } from "@/lib/services/riverService";
 
-export const runtime = "edge";
-
 // Cache for 5 minutes
 export const revalidate = 300;
 

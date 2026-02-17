@@ -3,8 +3,6 @@ import { getRiverData } from "@/lib/services/riverService";
 import CategoryIndexClient from "@/app/categories/CategoryIndexClient";
 import type { Metadata } from "next";
 
-export const runtime = "nodejs";
-
 export const metadata: Metadata = {
   title: "Categories",
   description:

@@ -6,7 +6,6 @@ import type { Metadata } from "next";
 
 // Cache for 5 minutes (300 seconds)
 export const revalidate = 300;
-export const runtime = "nodejs";
 
 export async function generateMetadata(props: {
   params: Promise<{ id: string }>;

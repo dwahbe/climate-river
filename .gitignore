@@ -35,7 +35,8 @@ pnpm-debug.log*
 .env.production
 .env.test
 
-# ── Lockfiles (we use npm; keep package-lock.json tracked) ─────
+# ── Lockfiles (we use bun; keep bun.lock tracked) ─────
+package-lock.json
 pnpm-lock.yaml
 yarn.lock
 
