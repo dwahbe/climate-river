@@ -58,7 +58,7 @@ async function getCategoryEmbedding(
     ].join(" ");
 
     const { embedding } = await embed({
-      model: openai.textEmbeddingModel("text-embedding-3-small"),
+      model: openai.embeddingModel("text-embedding-3-small"),
       value: representativeText,
     });
 
@@ -96,7 +96,7 @@ async function generateArticleEmbedding(
     const text = [title, summary].filter(Boolean).join(" ").slice(0, 1200);
 
     const { embedding } = await embed({
-      model: openai.textEmbeddingModel("text-embedding-3-small"),
+      model: openai.embeddingModel("text-embedding-3-small"),
       value: text,
     });
 

@@ -81,7 +81,7 @@ async function generateEmbedding(
     const truncatedText = text.substring(0, 8000);
 
     const { embedding } = await embed({
-      model: openai.textEmbeddingModel("text-embedding-3-small"),
+      model: openai.embeddingModel("text-embedding-3-small"),
       value: truncatedText,
     });
 

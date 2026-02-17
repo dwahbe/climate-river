@@ -20,7 +20,7 @@ type Row = {
  * Extract a meaningful snippet from article content with comprehensive safety checks
  * Prioritizes first few paragraphs (the lede) while filtering out paywalls and garbage
  */
-function extractContentSnippet(
+export function extractContentSnippet(
   contentText: string | null,
   contentHtml: string | null,
   maxChars = 600,
@@ -40,7 +40,8 @@ function extractContentSnippet(
     return null;
   }
 
-  // 🛡️ SAFETY CHECK 2: Detect paywall language
+  // 🛡️ SAFETY CHECK 2: Detect paywall language (require 2+ distinct matches
+  // to avoid false positives from words like "premium" or "member" in articles)
   const paywallPatterns = [
     /subscribe/i,
     /subscription/i,
@@ -50,10 +51,10 @@ function extractContentSnippet(
     /paywall/i,
   ];
   const firstPart = cleaned.slice(0, 200);
-  const paywallMatch = paywallPatterns.find((p) => p.test(firstPart));
-  if (paywallMatch) {
+  const paywallMatches = paywallPatterns.filter((p) => p.test(firstPart));
+  if (paywallMatches.length >= 2) {
     console.warn(
-      `⚠️  ${idLabel}Paywall detected ("${paywallMatch.source}"): "${firstPart.slice(0, 80)}..."`,
+      `⚠️  ${idLabel}Paywall detected (${paywallMatches.length} signals): "${firstPart.slice(0, 80)}..."`,
     );
     return null;
   }
@@ -90,81 +91,65 @@ function extractContentSnippet(
 
 /* ------------------------- Techmeme-Style Prompt ------------------------- */
 
-function buildPrompt(input: {
+const SYSTEM_PROMPT = `You rewrite climate news headlines in the style of Techmeme: dense, factual, scannable.
+
+RULES:
+- Lead with WHO (named entity: "EPA", "Ørsted", "9th Circuit") + strong action verb
+- Present tense, active voice, no period at end
+- 140-200 characters ideal; use commas and semicolons to pack detail
+- Only include numbers/dates/measurements that appear in the source material
+- If no numbers exist, stay concrete and qualitative — never pad with filler
+- Name specific entities, policies, products — never "regulators", "a company", "a bank"
+- The headline IS the news, not a description of an article about the news
+- Match the certainty of the source: facts as facts, projections with "may"/"could"
+
+NEVER USE these vague filler patterns (they will be rejected):
+- "aiming to", "impacting", "reflecting", "amid concerns/issues/challenges"
+- "detailing", "outlining", "addressing", "emphasizing"
+- "faces issues/challenges", "raises concerns/doubts", "sparking debate"
+- "building momentum", "gaining traction", "making progress"
+- "reports on", "explores", "discusses", "covers"
+- "likely", "expected to", "set to", "poised to"
+- "revolutionary", "game-changer", "unprecedented", "major breakthrough"
+- "significant", "important" (show with numbers instead)
+
+EXAMPLES:
+
+BEFORE: "Report shows solar installations grew significantly last year"
+AFTER: "Global solar installations hit record 593GW in 2024, up 29% year-over-year"
+
+BEFORE: "Company announces progress on offshore wind project"
+AFTER: "Ørsted resumes 2.6GW Ocean Wind project after 9th Circuit blocks permit freeze"
+
+BEFORE: "Study raises concerns about Amazon deforestation"
+AFTER: "Amazon emitted 10-170M tons of carbon in 2023 as extreme drought ravaged rainforest, Max Planck study finds"
+
+BEFORE: "New policy aims to address carbon emissions in the transport sector"
+AFTER: "EU tightens truck CO2 standards, requires 45% emissions cut by 2030 and 90% by 2040"
+
+BEFORE: "Bank launches framework to assess biodiversity risks"
+AFTER: "BNP Paribas launches country-level biodiversity risk scoring for lending and investment portfolios"
+
+BEFORE: "India's solar manufacturing industry faces oversupply issues, turning a boom into a glut, impacting market stability"
+AFTER: "India's solar manufacturing hits oversupply glut as factory capacity outpaces domestic demand"
+
+Output ONLY the rewritten headline — no quotes, no explanation, no preamble.`;
+
+const RETRY_SYSTEM_PROMPT = `You rewrite climate news headlines. Your previous attempt was too vague.
+
+This time: state EXACTLY what happened, who did it, and include any specific numbers or names from the source material. Do not use filler phrases like "aiming to", "impacting", "amid concerns", or "addressing challenges". Every clause must add a concrete fact.
+
+Output ONLY the rewritten headline — no quotes, no explanation, no preamble.`;
+
+type PromptInput = {
   title: string;
   dek?: string | null;
   contentSnippet?: string | null;
   previewExcerpt?: string | null;
-}) {
-  const lines = [
-    "Rewrite this climate news headline in the style of Techmeme - dense, factual, scannable, with all key details.",
-    "",
-    "STRUCTURE (Techmeme style):",
-    "- Lead with WHO (agency/company/court/institution)",
-    "- Follow with strong action verb (announces, blocks, requires, finds, cuts, raises)",
-    "- Add specific WHAT with details; only cite numbers that were provided",
-    "- End with WHY/IMPACT in natural clause",
-    "- Use commas to separate clauses, not complex sentence structures",
-    "- Write what WAS FOUND, HAPPENED, or CHANGED - never what was 'reported on'",
-    "- The headline IS the news, not a description of coverage",
-    "",
-    "SPECIFICITY REQUIRED:",
-    "- ONLY include numbers or quantitative claims that appear in the supplied material (title, summary, excerpt, preview article, or cluster context)",
-    "- If no quantitative details exist, keep the rewrite qualitative but still concrete",
-    "- Do not invent stats, measurements, dates, or sources; omit missing data instead of guessing",
-    "- Preview excerpts (when provided) are the verified article text—quote them faithfully",
-    '- Name specific entities: "EPA", "Ørsted", "Federal Appeals Court", not "regulators" or "companies"',
-    '- Include timeframes: "by 2030", "from 2025-2028", "starting Q1 2026"',
-    "- Product/policy names: Exact titles, not generic descriptions",
-    "- Give concrete examples when possible",
-    "",
-    "CLIMATE-SPECIFIC PATTERNS:",
-    '- Policy: "[Agency] [action verb] [rule/standard], requiring [entities] to [specific action] by [date], citing [reason]"',
-    '  Example: "EPA finalizes power plant emissions rule, requiring coal facilities to cut CO2 80% by 2032, citing climate goals"',
-    "",
-    '- Corporate: "[Company] [action] [project/investment], [size/scale with numbers], [reason/context]"',
-    '  Example: "Ørsted cancels 2.6GW New Jersey offshore wind project, cites supply chain costs and rate caps"',
-    "",
-    '- Legal: "[Court level] [ruling action] [case/project], citing [specific legal issue]"',
-    '  Example: "Federal appeals court blocks Mountain Valley Pipeline, citing insufficient climate impact review"',
-    "",
-    '- Science: "[Institution] study finds [specific finding], [magnitude/numbers], [implication]"',
-    '  Example: "Nature study finds Amazon emitting more CO2 than it absorbs, driven by 15% deforestation increase"',
-    "",
-    '- Technology: "[Company] [announces/demonstrates] [technology], achieving [metrics], targeting [application]"',
-    '  Example: "Form Energy demonstrates 100-hour iron-air battery, targets grid-scale seasonal storage"',
-    "",
-    '- Qualitative (when no numbers in source): "[Entity] [action] [specific thing], citing [reason]"',
-    '  Example: "Fashion for Good releases decarbonization blueprint, offering practical factory-level guidance"',
-    '  Example: "Indigenous groups blockade COP30 entrance, protesting lack of forest protection commitments"',
-    "",
-    "BAD vs GOOD (avoid vague meta-headlines):",
-    '- BAD: "Study raises concerns about microplastics in human bodies"',
-    '- GOOD: "Study finds microplastics in 87% of human tissue samples, highest concentrations in lungs"',
-    "",
-    '- BAD: "Report shows climate barometer falls, citing challenges"',
-    '- GOOD: "RBC Climate Barometer drops 12 points to 47, lowest since 2021"',
-    "",
-    '- BAD: "Company announces progress on wind project"',
-    '- GOOD: "Ørsted resumes 2.6GW Ocean Wind project after 9th Circuit blocks permit freeze"',
-    "",
-    "STYLE RULES:",
-    "- Present tense, active voice",
-    "- 120-160 characters ideal (Techmeme density)",
-    "- No period at end",
-    "- Repeat quantitative figures exactly as provided; no rounding or new units",
-    '- No hype words: "revolutionary", "game-changer", "unprecedented", "major breakthrough"',
-    '- No vague phrases: "significant", "important" (show don\'t tell with numbers)',
-    "- No questions, puns, or editorial voice",
-    '- Match certainty level of source: if source states fact ("Trump Won"), rewrite as fact ("Trump wins"), never as speculation',
-    '- FORBIDDEN WORDS: "likely", "expected to", "set to", "poised to" - these will cause rejection',
-    '- FORBIDDEN META-PATTERNS: "reports on", "raises concerns", "citing challenges", "sparking debate", "health implications", "building momentum"',
-    "- If you can't state the specific finding/action/change, the headline will be rejected",
-    '- "may"/"could" OK only for scientific projections about future events',
-    "",
-    "SOURCE MATERIAL:",
-    `Original headline: ${input.title}`,
-  ];
+};
+
+function buildUserPrompt(input: PromptInput) {
+  const lines = [`Original headline: ${input.title}`];
 
   if (input.dek) {
     lines.push(`Summary: ${input.dek}`);
@@ -172,37 +157,19 @@ function buildPrompt(input: {
 
   if (input.contentSnippet) {
     lines.push(`Article excerpt: ${input.contentSnippet}`);
-    lines.push("");
-    lines.push(
-      "CONTENT AVAILABLE - You MUST extract at least one specific detail from the article excerpt:",
-    );
-    lines.push("- A number, percentage, or measurement");
-    lines.push("- A specific name, location, or entity");
-    lines.push("- A concrete finding, action, or outcome");
-    lines.push(
-      "Do NOT write a generic summary when specific details exist in the excerpt above.",
-    );
   }
 
   if (input.previewExcerpt) {
-    lines.push(
-      `Preview article excerpt (from Climate River reader): ${input.previewExcerpt}`,
-    );
+    lines.push(`Full article excerpt: ${input.previewExcerpt}`);
   }
 
   lines.push("");
-  lines.push(
-    "CRITICAL: If a number, percentage, date, or measurement does NOT appear in the source material above, do NOT include it. Wrong numbers = rejected headline. When in doubt, omit the number entirely.",
-  );
-  lines.push("");
-  lines.push(
-    'OUTPUT: Rewritten headline only (no quotes, no explanation, no "Here is...")',
-  );
+  lines.push("Rewrite this headline.");
 
   return lines.join("\n");
 }
 
-function sanitizeHeadline(s: string) {
+export function sanitizeHeadline(s: string) {
   let t = (s || "")
     .replace(/^[""'\s]+|[""'\s]+$/g, "") // strip quotes
     .replace(/\s+/g, " ") // collapse spaces
@@ -341,7 +308,7 @@ type ValidationContext = {
   sourceQuant: QuantContext;
 };
 
-function buildSourceQuantContext(
+export function buildSourceQuantContext(
   parts: Array<string | null | undefined>,
 ): QuantContext {
   const filtered = parts.filter(
@@ -370,7 +337,7 @@ function buildSourceQuantContext(
 
 /* ------------------------- Enhanced Validation ------------------------- */
 
-function passesChecks(
+export function passesChecks(
   original: string,
   draft: string,
   context: ValidationContext,
@@ -379,9 +346,8 @@ function passesChecks(
   const t = sanitizeHeadline(draft);
   const { hasContent, sourceQuant } = context;
 
-  // Techmeme-style density: allow more flexibility for high-quality specificity
   const minLength = hasContent ? 60 : 50;
-  if (t.length < minLength || t.length > 200) {
+  if (t.length < minLength || t.length > 220) {
     console.warn(
       `⚠️  Length check failed (${t.length} chars): "${t.slice(0, 50)}..."`,
     );
@@ -404,31 +370,23 @@ function passesChecks(
     return false;
   }
 
-  // Word count check - allow Techmeme-style density (shorter but denser)
-  // Lowered thresholds since vaguePatterns validation catches actual quality issues
-  const originalWords = original.split(/\s+/).length;
   const draftWords = t.split(/\s+/).length;
-
-  // Very long originals (>30 words) are likely social media posts, not headlines
-  // Use much lower threshold since we're condensing a post into a headline
+  const originalWords = original.split(/\s+/).length;
   const isLikelySocialPost = originalWords > 30;
 
   if (isLikelySocialPost) {
-    // Social posts: just ensure we have a reasonable headline (8+ words)
     if (draftWords < 8) {
       console.warn(`⚠️  Headline too short for social post condensation`);
       return false;
     }
   } else if (hasContent) {
-    // Normal headline with content: allow denser headlines (70% threshold)
-    if (draftWords < originalWords * 0.7) {
+    if (draftWords < originalWords * 0.5) {
       console.warn(`⚠️  Headline too compressed despite having content`);
       return false;
     }
   } else {
-    // Normal headline without content: allow Techmeme-style compression (50% threshold)
-    if (draftWords < originalWords * 0.5) {
-      console.warn(`⚠️  Headline too compressed`);
+    if (draftWords < 6) {
+      console.warn(`⚠️  Headline too short (${draftWords} words)`);
       return false;
     }
   }
@@ -497,9 +455,11 @@ function passesChecks(
     /\bcovers\b/i,
     /\bexplores\b/i,
     /\bdiscusses\b/i,
+    /\bemphasiz(es|ing)\b/i,
 
     // Vague concern/debate language
     /\braising concerns\b/i,
+    /\braise[sd]? doubts\b/i,
     /\bsparking debate\b/i,
     /\bprompting questions\b/i,
     /\bdrawing attention\b/i,
@@ -519,6 +479,16 @@ function passesChecks(
     /\bhealth implications\b/i,
     /\bbroader implications\b/i,
     /\bongoing research\b/i,
+
+    // Vague filler clauses (pad headlines without adding info)
+    /\baiming to\b/i,
+    /\bimpacting\b/i,
+    /\breflecting\b/i,
+    /\bamid (concerns|issues|challenges|shifts)\b/i,
+    /\bdetailing\b/i,
+    /\boutlines?\b/i,
+    /\baddressing\b/i,
+    /\bfaces? (issues|challenges|concerns)\b/i,
   ];
 
   if (vaguePatterns.some((p) => p.test(t))) {
@@ -539,24 +509,26 @@ function passesChecks(
 /* ------------------------- LLM Generation ------------------------- */
 
 async function generateWithOpenAI(
-  input: {
-    title: string;
-    dek?: string | null;
-    contentSnippet?: string | null;
-    previewExcerpt?: string | null;
-  },
-  abortMs = 20000,
-  retries = 2,
+  input: PromptInput,
+  opts: {
+    systemPrompt?: string;
+    abortMs?: number;
+    retries?: number;
+  } = {},
 ): Promise<{ text: string | null; model: string; notes: string }> {
-  const prompt = buildPrompt(input);
-  const model = "gpt-4o-mini";
+  const system = opts.systemPrompt ?? SYSTEM_PROMPT;
+  const prompt = buildUserPrompt(input);
+  const abortMs = opts.abortMs ?? 20000;
+  const retries = opts.retries ?? 2;
+  const model = "gpt-4.1-mini";
 
   try {
     const { text } = await generateText({
       model: openai(model),
+      system,
       prompt,
-      temperature: 0.15, // Lower for stricter instruction following
-      maxOutputTokens: 50, // Lower - headlines shouldn't need much
+      temperature: 0.15,
+      maxOutputTokens: 80,
       maxRetries: retries,
       abortSignal: AbortSignal.timeout(abortMs),
     });
@@ -662,14 +634,14 @@ async function processOne(r: Row) {
   // SAFETY LAYER 1: Only use content if status is explicitly 'success'
   const contentSnippet =
     r.content_status === "success"
-      ? extractContentSnippet(r.content_text, r.content_html, 600, r.id)
+      ? extractContentSnippet(r.content_text, r.content_html, 1200, r.id)
       : null;
 
   const previewExcerpt =
     r.content_status === "success" &&
     typeof r.content_html === "string" &&
     r.content_html.trim().length > 0
-      ? extractContentSnippet(null, r.content_html, 1500, r.id)
+      ? extractContentSnippet(null, r.content_html, 2500, r.id)
       : null;
 
   // Track what happened with content
@@ -729,22 +701,24 @@ async function processOne(r: Row) {
     return { ok: 0, failed: 1 };
   }
 
-  const llm = await generateWithOpenAI({
+  const promptInput: PromptInput = {
     title: r.title,
     dek: r.dek,
     contentSnippet,
     previewExcerpt,
-  });
+  };
+
+  const validationContext: ValidationContext = {
+    hasContent: !!contentSnippet,
+    sourceQuant,
+  };
+
+  // First attempt
+  const llm = await generateWithOpenAI(promptInput);
   const draft = llm.text || "";
 
-  if (
-    passesChecks(r.title, draft, {
-      hasContent: !!contentSnippet,
-      sourceQuant,
-    })
-  ) {
+  if (passesChecks(r.title, draft, validationContext)) {
     const notes = llm.notes + contentNote;
-
     await query(
       `update articles
          set rewritten_title = $1,
@@ -760,7 +734,30 @@ async function processOne(r: Row) {
     return { ok: 1, failed: 0 };
   }
 
-  // Leave original title; just record why it failed.
+  // Retry once with a more direct prompt
+  const retryLlm = await generateWithOpenAI(promptInput, {
+    systemPrompt: RETRY_SYSTEM_PROMPT,
+  });
+  const retryDraft = retryLlm.text || "";
+
+  if (passesChecks(r.title, retryDraft, validationContext)) {
+    const notes = retryLlm.notes.replace("success:", "success:retry:") + contentNote;
+    await query(
+      `update articles
+         set rewritten_title = $1,
+             rewritten_at   = now(),
+             rewrite_model  = $2,
+             rewrite_notes  = $3
+       where id = $4`,
+      [retryDraft, retryLlm.model || "unknown", notes, r.id],
+    );
+    console.log(
+      `✅ [${r.id}] (retry) "${r.title.slice(0, 40)}..." → "${retryDraft.slice(0, 60)}..."`,
+    );
+    return { ok: 1, failed: 0 };
+  }
+
+  // Both attempts failed — record why
   await query(
     `update articles
        set rewrite_model = $1,
@@ -768,7 +765,7 @@ async function processOne(r: Row) {
      where id = $3`,
     [llm.model || "none", llm.notes + contentNote || "no_valid_rewrite", r.id],
   );
-  console.log(`⚠️  [${r.id}] Failed validation: "${r.title.slice(0, 50)}..."`);
+  console.log(`⚠️  [${r.id}] Failed validation (incl. retry): "${r.title.slice(0, 50)}..."`);
   return { ok: 0, failed: 1 };
 }
 
@@ -803,22 +800,33 @@ export async function run(opts: { limit?: number; closePool?: boolean } = {}) {
   return res;
 }
 
-// CLI support: `npm run rewrite`
+// CLI support: `bun scripts/rewrite.ts [--dry-run] [--limit N]`
 if (import.meta.url === `file://${process.argv[1]}`) {
   const cliOpts = parseCliArgs(process.argv.slice(2));
-  run({ ...cliOpts, closePool: true })
-    .then((r) => {
-      console.log("\n📊 Final results:", r);
-      process.exit(r.ok > 0 ? 0 : 1);
-    })
-    .catch((err) => {
-      console.error("❌ Fatal error:", err);
-      process.exit(1);
-    });
+
+  if (cliOpts.dryRun) {
+    dryRun(cliOpts.limit ?? 10)
+      .then(() => process.exit(0))
+      .catch((err) => {
+        console.error("❌ Fatal error:", err);
+        process.exit(1);
+      });
+  } else {
+    run({ ...cliOpts, closePool: true })
+      .then((r) => {
+        console.log("\n📊 Final results:", r);
+        process.exit(r.ok > 0 ? 0 : 1);
+      })
+      .catch((err) => {
+        console.error("❌ Fatal error:", err);
+        process.exit(1);
+      });
+  }
 }
 
 type CliOptions = {
   limit?: number;
+  dryRun?: boolean;
 };
 
 function parseCliArgs(argv: string[]): CliOptions {
@@ -826,6 +834,11 @@ function parseCliArgs(argv: string[]): CliOptions {
 
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
+
+    if (arg === "--dry-run" || arg === "-n") {
+      opts.dryRun = true;
+      continue;
+    }
 
     if (arg === "--limit" || arg === "-l") {
       const next = argv[i + 1];
@@ -856,4 +869,97 @@ function parseCliArgs(argv: string[]): CliOptions {
   }
 
   return opts;
+}
+
+/* ========================= Dry-Run Mode ========================== */
+
+async function dryRun(limit = 10) {
+  console.log("🔍 DRY RUN — generating rewrites without saving\n");
+
+  const rows = await fetchBatch(limit);
+  console.log(`Found ${rows.length} articles to process\n`);
+  console.log("═".repeat(80));
+
+  let passed = 0;
+  let failed = 0;
+  let retried = 0;
+
+  for (const r of rows) {
+    const contentSnippet =
+      r.content_status === "success"
+        ? extractContentSnippet(r.content_text, r.content_html, 1200, r.id)
+        : null;
+
+    const previewExcerpt =
+      r.content_status === "success" &&
+      typeof r.content_html === "string" &&
+      r.content_html.trim().length > 0
+        ? extractContentSnippet(null, r.content_html, 2500, r.id)
+        : null;
+
+    const sourceQuant = buildSourceQuantContext([
+      r.title,
+      r.dek,
+      contentSnippet,
+      previewExcerpt,
+      r.content_text,
+      r.content_html,
+    ]);
+
+    const promptInput: PromptInput = {
+      title: r.title,
+      dek: r.dek,
+      contentSnippet,
+      previewExcerpt,
+    };
+
+    const validationContext: ValidationContext = {
+      hasContent: !!contentSnippet,
+      sourceQuant,
+    };
+
+    const llm = await generateWithOpenAI(promptInput);
+    const draft = llm.text || "";
+    const pass1 = passesChecks(r.title, draft, validationContext);
+
+    let finalDraft = draft;
+    let finalPass = pass1;
+    let wasRetry = false;
+
+    if (!pass1 && draft) {
+      const retryLlm = await generateWithOpenAI(promptInput, {
+        systemPrompt: RETRY_SYSTEM_PROMPT,
+      });
+      const retryDraft = retryLlm.text || "";
+      finalPass = passesChecks(r.title, retryDraft, validationContext);
+      if (finalPass) {
+        finalDraft = retryDraft;
+        wasRetry = true;
+        retried++;
+      }
+    }
+
+    const status = finalPass ? (wasRetry ? "✅ PASS (retry)" : "✅ PASS") : "❌ FAIL";
+    const hasContent = contentSnippet ? "with content" : "no content";
+
+    console.log(`\n[${r.id}] ${status} | ${hasContent} | ${r.content_status ?? "null"}`);
+    console.log(`  ORIGINAL: ${r.title}`);
+    if (r.dek) console.log(`  DEK:      ${r.dek.slice(0, 120)}${r.dek.length > 120 ? "..." : ""}`);
+    console.log(`  REWRITE:  ${finalDraft || "(empty)"}`);
+    console.log(`  CHARS:    ${finalDraft.length} | WORDS: ${finalDraft.split(/\s+/).length}`);
+    if (!pass1 && draft) {
+      console.log(`  ATTEMPT1: ${draft}`);
+    }
+    console.log("─".repeat(80));
+
+    if (finalPass) passed++;
+    else failed++;
+  }
+
+  console.log("\n" + "═".repeat(80));
+  console.log(`📊 DRY RUN RESULTS: ${passed} passed, ${failed} failed, ${retried} recovered via retry`);
+  console.log(`   Pass rate: ${((passed / (passed + failed)) * 100).toFixed(1)}%`);
+  console.log("═".repeat(80));
+
+  await endPool();
 }
