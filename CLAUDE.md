@@ -2,6 +2,10 @@
 
 Climate news aggregator with AI-powered discovery, semantic clustering, and headline rewriting. Built with Next.js 16 (App Router), TypeScript, PostgreSQL (Supabase), and OpenAI.
 
+## Domain
+
+https://climateriver.org
+
 ## Quick Reference
 
 ```bash
