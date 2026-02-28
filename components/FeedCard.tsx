@@ -118,7 +118,7 @@ export default function FeedCard({
 
             {/* Dek/Description */}
             {cluster.lead_dek && (
-              <p className="text-[15px] text-zinc-600 leading-relaxed mb-2 line-clamp-2 text-pretty">
+              <p className="hidden sm:block text-[15px] text-zinc-600 leading-relaxed mb-2 line-clamp-2 text-pretty">
                 {cluster.lead_dek}
               </p>
             )}
