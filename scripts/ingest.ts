@@ -690,10 +690,29 @@ async function ensureSemanticClusterForArticle(
     return;
   }
 
-  // No similar articles found - article remains unclustered
-  console.log(
-    `Article ${articleId} - no similar articles found, remains unclustered`,
+  // No similar articles found - create singleton cluster so it enters the pipeline
+  const key = clusterKey(title) || `singleton-${Date.now()}`;
+
+  const cluster = await query<{ id: number }>(
+    `INSERT INTO clusters (key) VALUES ($1)
+     ON CONFLICT (key) DO UPDATE SET key = excluded.key
+     RETURNING id`,
+    [key],
   );
+
+  const clusterId = cluster.rows[0].id;
+
+  await query(
+    `INSERT INTO article_clusters (article_id, cluster_id)
+     VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+    [articleId, clusterId],
+  );
+
+  console.log(
+    `Created singleton cluster ${clusterId} for article ${articleId}`,
+  );
+
+  await updateClusterMetadata(clusterId);
 }
 
 // ---------- Source health tracking ----------

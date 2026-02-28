@@ -310,11 +310,11 @@ export async function run() {
         where p_category is null
            or exists (
              select 1
-             from article_clusters ac
-             join article_categories ag on ag.article_id = ac.article_id
+             from article_categories ag
              join categories cat on cat.id = ag.category_id
-             where ac.cluster_id = c.cluster_id
+             where ag.article_id = c.lead_article_id
                and cat.slug = p_category
+               and ag.is_primary = true
            )
       ),
       ranked as (

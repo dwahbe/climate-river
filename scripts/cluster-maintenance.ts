@@ -209,6 +209,62 @@ async function mergeSimilarClusters() {
 }
 
 /**
+ * Create singleton clusters for articles that are still unclustered
+ * after retroactive clustering. Ensures every article enters the display pipeline.
+ */
+async function createSingletonClusters() {
+  console.log("\n🫧 Creating singleton clusters for remaining orphans...");
+
+  const { rows: orphans } = await query<{
+    article_id: number;
+    title: string;
+  }>(
+    `
+    SELECT a.id as article_id, a.title
+    FROM articles a
+    LEFT JOIN article_clusters ac ON a.id = ac.article_id
+    WHERE ac.article_id IS NULL
+      AND a.embedding IS NOT NULL
+      AND a.fetched_at >= now() - interval '7 days'
+    ORDER BY a.fetched_at DESC
+    `,
+  );
+
+  console.log(`  Found ${orphans.length} orphaned articles`);
+
+  for (const article of orphans) {
+    const key =
+      article.title
+        .toLowerCase()
+        .replace(/[^a-z0-9\s]/g, " ")
+        .split(/\s+/)
+        .filter(Boolean)
+        .slice(0, 6)
+        .join("-") || `singleton-${Date.now()}`;
+
+    const { rows } = await query<{ id: number }>(
+      `INSERT INTO clusters (key) VALUES ($1)
+       ON CONFLICT (key) DO UPDATE SET key = excluded.key
+       RETURNING id`,
+      [key],
+    );
+
+    await query(
+      `INSERT INTO article_clusters (article_id, cluster_id)
+       VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+      [article.article_id, rows[0].id],
+    );
+
+    console.log(
+      `  ✓ Singleton cluster ${rows[0].id} for article ${article.article_id}: "${article.title.slice(0, 60)}..."`,
+    );
+  }
+
+  console.log(`  Created ${orphans.length} singleton clusters`);
+  return orphans.length;
+}
+
+/**
  * Update cluster metadata (lead article, size) after maintenance.
  * NOTE: Does NOT update score - that's handled by rescore.ts which has the
  * proper scoring algorithm. We only update lead_article_id and size here.
@@ -248,14 +304,16 @@ export async function run(opts: { closePool?: boolean } = {}) {
 
   const added = await retroactivelyClusterArticles();
   const merged = await mergeSimilarClusters();
+  const singletons = await createSingletonClusters();
 
-  if (added > 0 || merged > 0) {
+  if (added > 0 || merged > 0 || singletons > 0) {
     await updateClusterMetadata();
   }
 
   console.log("\n✅ Cluster maintenance complete!");
   console.log(`  Articles added to clusters: ${added}`);
   console.log(`  Clusters merged: ${merged}`);
+  console.log(`  Singleton clusters created: ${singletons}`);
 
   if (opts.closePool) await endPool();
   return { added, merged };
