@@ -19,6 +19,10 @@ bun run rescore      # Recalculate cluster scores
 bun run rewrite      # Rewrite headlines
 bun scripts/rewrite.ts --dry-run --limit 10  # Dry-run (no DB writes)
 bun run categorize   # Categorize articles
+bun run prefetch     # Prefetch article content
+bun run discover-web # Web discovery via Tavily
+bun run cleanup      # Remove old articles/clusters
+bun run cleanup:dry  # Dry-run cleanup (no DB writes)
 bun run schema       # Init/validate DB schema
 ```
 
@@ -38,33 +42,23 @@ bun run schema       # Init/validate DB schema
 ## Project Structure
 
 ```
-app/                    # Next.js App Router pages & API routes
-  api/cron/             # Cron endpoints (full, refresh, rewrite, cleanup)
-  api/reader/           # Article reader API
-  categories/           # Category pages
+app/                    # Next.js App Router pages, API routes, and cron endpoints
 components/             # React components
-lib/
-  models/               # TypeScript types
-  repositories/         # Database access layer
-  services/             # Business logic (riverService, readerService)
-  supabase/             # Supabase client init
-  db.ts                 # PostgreSQL connection pool
-  tagger.ts             # Keyword-based categorization rules
-  categorizer.ts        # Semantic categorization (embeddings + rules)
-  cron.ts               # Cron orchestration (safeRun, authorized, logPipelineRun)
+lib/                    # Core logic: models, repositories, services, DB, categorization
 scripts/                # Standalone CLI pipeline scripts
-config/                 # App configuration (climateOutlets.ts)
+config/                 # App configuration (outlet lists, etc.)
 ```
 
 ## Architecture
 
 ### Data Pipeline
 
-Three-tier cron strategy orchestrated via Vercel cron jobs:
+Four-tier cron strategy orchestrated via Vercel cron jobs (see `vercel.json`):
 
-1. **Full** (3x/day, 5min): discover + ingest + categorize + prefetch + rescore + web discovery
+1. **Full** (3x/day, 5min): discover + ingest + categorize + prefetch + rescore + web discovery + cluster maintenance
 2. **Refresh** (6x/day, 2min): ingest + categorize + prefetch + rescore + conditional web discovery
 3. **Rewrite** (16x/day, 1min): headline rewriting (gpt-4.1-mini, Techmeme-style, with retry)
+4. **Cleanup** (1x/day, 1min): remove old articles and clusters
 
 ### API Authorization
 
@@ -76,12 +70,12 @@ All cron/admin endpoints require either:
 ### Key Patterns
 
 - **Repository pattern** for database access (clusterRepository)
-- **Service layer** for business logic (riverService, readerService)
+- **Service layer** for business logic (riverService, readerService, searchService)
 - **Hybrid categorization**: keyword rules (tagger.ts) + AI embeddings (categorizer.ts)
 - **Semantic clustering** via pgvector cosine similarity
+- **Hybrid search**: full-text + semantic search with Reciprocal Rank Fusion
 - **ISR** on homepage (5min revalidation)
 - **Pipeline logging** to database for health monitoring
-- **Multi-tier caching**: in-memory -> database -> generate (embeddings, content)
 
 ## Conventions
 
@@ -97,6 +91,8 @@ All cron/admin endpoints require either:
 
 ## Environment Variables
 
-**Required**: `DATABASE_URL` or `POSTGRES_URL`, `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `OPENAI_API_KEY`, `ADMIN_TOKEN`
+See `.env.example` for the full list with descriptions.
 
-**Optional**: `TAVILY_API_KEY`, `WEB_SEARCH_ENABLED`, `DISCOVER_HL`/`DISCOVER_GL`/`DISCOVER_CEID` (Google News localization)
+**Required**: `DATABASE_URL`, `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `OPENAI_API_KEY`, `ADMIN_TOKEN`
+
+**Optional**: `TAVILY_API_KEY`, `WEB_SEARCH_ENABLED`, Google News localization (`DISCOVER_*`), web search tuning (`WEB_SEARCH_*`, `GOOGLE_SUGGESTION_MODEL`)
