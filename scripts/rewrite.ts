@@ -741,7 +741,8 @@ async function processOne(r: Row) {
   const retryDraft = retryLlm.text || "";
 
   if (passesChecks(r.title, retryDraft, validationContext)) {
-    const notes = retryLlm.notes.replace("success:", "success:retry:") + contentNote;
+    const notes =
+      retryLlm.notes.replace("success:", "success:retry:") + contentNote;
     await query(
       `update articles
          set rewritten_title = $1,
@@ -765,7 +766,9 @@ async function processOne(r: Row) {
      where id = $3`,
     [llm.model || "none", llm.notes + contentNote || "no_valid_rewrite", r.id],
   );
-  console.log(`⚠️  [${r.id}] Failed validation (incl. retry): "${r.title.slice(0, 50)}..."`);
+  console.log(
+    `⚠️  [${r.id}] Failed validation (incl. retry): "${r.title.slice(0, 50)}..."`,
+  );
   return { ok: 0, failed: 1 };
 }
 
@@ -939,14 +942,25 @@ async function dryRun(limit = 10) {
       }
     }
 
-    const status = finalPass ? (wasRetry ? "✅ PASS (retry)" : "✅ PASS") : "❌ FAIL";
+    const status = finalPass
+      ? wasRetry
+        ? "✅ PASS (retry)"
+        : "✅ PASS"
+      : "❌ FAIL";
     const hasContent = contentSnippet ? "with content" : "no content";
 
-    console.log(`\n[${r.id}] ${status} | ${hasContent} | ${r.content_status ?? "null"}`);
+    console.log(
+      `\n[${r.id}] ${status} | ${hasContent} | ${r.content_status ?? "null"}`,
+    );
     console.log(`  ORIGINAL: ${r.title}`);
-    if (r.dek) console.log(`  DEK:      ${r.dek.slice(0, 120)}${r.dek.length > 120 ? "..." : ""}`);
+    if (r.dek)
+      console.log(
+        `  DEK:      ${r.dek.slice(0, 120)}${r.dek.length > 120 ? "..." : ""}`,
+      );
     console.log(`  REWRITE:  ${finalDraft || "(empty)"}`);
-    console.log(`  CHARS:    ${finalDraft.length} | WORDS: ${finalDraft.split(/\s+/).length}`);
+    console.log(
+      `  CHARS:    ${finalDraft.length} | WORDS: ${finalDraft.split(/\s+/).length}`,
+    );
     if (!pass1 && draft) {
       console.log(`  ATTEMPT1: ${draft}`);
     }
@@ -957,8 +971,12 @@ async function dryRun(limit = 10) {
   }
 
   console.log("\n" + "═".repeat(80));
-  console.log(`📊 DRY RUN RESULTS: ${passed} passed, ${failed} failed, ${retried} recovered via retry`);
-  console.log(`   Pass rate: ${((passed / (passed + failed)) * 100).toFixed(1)}%`);
+  console.log(
+    `📊 DRY RUN RESULTS: ${passed} passed, ${failed} failed, ${retried} recovered via retry`,
+  );
+  console.log(
+    `   Pass rate: ${((passed / (passed + failed)) * 100).toFixed(1)}%`,
+  );
   console.log("═".repeat(80));
 
   await endPool();

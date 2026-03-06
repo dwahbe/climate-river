@@ -176,7 +176,7 @@ function pick(...vals: Array<string | undefined | null>) {
   for (const v of vals) if (v && v.trim()) return v;
   return "";
 }
-function oneLine(raw: string, max = 200) {
+function oneLine(raw: string, max = 300) {
   const txt = stripHtml(raw);
   const m = txt.match(/(.{40,}?[.!?])\s/); // first sentence-ish if long enough
   const cut = m?.[1] ?? txt;

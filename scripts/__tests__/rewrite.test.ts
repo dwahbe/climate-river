@@ -137,10 +137,15 @@ describe("passesChecks — length", () => {
 
   it("accepts headline between 200-220 chars", () => {
     // Build a 205-char headline with enough words
-    const words = "EPA finalizes landmark emissions reduction rule for power plants across the nation requiring significant cuts to greenhouse gas pollution from coal and natural gas facilities by deadline";
+    const words =
+      "EPA finalizes landmark emissions reduction rule for power plants across the nation requiring significant cuts to greenhouse gas pollution from coal and natural gas facilities by deadline";
     assert.ok(words.length >= 180 && words.length <= 220);
     assert.equal(
-      passesChecks("Different original title for testing purposes here", words, noContent),
+      passesChecks(
+        "Different original title for testing purposes here",
+        words,
+        noContent,
+      ),
       true,
     );
   });
@@ -152,7 +157,8 @@ describe("passesChecks — length", () => {
 
 describe("passesChecks — word count", () => {
   it("allows dense rewrite without content (6+ words, 50+ chars)", () => {
-    const original = "This Is A Very Long And Wordy Original Headline About Climate Change";
+    const original =
+      "This Is A Very Long And Wordy Original Headline About Climate Change";
     const draft =
       "Climate policy shifts reshape energy markets across multiple European regions";
     assert.ok(draft.length >= 50);
@@ -182,7 +188,8 @@ describe("passesChecks — word count", () => {
     const original =
       "A very long and detailed original headline with many many words that goes on and on about climate change impacts worldwide";
     // 6-word rewrite = 30% of 20 words
-    const draft = "Climate change worldwide short rewrite here placeholder text";
+    const draft =
+      "Climate change worldwide short rewrite here placeholder text";
     assert.equal(passesChecks(original, draft, ctx(true)), false);
   });
 });
@@ -225,28 +232,38 @@ describe("passesChecks — rejects vague filler", () => {
 describe("passesChecks — accepts good headlines", () => {
   const goodHeadlines = [
     {
-      headline: "EPA finalizes power plant emissions rule, requires coal facilities to cut CO2 80% by 2032",
-      source: "EPA announces new rule requiring 80% CO2 cuts from coal power plants by 2032",
+      headline:
+        "EPA finalizes power plant emissions rule, requires coal facilities to cut CO2 80% by 2032",
+      source:
+        "EPA announces new rule requiring 80% CO2 cuts from coal power plants by 2032",
     },
     {
-      headline: "Ørsted cancels 2.6GW New Jersey offshore wind project, cites supply chain costs and rate caps",
-      source: "Ørsted to cancel 2.6GW offshore wind project in New Jersey due to rising costs",
+      headline:
+        "Ørsted cancels 2.6GW New Jersey offshore wind project, cites supply chain costs and rate caps",
+      source:
+        "Ørsted to cancel 2.6GW offshore wind project in New Jersey due to rising costs",
     },
     {
-      headline: "Federal appeals court blocks Mountain Valley Pipeline, cites insufficient climate impact review",
-      source: "Court blocks Mountain Valley Pipeline project over climate review",
+      headline:
+        "Federal appeals court blocks Mountain Valley Pipeline, cites insufficient climate impact review",
+      source:
+        "Court blocks Mountain Valley Pipeline project over climate review",
     },
     {
-      headline: "India solar manufacturing hits oversupply glut as factory capacity outpaces domestic demand",
+      headline:
+        "India solar manufacturing hits oversupply glut as factory capacity outpaces domestic demand",
       source: "India's solar manufacturing sector faces growing oversupply",
     },
     {
-      headline: "BNP Paribas launches country-level biodiversity risk scoring for lending and investment portfolios",
+      headline:
+        "BNP Paribas launches country-level biodiversity risk scoring for lending and investment portfolios",
       source: "French bank BNP Paribas creates new biodiversity risk framework",
     },
     {
-      headline: "Amazon emitted 170M tons of carbon in 2023 as extreme drought ravaged rainforest, study finds",
-      source: "Study says Amazon rainforest emitted 170M tons of carbon in 2023 drought",
+      headline:
+        "Amazon emitted 170M tons of carbon in 2023 as extreme drought ravaged rainforest, study finds",
+      source:
+        "Study says Amazon rainforest emitted 170M tons of carbon in 2023 drought",
     },
   ];
 
@@ -268,15 +285,19 @@ describe("passesChecks — accepts good headlines", () => {
 
 describe("passesChecks — numeric validation", () => {
   it("rejects numbers not in source material", () => {
-    const original = "Major company announces large offshore wind project in the North Sea region";
-    const draft = "Company launches 5GW wind project in North Sea, targets completion by next year";
+    const original =
+      "Major company announces large offshore wind project in the North Sea region";
+    const draft =
+      "Company launches 5GW wind project in North Sea, targets completion by next year";
     const c = ctx(false, original);
     assert.equal(passesChecks(original, draft, c), false);
   });
 
   it("accepts numbers that exist in source", () => {
-    const original = "Company launches 5GW wind project in the North Sea targeting grid connection";
-    const draft = "Company begins construction on 5GW offshore wind farm in the North Sea region";
+    const original =
+      "Company launches 5GW wind project in the North Sea targeting grid connection";
+    const draft =
+      "Company begins construction on 5GW offshore wind farm in the North Sea region";
     const c = ctx(false, original);
     assert.equal(passesChecks(original, draft, c), true);
   });
