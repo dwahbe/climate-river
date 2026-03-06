@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback } from "react";
+import { flushSync } from "react-dom";
 import { useRouter } from "next/navigation";
 
 const SearchIcon = ({ className }: { className?: string }) => (
@@ -86,8 +87,8 @@ export default function SearchLink() {
   const desktopInputRef = useRef<HTMLInputElement>(null);
 
   const expandDesktop = useCallback(() => {
-    setDesktopOpen(true);
-    requestAnimationFrame(() => desktopInputRef.current?.focus());
+    flushSync(() => setDesktopOpen(true));
+    desktopInputRef.current?.focus();
   }, []);
 
   const collapseDesktop = useCallback(() => {
