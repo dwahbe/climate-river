@@ -4,6 +4,7 @@ import { Analytics } from "@vercel/analytics/react";
 import LastUpdated from "@/components/LastUpdated";
 import HeaderLogoHover from "@/components/HeaderLogoHover";
 import OrganizationStructuredData from "@/components/OrganizationStructuredData";
+import SearchLink from "@/components/SearchLink";
 import { Inclusive_Sans } from "next/font/google";
 
 const inclusive = Inclusive_Sans({
@@ -100,7 +101,7 @@ export default async function RootLayout({
         <nav className="bg-white border-b border-zinc-100">
           <div className="mx-auto max-w-5xl px-4 sm:px-6">
             {/* Two columns: left / right — all vertically centered */}
-            <div className="flex md:items-center md:justify-between max-md:flex-col gap-2 py-3 sm:py-4">
+            <div className="flex items-center justify-between gap-4 py-3 sm:py-4">
               {/* Left: brand + navigation */}
               <div className="flex items-baseline-last gap-6">
                 <Link
@@ -128,8 +129,13 @@ export default async function RootLayout({
                 </Link>
               </div>
 
-              {/* Right: Last updated */}
-              <LastUpdated />
+              {/* Right: Search + Last updated */}
+              <div className="flex items-center gap-4 shrink-0">
+                <SearchLink />
+                <div className="hidden sm:block">
+                  <LastUpdated />
+                </div>
+              </div>
             </div>
           </div>
         </nav>

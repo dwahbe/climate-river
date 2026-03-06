@@ -465,6 +465,65 @@ export async function run() {
     $$;
   `);
 
+  // --- full-text search for articles -----------------------------------------
+  await query(
+    `ALTER TABLE IF EXISTS articles ADD COLUMN IF NOT EXISTS search_vector tsvector;`,
+  );
+
+  await query(`
+    CREATE OR REPLACE FUNCTION articles_search_vector_update() RETURNS trigger AS $$
+    DECLARE
+      source_name text;
+    BEGIN
+      SELECT name INTO source_name FROM sources WHERE id = NEW.source_id;
+      NEW.search_vector :=
+        setweight(to_tsvector('english', coalesce(NEW.title, '')), 'A') ||
+        setweight(to_tsvector('english', coalesce(NEW.rewritten_title, '')), 'A') ||
+        setweight(to_tsvector('english', coalesce(NEW.dek, '')), 'B') ||
+        setweight(to_tsvector('english', coalesce(NEW.publisher_name, source_name, '')), 'B') ||
+        setweight(to_tsvector('english', coalesce(NEW.author, '')), 'B') ||
+        setweight(to_tsvector('english', coalesce(NEW.content_text, '')), 'C');
+      RETURN NEW;
+    END;
+    $$ LANGUAGE plpgsql;
+  `);
+
+  await query(
+    `DROP TRIGGER IF EXISTS articles_search_vector_trigger ON articles;`,
+  );
+  await query(`
+    CREATE TRIGGER articles_search_vector_trigger
+      BEFORE INSERT OR UPDATE OF title, rewritten_title, dek, content_text, publisher_name, author, source_id ON articles
+      FOR EACH ROW
+      EXECUTE FUNCTION articles_search_vector_update();
+  `);
+
+  await query(
+    `CREATE INDEX IF NOT EXISTS idx_articles_search_vector ON articles USING gin(search_vector);`,
+  );
+
+  // --- HNSW index for fast vector similarity search --------------------------
+  await query(`
+    CREATE INDEX IF NOT EXISTS idx_articles_embedding_hnsw
+      ON articles USING hnsw (embedding vector_cosine_ops)
+      WITH (m = 16, ef_construction = 64);
+  `);
+
+  // Backfill search_vector for all articles (includes source name + author)
+  console.log("Backfilling search vectors...");
+  const { rowCount: backfilled } = await query(`
+    UPDATE articles a SET search_vector =
+      setweight(to_tsvector('english', coalesce(a.title, '')), 'A') ||
+      setweight(to_tsvector('english', coalesce(a.rewritten_title, '')), 'A') ||
+      setweight(to_tsvector('english', coalesce(a.dek, '')), 'B') ||
+      setweight(to_tsvector('english', coalesce(a.publisher_name, s.name, '')), 'B') ||
+      setweight(to_tsvector('english', coalesce(a.author, '')), 'B') ||
+      setweight(to_tsvector('english', coalesce(a.content_text, '')), 'C')
+    FROM sources s
+    WHERE s.id = a.source_id;
+  `);
+  console.log(`Backfilled ${backfilled} article search vectors`);
+
   console.log("Schema ensured ✅");
 }
 

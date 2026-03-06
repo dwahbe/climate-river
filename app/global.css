@@ -95,6 +95,19 @@ body {
   color: #0a0a0a;
 }
 
+/* Animated gradient border for search input */
+@property --border-angle {
+  syntax: "<angle>";
+  initial-value: 0deg;
+  inherits: false;
+}
+
+@keyframes gradient-spin {
+  to {
+    --border-angle: 360deg;
+  }
+}
+
 /* Reader panel animations */
 @keyframes fadeIn {
   from {
