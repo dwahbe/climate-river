@@ -12,6 +12,7 @@ type Row = {
   content_text: string | null;
   content_html: string | null;
   content_status: string | null;
+  published_at: string | null;
 };
 
 /* ------------------------- Content Extraction with Safety Checks ------------------------- */
@@ -91,15 +92,27 @@ export function extractContentSnippet(
 
 /* ------------------------- Techmeme-Style Prompt ------------------------- */
 
-const SYSTEM_PROMPT = `You rewrite climate news headlines in the style of Techmeme: dense, factual, scannable.
+function todayLabel() {
+  return new Date().toLocaleDateString("en-US", {
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+  });
+}
+
+function buildSystemPrompt() {
+  return `Today is ${todayLabel()}.
+
+You rewrite climate news headlines in the style of Techmeme: dense, factual, scannable.
 
 RULES:
-- Lead with WHO (named entity: "EPA", "Ørsted", "9th Circuit") + strong action verb
+- Lead with WHO (named entity from the source: "EPA", "Ørsted", "9th Circuit") + strong action verb
 - Present tense, active voice, no period at end
 - 140-200 characters ideal; use commas and semicolons to pack detail
-- Only include numbers/dates/measurements that appear in the source material
+- Only include numbers/dates/measurements that appear in the source material; do not convert relative time ("last year", "this year") into specific years
+- NEVER add, replace, or change names of people, politicians, or political figures — use exactly the names and attributions from the source material
 - If no numbers exist, stay concrete and qualitative — never pad with filler
-- Name specific entities, policies, products — never "regulators", "a company", "a bank"
+- Prefer named entities, policies, products from the source over vague references like "regulators", "a company", "a bank"
 - The headline IS the news, not a description of an article about the news
 - Match the certainty of the source: facts as facts, projections with "may"/"could"
 
@@ -134,22 +147,44 @@ BEFORE: "India's solar manufacturing industry faces oversupply issues, turning a
 AFTER: "India's solar manufacturing hits oversupply glut as factory capacity outpaces domestic demand"
 
 Output ONLY the rewritten headline — no quotes, no explanation, no preamble.`;
+}
 
-const RETRY_SYSTEM_PROMPT = `You rewrite climate news headlines. Your previous attempt was too vague.
+function buildRetrySystemPrompt() {
+  return `Today is ${todayLabel()}.
 
-This time: state EXACTLY what happened, who did it, and include any specific numbers or names from the source material. Do not use filler phrases like "aiming to", "impacting", "amid concerns", or "addressing challenges". Every clause must add a concrete fact.
+You rewrite climate news headlines. Your previous attempt was too vague.
+
+This time: state EXACTLY what happened, who did it per the source material, and include any specific numbers or names from the source. Do not introduce names, people, or organizations not mentioned in the source. Do not use filler phrases like "aiming to", "impacting", "amid concerns", or "addressing challenges". Every clause must add a concrete fact.
 
 Output ONLY the rewritten headline — no quotes, no explanation, no preamble.`;
+}
 
 type PromptInput = {
   title: string;
   dek?: string | null;
   contentSnippet?: string | null;
   previewExcerpt?: string | null;
+  publishedAt?: string | null;
 };
+
+function formatPublishedDate(iso: string | null | undefined): string | null {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return null;
+  return d.toLocaleDateString("en-US", {
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+  });
+}
 
 function buildUserPrompt(input: PromptInput) {
   const lines = [`Original headline: ${input.title}`];
+
+  const pubDate = formatPublishedDate(input.publishedAt);
+  if (pubDate) {
+    lines.push(`Published: ${pubDate}`);
+  }
 
   if (input.dek) {
     lines.push(`Summary: ${input.dek}`);
@@ -306,6 +341,7 @@ type QuantContext = {
 type ValidationContext = {
   hasContent: boolean;
   sourceQuant: QuantContext;
+  sourceText: string;
 };
 
 export function buildSourceQuantContext(
@@ -415,6 +451,31 @@ export function passesChecks(
     }
   }
 
+  // Reject hallucinated political figures not present in source material
+  const politicalFigures = [
+    "biden",
+    "trump",
+    "obama",
+    "harris",
+    "pence",
+    "clinton",
+    "desantis",
+    "newsom",
+    "vance",
+  ];
+  const srcLower = context.sourceText.toLowerCase();
+  const draftLower = t.toLowerCase();
+  for (const name of politicalFigures) {
+    if (new RegExp(`\\b${name}\\b`).test(draftLower)) {
+      if (!new RegExp(`\\b${name}\\b`).test(srcLower)) {
+        console.warn(
+          `⚠️  Hallucinated political figure "${name}" not found in source material: "${t.slice(0, 60)}..."`,
+        );
+        return false;
+      }
+    }
+  }
+
   // Check for vague/hype phrases that shouldn't be in good headlines
   const badPatterns = [
     /\bmajor\b.*\bbreakthrough\b/i,
@@ -516,7 +577,7 @@ async function generateWithOpenAI(
     retries?: number;
   } = {},
 ): Promise<{ text: string | null; model: string; notes: string }> {
-  const system = opts.systemPrompt ?? SYSTEM_PROMPT;
+  const system = opts.systemPrompt ?? buildSystemPrompt();
   const prompt = buildUserPrompt(input);
   const abortMs = opts.abortMs ?? 20000;
   const retries = opts.retries ?? 2;
@@ -601,7 +662,8 @@ async function fetchBatch(limit = 40) {
         a.canonical_url,
         a.content_text,
         a.content_html,
-        a.content_status
+        a.content_status,
+        a.published_at
       from articles a
       left join lateral (
         select cs.score
@@ -706,11 +768,17 @@ async function processOne(r: Row) {
     dek: r.dek,
     contentSnippet,
     previewExcerpt,
+    publishedAt: r.published_at,
   };
+
+  const sourceText = [r.title, r.dek, contentSnippet, previewExcerpt]
+    .filter((p): p is string => typeof p === "string" && p.trim().length > 0)
+    .join(" ");
 
   const validationContext: ValidationContext = {
     hasContent: !!contentSnippet,
     sourceQuant,
+    sourceText,
   };
 
   // First attempt
@@ -736,7 +804,7 @@ async function processOne(r: Row) {
 
   // Retry once with a more direct prompt
   const retryLlm = await generateWithOpenAI(promptInput, {
-    systemPrompt: RETRY_SYSTEM_PROMPT,
+    systemPrompt: buildRetrySystemPrompt(),
   });
   const retryDraft = retryLlm.text || "";
 
@@ -914,11 +982,17 @@ async function dryRun(limit = 10) {
       dek: r.dek,
       contentSnippet,
       previewExcerpt,
+      publishedAt: r.published_at,
     };
+
+    const sourceText = [r.title, r.dek, contentSnippet, previewExcerpt]
+      .filter((p): p is string => typeof p === "string" && p.trim().length > 0)
+      .join(" ");
 
     const validationContext: ValidationContext = {
       hasContent: !!contentSnippet,
       sourceQuant,
+      sourceText,
     };
 
     const llm = await generateWithOpenAI(promptInput);
@@ -931,7 +1005,7 @@ async function dryRun(limit = 10) {
 
     if (!pass1 && draft) {
       const retryLlm = await generateWithOpenAI(promptInput, {
-        systemPrompt: RETRY_SYSTEM_PROMPT,
+        systemPrompt: buildRetrySystemPrompt(),
       });
       const retryDraft = retryLlm.text || "";
       finalPass = passesChecks(r.title, retryDraft, validationContext);

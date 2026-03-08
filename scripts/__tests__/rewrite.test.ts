@@ -16,11 +16,15 @@ function ctx(
   hasContent: boolean,
   ...sourceParts: Array<string | null | undefined>
 ) {
+  const filtered = sourceParts.filter(
+    (p): p is string => typeof p === "string" && p.trim().length > 0,
+  );
   return {
     hasContent,
     sourceQuant: buildSourceQuantContext(
       sourceParts.length > 0 ? sourceParts : [null],
     ),
+    sourceText: filtered.join(" "),
   };
 }
 
