@@ -130,6 +130,16 @@ export default function HomeFeed({ clusters, leaderboard }: HomeFeedProps) {
                 Weekly Leaderboard
               </h2>
               <PublicationLeaderboard entries={leaderboard} />
+              <p className="mt-2 px-1 text-[11px] text-zinc-400">
+                Ranked by story impact — how widely each outlet&apos;s scoops
+                are covered.{" "}
+                <a
+                  href="/about#how-is-the-weekly-leaderboard-calculated"
+                  className="underline decoration-zinc-300 hover:decoration-zinc-400"
+                >
+                  Learn more
+                </a>
+              </p>
             </div>
           )}
         </div>

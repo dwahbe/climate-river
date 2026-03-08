@@ -47,6 +47,11 @@ const FAQ_ITEMS = [
       "Headlines are rewritten for clarity and accuracy using AI, following the Techmeme style. The goal is to describe the news event plainly rather than use clickbait. Original sources are always linked and clearly attributed.",
   },
   {
+    question: "How is the Weekly Leaderboard calculated?",
+    answer:
+      "The Weekly Leaderboard ranks publications by story impact over a rolling 7-day window. When an outlet is the first to cover a story (a 'lead'), it earns points equal to the number of articles across all outlets that end up covering that same story. Breaking a story that 10 outlets pick up is worth more than breaking one only you cover. Rankings update continuously throughout the day.",
+  },
+  {
     question: "How can I get climate news updates?",
     answer:
       "You can subscribe to the Climate River RSS feed at climateriver.org/feed.xml using any feed reader. The feed includes the top 30 stories, updated every 5 minutes.",
@@ -147,7 +152,13 @@ export default function AboutPage() {
       </h2>
       <dl className="mt-3 space-y-4">
         {FAQ_ITEMS.map((item) => (
-          <div key={item.question}>
+          <div
+            key={item.question}
+            id={item.question
+              .toLowerCase()
+              .replace(/[^a-z0-9]+/g, "-")
+              .replace(/(^-|-$)/g, "")}
+          >
             <dt className="text-sm font-medium text-zinc-900">
               {item.question}
             </dt>
