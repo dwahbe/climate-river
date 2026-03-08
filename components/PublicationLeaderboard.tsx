@@ -86,8 +86,8 @@ export default function PublicationLeaderboard({ entries }: Props) {
               {entry.name}
             </span>
             <span className="text-xs text-zinc-500">
-              {entry.leads} {entry.leads === 1 ? "lead" : "leads"} ·{" "}
-              {entry.articles} {entry.articles === 1 ? "story" : "stories"}
+              {entry.leads} impact · {entry.articles}{" "}
+              {entry.articles === 1 ? "story" : "stories"}
             </span>
           </div>
 

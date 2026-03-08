@@ -31,8 +31,7 @@ function buildLeadsQuery(withLimit: boolean) {
     SELECT
       s.name,
       s.homepage_url AS homepage,
-      COUNT(DISTINCT cs.cluster_id)
-        FILTER (WHERE cs.lead_article_id = a.id)::int AS leads,
+      COALESCE(SUM(cs.size) FILTER (WHERE cs.lead_article_id = a.id), 0)::int AS leads,
       COUNT(DISTINCT ac.cluster_id)::int AS articles
     FROM articles a
     JOIN sources s ON a.source_id = s.id
