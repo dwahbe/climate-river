@@ -109,7 +109,7 @@ export default async function RootLayout({
                   className="group flex items-center gap-2 no-underline"
                 >
                   <HeaderLogoHover />
-                  <span className="font-semibold text-base sm:text-lg">
+                  <span className="font-semibold text-base sm:text-lg whitespace-nowrap">
                     Climate River
                   </span>
                 </Link>
@@ -131,10 +131,10 @@ export default async function RootLayout({
 
               {/* Right: Search + Last updated */}
               <div className="flex items-center gap-4 shrink-0">
-                <SearchLink />
-                <div className="hidden sm:block">
+                <div className="hidden md:block">
                   <LastUpdated />
                 </div>
+                <SearchLink />
               </div>
             </div>
           </div>

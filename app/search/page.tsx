@@ -28,7 +28,9 @@ export default async function SearchPage({
 
   return (
     <div className="w-full pt-1 sm:pt-1.5 pb-10">
-      <h1 className="text-xl font-semibold tracking-tight mb-4">Search</h1>
+      <h1 className="px-4 sm:px-0 text-xl font-semibold tracking-tight mb-4">
+        Search
+      </h1>
 
       {searchQuery ? (
         <Suspense fallback={<SearchResultsSkeleton />}>

@@ -233,7 +233,7 @@ export default async function ClusterPage(props: {
   const r = rows[0];
   if (!r) {
     return (
-      <div className="mx-auto max-w-3xl px-4 sm:px-6 py-10 text-zinc-600">
+      <div className="mx-auto max-w-3xl py-10 text-zinc-600">
         <Link href="/river" className="hover:underline">
           ← Back to river
         </Link>
@@ -254,7 +254,7 @@ export default async function ClusterPage(props: {
         publisher={r.lead_source || "Climate River"}
         url={`https://climateriver.org/river/${cid}`}
       />
-      <div className="mx-auto max-w-3xl px-4 sm:px-6 py-3">
+      <div className="mx-auto max-w-3xl pt-3 pb-10">
         {/* Page chrome */}
         <div className="flex items-center justify-between text-[12px] sm:text-sm text-zinc-600">
           <Link href="/river" className="hover:underline">

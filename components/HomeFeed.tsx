@@ -4,7 +4,9 @@ import { useState, useEffect } from "react";
 import FeedCard from "@/components/FeedCard";
 import ReaderPanel from "@/components/ReaderPanel";
 import ReaderView from "@/components/ReaderView";
+import PublicationLeaderboard from "@/components/PublicationLeaderboard";
 import type { Cluster } from "@/lib/models/cluster";
+import type { LeaderboardEntry } from "@/lib/repositories/leaderboardRepository";
 
 type SelectedArticle = {
   id: number;
@@ -14,11 +16,12 @@ type SelectedArticle = {
 
 type HomeFeedProps = {
   clusters: Cluster[];
+  leaderboard: LeaderboardEntry[];
 };
 
 type DeviceType = "mobile" | "tablet" | "desktop";
 
-export default function HomeFeed({ clusters }: HomeFeedProps) {
+export default function HomeFeed({ clusters, leaderboard }: HomeFeedProps) {
   const [selectedArticle, setSelectedArticle] = useState<SelectedArticle>(null);
   const [deviceType, setDeviceType] = useState<DeviceType>("desktop");
 
@@ -27,7 +30,7 @@ export default function HomeFeed({ clusters }: HomeFeedProps) {
       const width = window.innerWidth;
       if (width < 768) {
         setDeviceType("mobile");
-      } else if (width < 1280) {
+      } else if (width < 1024) {
         setDeviceType("tablet");
       } else {
         setDeviceType("desktop");
@@ -77,9 +80,9 @@ export default function HomeFeed({ clusters }: HomeFeedProps) {
 
   return (
     <>
-      <div className="xl:flex xl:gap-8 xl:justify-center">
+      <div className="lg:flex lg:gap-6">
         {/* Feed Column */}
-        <div className="mx-auto max-w-3xl sm:px-6 xl:shrink-0">
+        <div className="mx-auto max-w-3xl sm:px-6 lg:mx-0 lg:px-0 lg:flex-1 lg:min-w-0">
           <h1 className="mb-3 px-4 sm:px-0 text-xl font-semibold tracking-tight">
             Top Stories
           </h1>
@@ -102,28 +105,37 @@ export default function HomeFeed({ clusters }: HomeFeedProps) {
           )}
         </div>
 
-        {/* Reader Panel - Desktop only */}
-        {isOpen && (
-          <div className="hidden xl:block w-[500px] shrink-0 sticky top-0 h-screen">
+        {/* Right Column — Leaderboard swaps to Reader Panel */}
+        <div
+          className={`hidden lg:block shrink-0 ${
+            isOpen ? "lg:w-[400px] xl:w-[500px]" : "lg:w-[300px] xl:w-[300px]"
+          }`}
+        >
+          {isOpen && selectedArticle ? (
             <div className="h-full bg-white overflow-hidden animate-[slideInRight_200ms_ease-out]">
-              {selectedArticle && (
-                <ReaderPanel
-                  articleId={selectedArticle.id}
-                  articleTitle={selectedArticle.title}
-                  articleUrl={selectedArticle.url}
-                  onClose={handleClosePreview}
-                  onPrev={handlePrev}
-                  onNext={handleNext}
-                  hasPrev={currentIndex > 0}
-                  hasNext={currentIndex < clusters.length - 1}
-                />
-              )}
+              <ReaderPanel
+                articleId={selectedArticle.id}
+                articleTitle={selectedArticle.title}
+                articleUrl={selectedArticle.url}
+                onClose={handleClosePreview}
+                onPrev={handlePrev}
+                onNext={handleNext}
+                hasPrev={currentIndex > 0}
+                hasNext={currentIndex < clusters.length - 1}
+              />
             </div>
-          </div>
-        )}
+          ) : (
+            <div>
+              <h2 className="mb-3 text-xl font-semibold tracking-tight">
+                Weekly Leaderboard
+              </h2>
+              <PublicationLeaderboard entries={leaderboard} />
+            </div>
+          )}
+        </div>
       </div>
 
-      {/* Reader View - Mobile/Tablet */}
+      {/* Reader View — Mobile/Tablet */}
       {deviceType !== "desktop" && selectedArticle && (
         <ReaderView
           articleId={selectedArticle.id}

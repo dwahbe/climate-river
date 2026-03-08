@@ -78,7 +78,7 @@ export default async function CategoryDetailPage(props: {
         >
           ← All categories
         </Link>
-        <h1 className="mt-2 mb-3 flex items-center gap-2 text-xl font-semibold tracking-tight">
+        <h1 className="mt-2 mb-3 px-4 sm:px-0 flex items-center gap-2 text-xl font-semibold tracking-tight">
           <span>{category.name}</span>
           <CategoryIcon
             slug={category.slug}

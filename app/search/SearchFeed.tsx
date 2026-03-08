@@ -61,7 +61,7 @@ export default function SearchFeed({ clusters }: { clusters: Cluster[] }) {
 
   return (
     <>
-      <div>
+      <div className="divide-y divide-zinc-200/80 -mx-4 sm:mx-0">
         {clusters.map((cluster) => (
           <FeedCard
             key={cluster.cluster_id}

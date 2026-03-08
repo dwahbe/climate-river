@@ -135,7 +135,7 @@ export default function SearchLink() {
       <button
         type="button"
         onClick={() => setMobileOpen(true)}
-        className="sm:hidden self-center text-zinc-600 hover:text-zinc-900 cursor-pointer"
+        className="md:hidden self-center text-zinc-600 hover:text-zinc-900 cursor-pointer"
         aria-label="Search"
       >
         <SearchIcon className="h-[18px] w-[18px]" />
@@ -148,7 +148,7 @@ export default function SearchLink() {
       />
 
       {/* Desktop: pill / inline input */}
-      <div className="hidden sm:block w-48 h-8">
+      <div className="hidden md:block w-48 h-8">
         {desktopOpen ? (
           <form
             onSubmit={(e) => {

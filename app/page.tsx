@@ -1,4 +1,5 @@
 import { getRiverData } from "@/lib/services/riverService";
+import { getPublicationLeaderboard } from "@/lib/repositories/leaderboardRepository";
 import HomeFeed from "@/components/HomeFeed";
 import ItemListStructuredData from "@/components/ItemListStructuredData";
 import type { Metadata } from "next";
@@ -38,16 +39,16 @@ export const metadata: Metadata = {
 };
 
 export default async function RiverPage() {
-  const clusters = await getRiverData({
-    view: "top",
-    limit: 20,
-  });
+  const [clusters, leaderboard] = await Promise.all([
+    getRiverData({ view: "top", limit: 20 }),
+    getPublicationLeaderboard(168, 10),
+  ]);
 
   return (
     <>
       <ItemListStructuredData clusters={clusters} />
-      <div className="w-full pt-1 sm:pt-1.5">
-        <HomeFeed clusters={clusters} />
+      <div className="w-full pt-1 sm:pt-1.5 pb-10">
+        <HomeFeed clusters={clusters} leaderboard={leaderboard} />
       </div>
     </>
   );
