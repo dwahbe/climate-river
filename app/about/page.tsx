@@ -59,9 +59,7 @@ export default function AboutPage() {
       <FAQStructuredData items={FAQ_ITEMS} />
 
       <div className="flex items-center justify-between mb-4">
-        <h1 className="px-4 sm:px-0 text-xl font-semibold tracking-tight">
-          About
-        </h1>
+        <h1 className="text-xl font-semibold tracking-tight">About</h1>
       </div>
       <p className="mt-3 text-zinc-700 text-pretty">
         Despite being one of the defining challenges of our time, coverage of
@@ -115,8 +113,7 @@ export default function AboutPage() {
         >
           six categories
         </Link>
-        :{" "}
-        <span style={{ color: "#3B82F6" }}>government policy</span>,{" "}
+        : <span style={{ color: "#3B82F6" }}>government policy</span>,{" "}
         <span style={{ color: "#EC4899" }}>activism</span>,{" "}
         <span style={{ color: "#06B6D4" }}>business</span>,{" "}
         <span style={{ color: "#EF4444" }}>climate impacts</span>,{" "}

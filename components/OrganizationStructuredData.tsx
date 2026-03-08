@@ -10,8 +10,7 @@ export default function OrganizationStructuredData() {
       "@type": "SearchAction",
       target: {
         "@type": "EntryPoint",
-        urlTemplate:
-          "https://climateriver.org/search?q={search_term_string}",
+        urlTemplate: "https://climateriver.org/search?q={search_term_string}",
       },
       "query-input": "required name=search_term_string",
     },

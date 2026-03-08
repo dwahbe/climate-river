@@ -83,7 +83,7 @@ export default function HomeFeed({ clusters, leaderboard }: HomeFeedProps) {
       <div className="lg:flex lg:gap-6">
         {/* Feed Column */}
         <div className="mx-auto max-w-3xl sm:px-6 lg:mx-0 lg:px-0 lg:flex-1 lg:min-w-0">
-          <h1 className="mb-3 px-4 sm:px-0 text-xl font-semibold tracking-tight">
+          <h1 className="mb-3 text-xl font-semibold tracking-tight">
             Top Stories
           </h1>
 

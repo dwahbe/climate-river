@@ -254,7 +254,7 @@ export default async function ClusterPage(props: {
         publisher={r.lead_source || "Climate River"}
         url={`https://climateriver.org/river/${cid}`}
       />
-      <div className="mx-auto max-w-3xl pt-3 pb-10">
+      <div className="mx-auto max-w-3xl pt-1 sm:pt-1.5 pb-10">
         {/* Page chrome */}
         <div className="flex items-center justify-between text-[12px] sm:text-sm text-zinc-600">
           <Link href="/river" className="hover:underline">

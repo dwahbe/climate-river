@@ -102,14 +102,12 @@ export default function SourcesPage() {
 
   return (
     <div className="mx-auto max-w-3xl pt-1 sm:pt-1.5 pb-10">
-      <h1 className="px-4 sm:px-0 text-xl font-semibold tracking-tight">
-        Sources
-      </h1>
+      <h1 className="text-xl font-semibold tracking-tight">Sources</h1>
       <p className="mt-3 text-zinc-700 text-pretty">
-        Climate River monitors 40+ outlets chosen
-        for their dedicated climate desks, investigative track records, and
-        editorial standards. We prioritize publications with sustained climate
-        reporting over outlets that cover the topic only occasionally.
+        Climate River monitors 40+ outlets chosen for their dedicated climate
+        desks, investigative track records, and editorial standards. We
+        prioritize publications with sustained climate reporting over outlets
+        that cover the topic only occasionally.
       </p>
       <p className="mt-2 text-zinc-700 text-pretty">
         Articles are ingested via RSS feeds and supplemented with web searches
