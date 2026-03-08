@@ -10,27 +10,27 @@ export const revalidate = 300;
 // Static metadata consumed by Next.js for SEO and social tags:
 // https://nextjs.org/docs/app/building-your-application/optimizing/metadata#static-metadata
 export const metadata: Metadata = {
-  title: "Top Climate News",
+  title: "Climate News Today",
   description:
-    "Top climate news aggregated from leading outlets like The Guardian, New York Times, and Reuters. Stories organized by topic, ranked for trust and timeliness. Updated continuously.",
+    "Today's top climate news aggregated from 40+ trusted outlets including The Guardian, NYT, Reuters, and Bloomberg. Stories clustered by topic, ranked for credibility, and updated continuously.",
   openGraph: {
-    title: "Top Climate News | Climate River",
+    title: "Climate News Today | Climate River",
     description:
-      "Top climate news aggregated from leading outlets. Stories organized by topic, ranked for trust and timeliness. Updated continuously.",
+      "Today's top climate news from 40+ trusted outlets. Stories clustered by topic, ranked for credibility, updated continuously.",
     url: "https://climateriver.org",
     images: [
       {
         url: "/api/og",
         width: 1200,
         height: 630,
-        alt: "Climate River - Top climate news headlines",
+        alt: "Climate River - Today's top climate news headlines",
       },
     ],
   },
   twitter: {
-    title: "Top Climate News | Climate River",
+    title: "Climate News Today | Climate River",
     description:
-      "Top climate news aggregated from leading outlets. Stories organized by topic, ranked for trust and timeliness.",
+      "Today's top climate news from 40+ trusted outlets. Stories clustered by topic, ranked for credibility, updated continuously.",
     images: ["/api/og"],
   },
   alternates: {

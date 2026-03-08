@@ -5,6 +5,7 @@ import { getRiverData } from "@/lib/services/riverService";
 import { getCategoryBySlug } from "@/lib/tagger";
 import { CategoryIcon } from "@/components/categoryIcons";
 import BreadcrumbStructuredData from "@/components/BreadcrumbStructuredData";
+import ItemListStructuredData from "@/components/ItemListStructuredData";
 import type { Metadata } from "next";
 
 export const revalidate = 300;
@@ -24,7 +25,7 @@ export async function generateMetadata(props: {
   }
 
   const title = `${category.name} Climate News`;
-  const description = `${category.description}. Stay updated with the latest ${category.name.toLowerCase()} news and developments in climate change.`;
+  const description = category.longDescription;
 
   return {
     title,
@@ -71,6 +72,10 @@ export default async function CategoryDetailPage(props: {
           },
         ]}
       />
+      <ItemListStructuredData
+        clusters={clusters}
+        listName={`${category.name} Climate News`}
+      />
       <div className="w-full pt-1 sm:pt-1.5 pb-10">
         <Link
           href="/categories"
@@ -86,6 +91,11 @@ export default async function CategoryDetailPage(props: {
             style={{ color: category.color }}
           />
         </h1>
+        {category.longDescription && (
+          <p className="mb-4 text-sm text-zinc-600 text-pretty max-w-2xl">
+            {category.longDescription}
+          </p>
+        )}
         <FeedCardGrid
           clusters={clusters}
           emptyMessage="No stories available right now."

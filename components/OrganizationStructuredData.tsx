@@ -6,6 +6,15 @@ export default function OrganizationStructuredData() {
     url: "https://climateriver.org",
     description:
       "Climate River is a curated aggregator of the latest climate news from leading outlets, organized by story and ranked for trust and timeliness.",
+    potentialAction: {
+      "@type": "SearchAction",
+      target: {
+        "@type": "EntryPoint",
+        urlTemplate:
+          "https://climateriver.org/search?q={search_term_string}",
+      },
+      "query-input": "required name=search_term_string",
+    },
     publisher: {
       "@type": "Organization",
       name: "Climate River",

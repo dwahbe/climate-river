@@ -45,6 +45,12 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
       changeFrequency: "daily",
       priority: 0.9,
     },
+    {
+      url: `${baseUrl}/sources`,
+      lastModified: new Date("2026-03-08"),
+      changeFrequency: "monthly",
+      priority: 0.7,
+    },
   ];
 
   // Category pages

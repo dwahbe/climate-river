@@ -144,6 +144,20 @@ export default async function RootLayout({
           {children}
         </main>
 
+        <footer className="border-t border-zinc-100 mt-12">
+          <div className="mx-auto max-w-5xl px-4 sm:px-6 py-6 flex flex-wrap items-center gap-x-5 gap-y-2 text-xs text-zinc-400">
+            <Link href="/" className="flex items-center gap-1.5 no-underline mr-1">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src="/icon.svg" alt="" className="h-4 w-4 opacity-50" />
+              <span className="text-sm text-zinc-500">Climate River</span>
+            </Link>
+            <Link href="/categories" className="hover:text-zinc-600 no-underline">Categories</Link>
+            <Link href="/about" className="hover:text-zinc-600 no-underline">About</Link>
+            <Link href="/sources" className="hover:text-zinc-600 no-underline">Sources</Link>
+            <a href="/feed.xml" className="hover:text-zinc-600 no-underline">RSS</a>
+          </div>
+        </footer>
+
         <div className="pb-[env(safe-area-inset-bottom)]" />
         <Analytics />
       </body>

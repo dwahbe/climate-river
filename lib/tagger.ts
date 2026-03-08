@@ -13,6 +13,8 @@ export const CATEGORIES = [
     slug: "government",
     name: "Government",
     description: "Government policy, regulations, and climate laws",
+    longDescription:
+      "Track climate legislation, EPA regulations, international climate agreements, and government action on emissions. Coverage spans executive orders, congressional debates, state-level policies, and global summits like COP from outlets including E&E News, Politico, Reuters, and The Guardian.",
     color: "#3B82F6", // blue
     keywords: [
       "epa",
@@ -65,6 +67,8 @@ export const CATEGORIES = [
     name: "Activism",
     description:
       "Climate protests, rallies, strikes, and direct action by grassroots movements and activist organizations",
+    longDescription:
+      "Follow climate protests, grassroots movements, and direct action campaigns from organizations like Extinction Rebellion, Just Stop Oil, and Fridays for Future. Coverage includes rallies, strikes, civil disobedience, and the intersection of climate justice with social movements worldwide.",
     color: "#EC4899", // pink
     keywords: [
       // Specific activist organizations
@@ -120,6 +124,8 @@ export const CATEGORIES = [
     slug: "business",
     name: "Business",
     description: "Corporate climate action, finance, and market trends",
+    longDescription:
+      "Monitor corporate net-zero commitments, ESG developments, carbon markets, and climate finance. Coverage spans green bonds, sustainable investing, supply chain decarbonization, and industry transitions from Bloomberg Green, Financial Times, and Reuters.",
     color: "#06B6D4", // cyan
     keywords: [
       "company",
@@ -171,6 +177,8 @@ export const CATEGORIES = [
     name: "Impacts",
     description:
       "Climate effects, extreme weather, and environmental consequences",
+    longDescription:
+      "Stay informed on extreme weather events, rising sea levels, biodiversity loss, and the real-world consequences of climate change. Coverage includes hurricanes, wildfires, droughts, flooding, and their effects on communities, agriculture, and ecosystems worldwide.",
     color: "#EF4444", // red
     keywords: [
       "hurricane",
@@ -219,6 +227,8 @@ export const CATEGORIES = [
     slug: "tech",
     name: "Tech",
     description: "Clean technology, renewables, and climate solutions",
+    longDescription:
+      "Explore breakthroughs in renewable energy, electric vehicles, carbon capture, battery storage, and other climate solutions. Coverage from Canary Media, CleanTechnica, and Heatmap News tracks the technologies driving the energy transition.",
     color: "#10B981", // green
     keywords: [
       "technology",
@@ -266,6 +276,8 @@ export const CATEGORIES = [
     slug: "research",
     name: "Research & Innovation",
     description: "Climate research, studies, and scientific discoveries",
+    longDescription:
+      "Read the latest climate science from peer-reviewed studies, IPCC reports, and research institutions. Coverage includes new findings on warming projections, atmospheric science, oceanography, and climate modeling from Nature, Scientific American, and NASA.",
     color: "#8B5CF6", // purple
     keywords: [
       "study shows",
