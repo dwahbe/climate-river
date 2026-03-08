@@ -48,6 +48,11 @@ supabase/.temp/
 supabase/.branches/
 supabase/.logs/
 
+# ── Claude Code (local-only files) ──────────────────────────
+.claude/settings.local.json
+.claude/worktrees/
+CLAUDE.local.md
+
 # ── OS / Editor junk ─────────────────────────────────────────
 .DS_Store
 Thumbs.db
