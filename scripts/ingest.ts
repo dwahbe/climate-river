@@ -4,8 +4,10 @@ import dayjs from "dayjs";
 import { query, endPool } from "@/lib/db";
 import { categorizeAndStoreArticle } from "@/lib/categorizer";
 import { isClimateRelevant } from "@/lib/tagger";
-import { embed } from "ai";
-import { openai } from "@ai-sdk/openai";
+import {
+  generateEmbedding,
+  CLUSTER_CONFIG,
+} from "@/lib/clustering";
 
 // ---------- Parser configured once (captures <source>, rich content) ----------
 type RssSourceField =
@@ -68,29 +70,7 @@ function isGoogleNewsFeed(feedUrl: string) {
   }
 }
 
-// Generate embedding for article content
-async function generateEmbedding(
-  title: string,
-  description?: string,
-): Promise<number[]> {
-  try {
-    // Combine title and description for better semantic understanding
-    const text = description ? `${title}\n\n${description}` : title;
-
-    // Truncate to prevent token limit issues (rough estimate: 1 token ≈ 4 chars)
-    const truncatedText = text.substring(0, 8000);
-
-    const { embedding } = await embed({
-      model: openai.embeddingModel("text-embedding-3-small"),
-      value: truncatedText,
-    });
-
-    return embedding;
-  } catch (error) {
-    console.error("Error generating embedding:", error);
-    return [];
-  }
-}
+// generateEmbedding is imported from lib/clustering.ts
 
 /** Unwrap Google News redirect to publisher URL when present */
 function unGoogleLink(link: string) {
@@ -535,30 +515,25 @@ async function updateClusterMetadata(clusterId: number) {
   }
 }
 
-// New semantic clustering function using vector embeddings
+// Centroid-based semantic clustering with size cap.
+// Compares new article embedding against cluster centroids (AVG of member embeddings)
+// instead of individual members, preventing semantic drift.
 async function ensureSemanticClusterForArticle(
   articleId: number,
   title: string,
 ) {
-  // Check if this article is already in ANY cluster
-  const articleAlreadyClustered = await query<{ cluster_id: number }>(
+  // Check if already clustered
+  const existing = await query<{ cluster_id: number }>(
     `SELECT cluster_id FROM article_clusters WHERE article_id = $1`,
     [articleId],
   );
+  if (existing.rows.length > 0) return;
 
-  if (articleAlreadyClustered.rows.length > 0) {
-    console.log(
-      `Article ${articleId} already in cluster ${articleAlreadyClustered.rows[0].cluster_id}, skipping`,
-    );
-    return;
-  }
-
-  // Get the article's embedding
+  // Get article embedding
   const articleResult = await query<{ embedding: string }>(
     `SELECT embedding FROM articles WHERE id = $1 AND embedding IS NOT NULL`,
     [articleId],
   );
-
   if (articleResult.rows.length === 0) {
     console.log(`Article ${articleId} has no embedding, skipping clustering`);
     return;
@@ -566,152 +541,65 @@ async function ensureSemanticClusterForArticle(
 
   const articleEmbedding = articleResult.rows[0].embedding;
 
-  // Find similar articles using cosine similarity
-  const similarArticles = await query<{
-    article_id: number;
-    cluster_id: number | null;
+  // Find candidate clusters by comparing against cluster centroids
+  const candidates = await query<{
+    cluster_id: number;
     similarity: number;
-    title: string;
-  }>(
-    `SELECT 
-       a.id as article_id,
-       ac.cluster_id,
-       1 - (a.embedding <=> $1::vector) as similarity,
-       a.title
-     FROM articles a
-     LEFT JOIN article_clusters ac ON a.id = ac.article_id
-                          WHERE a.id != $2
-                       AND a.embedding IS NOT NULL
-                       AND a.fetched_at >= now() - interval '7 days'
-                       AND 1 - (a.embedding <=> $1::vector) > 0.6
-     ORDER BY a.embedding <=> $1::vector
-     LIMIT 10`,
-    [articleEmbedding, articleId],
-  );
+    size: number;
+  }>(`
+    WITH cluster_centroids AS (
+      SELECT
+        ac.cluster_id,
+        COUNT(*)::int AS size,
+        AVG(a.embedding) AS centroid
+      FROM article_clusters ac
+      JOIN articles a ON a.id = ac.article_id
+      WHERE a.embedding IS NOT NULL
+        AND a.fetched_at >= now() - make_interval(days => $4)
+      GROUP BY ac.cluster_id
+      HAVING COUNT(*) < $2
+    )
+    SELECT
+      cluster_id,
+      1 - (centroid <=> $1::vector) AS similarity,
+      size
+    FROM cluster_centroids
+    WHERE 1 - (centroid <=> $1::vector) > $3
+    ORDER BY centroid <=> $1::vector
+    LIMIT 1
+  `, [
+    articleEmbedding,
+    CLUSTER_CONFIG.MAX_CLUSTER_SIZE,
+    CLUSTER_CONFIG.SIMILARITY_THRESHOLD,
+    CLUSTER_CONFIG.LOOKBACK_DAYS,
+  ]);
 
-  // Look for existing clusters among similar articles
-  // Find all unique clusters and their best similarity scores
-  const clusterCandidates = new Map<
-    number,
-    {
-      similarity: number;
-      article_id: number;
-      title: string;
-    }
-  >();
-
-  for (const similar of similarArticles.rows) {
-    if (similar.cluster_id) {
-      const existing = clusterCandidates.get(similar.cluster_id);
-      if (!existing || similar.similarity > existing.similarity) {
-        clusterCandidates.set(similar.cluster_id, {
-          similarity: similar.similarity,
-          article_id: similar.article_id,
-          title: similar.title,
-        });
-      }
-    }
-  }
-
-  // If we found cluster candidates, join the one with highest similarity
-  if (clusterCandidates.size > 0) {
-    const bestCluster = Array.from(clusterCandidates.entries()).sort(
-      ([, a], [, b]) => b.similarity - a.similarity,
-    )[0];
-
-    const [clusterId, bestMatch] = bestCluster;
-
+  if (candidates.rows.length > 0) {
+    const best = candidates.rows[0];
     console.log(
-      `Article ${articleId} matched existing cluster ${clusterId} via similar article ${bestMatch.article_id} (similarity: ${bestMatch.similarity.toFixed(3)}) - "${bestMatch.title}"`,
+      `Article ${articleId} matched cluster ${best.cluster_id} (centroid sim: ${best.similarity.toFixed(3)}, size: ${best.size})`,
     );
-
-    // Add this article to the best matching cluster
     await query(
-      `INSERT INTO article_clusters (article_id, cluster_id)
-       VALUES ($1, $2) ON CONFLICT DO NOTHING`,
-      [articleId, clusterId],
+      `INSERT INTO article_clusters (article_id, cluster_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+      [articleId, best.cluster_id],
     );
-
-    // Also add any unclustered similar articles to this cluster (retroactive clustering)
-    const unclusteredSimilar = similarArticles.rows.filter(
-      (a) => !a.cluster_id && a.similarity >= 0.6,
-    );
-    for (const unclustered of unclusteredSimilar) {
-      await query(
-        `INSERT INTO article_clusters (article_id, cluster_id)
-         VALUES ($1, $2) ON CONFLICT DO NOTHING`,
-        [unclustered.article_id, clusterId],
-      );
-      console.log(
-        `  ↳ Added unclustered article ${unclustered.article_id} to cluster ${clusterId} (similarity: ${unclustered.similarity.toFixed(3)})`,
-      );
-    }
-
-    // Update cluster_scores to potentially select a better lead article
-    await updateClusterMetadata(clusterId);
+    await updateClusterMetadata(best.cluster_id);
     return;
   }
 
-  // If we have similar articles but no existing cluster, create a new one
-  if (similarArticles.rows.length > 0) {
-    const key = clusterKey(title) || `semantic-${Date.now()}`;
-
-    const cluster = await query<{ id: number }>(
-      `INSERT INTO clusters (key) VALUES ($1)
-       ON CONFLICT (key) DO UPDATE SET key = excluded.key
-       RETURNING id`,
-      [key],
-    );
-
-    const clusterId = cluster.rows[0].id;
-
-    // Add the current article to the new cluster
-    await query(
-      `INSERT INTO article_clusters (article_id, cluster_id)
-       VALUES ($1, $2) ON CONFLICT DO NOTHING`,
-      [articleId, clusterId],
-    );
-
-    // Add all similar articles to the new cluster
-    for (const similar of similarArticles.rows) {
-      await query(
-        `INSERT INTO article_clusters (article_id, cluster_id)
-         VALUES ($1, $2) ON CONFLICT DO NOTHING`,
-        [similar.article_id, clusterId],
-      );
-    }
-
-    console.log(
-      `Created new semantic cluster ${clusterId} with ${similarArticles.rows.length + 1} articles`,
-    );
-
-    // Initialize cluster_scores for the new cluster
-    await updateClusterMetadata(clusterId);
-    return;
-  }
-
-  // No similar articles found - create singleton cluster so it enters the pipeline
-  const key = clusterKey(title) || `singleton-${Date.now()}`;
-
+  // No matching cluster — create singleton
+  const key = clusterKey(title) || `semantic-${Date.now()}`;
   const cluster = await query<{ id: number }>(
     `INSERT INTO clusters (key) VALUES ($1)
-     ON CONFLICT (key) DO UPDATE SET key = excluded.key
-     RETURNING id`,
+     ON CONFLICT (key) DO UPDATE SET key = excluded.key RETURNING id`,
     [key],
   );
-
   const clusterId = cluster.rows[0].id;
-
   await query(
-    `INSERT INTO article_clusters (article_id, cluster_id)
-     VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+    `INSERT INTO article_clusters (article_id, cluster_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
     [articleId, clusterId],
   );
-
-  console.log(
-    `Created singleton cluster ${clusterId} for article ${articleId}`,
-  );
-
+  console.log(`Created singleton cluster ${clusterId} for article ${articleId}`);
   await updateClusterMetadata(clusterId);
 }
 

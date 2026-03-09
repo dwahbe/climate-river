@@ -3,6 +3,7 @@ import Parser from "rss-parser";
 import dayjs from "dayjs";
 import { query, endPool } from "@/lib/db";
 import { isClimateRelevant } from "@/lib/tagger";
+import { generateEmbedding, CLUSTER_CONFIG } from "@/lib/clustering";
 
 type RssItem = {
   title?: string;
@@ -204,36 +205,86 @@ async function insertArticle(
   url: string,
   publishedAt?: string,
 ) {
+  // Skip duplicates before generating embedding to avoid wasted OpenAI API calls
+  const existing = await query<{ id: number }>(
+    `SELECT id FROM articles WHERE canonical_url = $1`,
+    [url],
+  );
+  if (existing.rows.length > 0) return undefined;
+
+  const embedding = await generateEmbedding(title);
   const row = await query<{ id: number }>(
     `
-    insert into articles (source_id, title, canonical_url, published_at)
-    values ($1, $2, $3, $4)
-    on conflict (canonical_url) do nothing
-    returning id
+    INSERT INTO articles (source_id, title, canonical_url, published_at, embedding)
+    VALUES ($1, $2, $3, $4, $5)
+    ON CONFLICT (canonical_url) DO NOTHING
+    RETURNING id
   `,
-    [sourceId, title, url, publishedAt ? dayjs(publishedAt).toDate() : null],
+    [
+      sourceId,
+      title,
+      url,
+      publishedAt ? dayjs(publishedAt).toDate() : null,
+      embedding.length > 0 ? JSON.stringify(embedding) : null,
+    ],
   );
   return row.rows[0]?.id;
 }
 
 async function ensureClusterForArticle(articleId: number, title: string) {
+  // Check if article has an embedding for centroid-based clustering
+  const embResult = await query<{ embedding: string }>(
+    `SELECT embedding FROM articles WHERE id = $1 AND embedding IS NOT NULL`,
+    [articleId],
+  );
+
+  if (embResult.rows.length > 0) {
+    // Centroid-based semantic clustering (same as ingest.ts)
+    const candidates = await query<{
+      cluster_id: number;
+      similarity: number;
+      size: number;
+    }>(`
+      WITH cluster_centroids AS (
+        SELECT ac.cluster_id, COUNT(*)::int AS size, AVG(a.embedding) AS centroid
+        FROM article_clusters ac
+        JOIN articles a ON a.id = ac.article_id
+        WHERE a.embedding IS NOT NULL
+          AND a.fetched_at >= now() - make_interval(days => $4)
+        GROUP BY ac.cluster_id
+        HAVING COUNT(*) < $2
+      )
+      SELECT cluster_id, 1 - (centroid <=> $1::vector) AS similarity, size
+      FROM cluster_centroids
+      WHERE 1 - (centroid <=> $1::vector) > $3
+      ORDER BY centroid <=> $1::vector
+      LIMIT 1
+    `, [
+      embResult.rows[0].embedding,
+      CLUSTER_CONFIG.MAX_CLUSTER_SIZE,
+      CLUSTER_CONFIG.SIMILARITY_THRESHOLD,
+      CLUSTER_CONFIG.LOOKBACK_DAYS,
+    ]);
+
+    if (candidates.rows.length > 0) {
+      await query(
+        `INSERT INTO article_clusters (article_id, cluster_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+        [articleId, candidates.rows[0].cluster_id],
+      );
+      return;
+    }
+  }
+
+  // Fallback: keyword-based clustering (for articles without embeddings)
   const key = clusterKey(title);
   if (!key) return;
   const cluster = await query<{ id: number }>(
-    `
-    insert into clusters (key)
-    values ($1)
-    on conflict (key) do update set key = excluded.key
-    returning id
-  `,
+    `INSERT INTO clusters (key) VALUES ($1)
+     ON CONFLICT (key) DO UPDATE SET key = excluded.key RETURNING id`,
     [key],
   );
   await query(
-    `
-    insert into article_clusters (article_id, cluster_id)
-    values ($1, $2)
-    on conflict do nothing
-  `,
+    `INSERT INTO article_clusters (article_id, cluster_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
     [articleId, cluster.rows[0].id],
   );
 }
@@ -313,7 +364,6 @@ async function ingestQuery(q: string, limitPerQuery = 25) {
 
 export async function run(
   opts: {
-    queries?: string[];
     limitPerQuery?: number;
     closePool?: boolean;
   } = {},

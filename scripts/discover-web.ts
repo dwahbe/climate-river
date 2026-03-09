@@ -10,6 +10,7 @@ import {
   CURATED_CLIMATE_OUTLETS,
   type ClimateOutlet,
 } from "@/config/climateOutlets";
+import { generateEmbedding, CLUSTER_CONFIG } from "@/lib/clustering";
 
 // Tavily client for cost-effective site-specific search
 // Only initialize if API key exists (SDK throws on empty key)
@@ -1594,19 +1595,24 @@ async function insertWebDiscoveredArticle(
       return null;
     }
 
+    // Generate embedding for semantic clustering
+    const embedding = await generateEmbedding(result.title, result.snippet ?? undefined);
+
     const { rows } = await query<{ id: number }>(
       `
       INSERT INTO articles (
-        source_id, 
-        title, 
-        canonical_url, 
+        source_id,
+        title,
+        canonical_url,
         dek,
         published_at,
         fetched_at,
         publisher_name,
-        publisher_homepage
+        publisher_homepage,
+        embedding
       )
-      VALUES ($1, $2, $3, $4, $5, NOW(), $6, $7)
+      VALUES ($1, $2, $3, $4, $5, NOW(), $6, $7, $8)
+      ON CONFLICT (canonical_url) DO NOTHING
       RETURNING id
     `,
       [
@@ -1614,9 +1620,10 @@ async function insertWebDiscoveredArticle(
         result.title,
         result.url,
         result.snippet,
-        publishedDate, // Now guaranteed to be valid, no fallback needed
+        publishedDate,
         publisherName ?? null,
         publisherHomepage ?? null,
+        embedding.length > 0 ? JSON.stringify(embedding) : null,
       ],
     );
 
@@ -1658,32 +1665,61 @@ async function getOrCreateWebDiscoverySource(): Promise<number> {
 }
 
 async function ensureClusterForArticle(articleId: number, title: string) {
-  // Simple clustering based on title keywords (reuse your existing logic)
+  // Try centroid-based semantic clustering first
+  const embResult = await query<{ embedding: string }>(
+    `SELECT embedding FROM articles WHERE id = $1 AND embedding IS NOT NULL`,
+    [articleId],
+  );
+
+  if (embResult.rows.length > 0) {
+    const candidates = await query<{
+      cluster_id: number;
+      similarity: number;
+    }>(`
+      WITH cluster_centroids AS (
+        SELECT ac.cluster_id, COUNT(*)::int AS size, AVG(a.embedding) AS centroid
+        FROM article_clusters ac
+        JOIN articles a ON a.id = ac.article_id
+        WHERE a.embedding IS NOT NULL
+          AND a.fetched_at >= now() - make_interval(days => $4)
+        GROUP BY ac.cluster_id
+        HAVING COUNT(*) < $2
+      )
+      SELECT cluster_id, 1 - (centroid <=> $1::vector) AS similarity
+      FROM cluster_centroids
+      WHERE 1 - (centroid <=> $1::vector) > $3
+      ORDER BY centroid <=> $1::vector
+      LIMIT 1
+    `, [
+      embResult.rows[0].embedding,
+      CLUSTER_CONFIG.MAX_CLUSTER_SIZE,
+      CLUSTER_CONFIG.SIMILARITY_THRESHOLD,
+      CLUSTER_CONFIG.LOOKBACK_DAYS,
+    ]);
+
+    if (candidates.rows.length > 0) {
+      await query(
+        `INSERT INTO article_clusters (article_id, cluster_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+        [articleId, candidates.rows[0].cluster_id],
+      );
+      return;
+    }
+  }
+
+  // Fallback: keyword-based singleton
   const titleWords = title.toLowerCase().split(" ");
   const keywords = titleWords.filter((w) => w.length > 4).slice(0, 3);
   const clusterKey = keywords.join("-") || `article-${articleId}`;
 
-  // Get or create cluster
   const { rows: clusters } = await query<{ id: number }>(
-    `
-    INSERT INTO clusters (key, created_at)
-    VALUES ($1, NOW())
-    ON CONFLICT (key) DO UPDATE SET key = EXCLUDED.key
-    RETURNING id
-  `,
+    `INSERT INTO clusters (key, created_at) VALUES ($1, NOW())
+     ON CONFLICT (key) DO UPDATE SET key = EXCLUDED.key RETURNING id`,
     [clusterKey],
   );
 
-  const clusterId = clusters[0].id;
-
-  // Link article to cluster
   await query(
-    `
-    INSERT INTO article_clusters (article_id, cluster_id)
-    VALUES ($1, $2)
-    ON CONFLICT (article_id, cluster_id) DO NOTHING
-  `,
-    [articleId, clusterId],
+    `INSERT INTO article_clusters (article_id, cluster_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+    [articleId, clusters[0].id],
   );
 }
 
