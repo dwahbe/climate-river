@@ -4,10 +4,13 @@ import dayjs from "dayjs";
 import { query, endPool } from "@/lib/db";
 import { categorizeAndStoreArticle } from "@/lib/categorizer";
 import { isClimateRelevant } from "@/lib/tagger";
+import { generateEmbedding, assignArticleToCluster } from "@/lib/clustering";
 import {
-  generateEmbedding,
-  CLUSTER_CONFIG,
-} from "@/lib/clustering";
+  canonical,
+  mapLimit,
+  cleanGoogleNewsTitle,
+  isValidArticleDate,
+} from "@/lib/utils";
 
 // ---------- Parser configured once (captures <source>, rich content) ----------
 type RssSourceField =
@@ -128,10 +131,6 @@ function extractPublisherFromGoogleItem(item: RssItem): {
   return {};
 }
 
-function cleanGoogleNewsTitle(title: string) {
-  return title.replace(/\s[-—]\s[^-—]+$/, "").trim();
-}
-
 function stripHtml(s: string) {
   return (s || "")
     .replace(/<[^>]*>/g, " ")
@@ -181,81 +180,6 @@ type SourceDef = {
   weight: number;
   slug: string;
 };
-function canonical(url: string) {
-  try {
-    const u = new URL(url);
-    [...u.searchParams.keys()].forEach((k) => {
-      if (/^utm_|^fbclid$|^gclid$|^mc_/i.test(k)) u.searchParams.delete(k);
-    });
-    u.hash = "";
-    return u.toString();
-  } catch {
-    return url;
-  }
-}
-function clusterKey(title: string) {
-  const t = (title || "")
-    .toLowerCase()
-    .normalize("NFKD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^a-z0-9\s]/g, " ");
-  const words = t.split(/\s+/).filter(Boolean);
-  const STOP = new Set([
-    "the",
-    "a",
-    "an",
-    "and",
-    "or",
-    "but",
-    "to",
-    "of",
-    "in",
-    "on",
-    "for",
-    "with",
-    "by",
-    "from",
-    "at",
-    "is",
-    "are",
-    "was",
-    "were",
-    "be",
-    "as",
-  ]);
-  const kept = words.filter((w) => !STOP.has(w) && w.length >= 3);
-  return kept.slice(0, 8).join("-");
-}
-
-async function mapLimit<T, R>(
-  items: T[],
-  limit: number,
-  fn: (t: T, idx: number) => Promise<R>,
-) {
-  const ret: R[] = new Array(items.length);
-  let i = 0,
-    active = 0;
-  return new Promise<R[]>((resolve, reject) => {
-    const next = () => {
-      if (i >= items.length && active === 0) return resolve(ret);
-      while (active < limit && i < items.length) {
-        const cur = i++;
-        active++;
-        fn(items[cur], cur)
-          .then((v) => (ret[cur] = v))
-          .catch(reject)
-          .finally(() => {
-            active--;
-            next();
-          });
-      }
-    };
-    next();
-  });
-}
-
-// Removed normalizeSource function - no longer needed since we fetch from database
-
 // ---------- Idempotent schema guard ----------
 async function ensureSchema() {
   await query(`
@@ -370,39 +294,6 @@ function parseDateMaybe(s?: string) {
   return d.isValid() ? d.toDate() : null;
 }
 
-// Validate that a date is reasonable for a news article (not future, not too old)
-function isValidArticleDate(date: Date | null): {
-  valid: boolean;
-  reason?: string;
-} {
-  if (!date) return { valid: false, reason: "missing date" };
-
-  const now = new Date();
-  const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
-  const oneMinuteFromNow = new Date(now.getTime() + 60 * 1000);
-
-  // Reject future dates (with 1 minute grace for clock skew)
-  if (date > oneMinuteFromNow) {
-    return { valid: false, reason: `future date: ${date.toISOString()}` };
-  }
-
-  // Warn if date is very close to now (within 30 seconds) - likely a fallback to NOW()
-  if (Math.abs(date.getTime() - now.getTime()) < 30 * 1000) {
-    return {
-      valid: false,
-      reason:
-        "date suspiciously close to current time (likely parsing failure)",
-    };
-  }
-
-  // Reject articles older than 30 days for RSS ingestion
-  if (date < thirtyDaysAgo) {
-    return { valid: false, reason: `too old: ${date.toISOString()}` };
-  }
-
-  return { valid: true };
-}
-
 async function insertArticle(
   sourceId: number,
   title: string,
@@ -476,130 +367,6 @@ async function insertArticle(
 // Update cluster metadata (lead article, size) when new articles are added
 // NOTE: Does NOT update score - that's handled by rescore.ts which has the
 // proper scoring algorithm with freshness decay, source weights, etc.
-async function updateClusterMetadata(clusterId: number) {
-  try {
-    await query(
-      `
-      INSERT INTO cluster_scores (cluster_id, lead_article_id, size, score)
-      SELECT
-        $1 as cluster_id,
-        (SELECT a.id
-         FROM articles a
-         JOIN article_clusters ac ON ac.article_id = a.id
-         WHERE ac.cluster_id = $1
-         ORDER BY a.published_at DESC, a.id DESC
-         LIMIT 1) as lead_article_id,
-        (SELECT COUNT(*)
-         FROM article_clusters
-         WHERE cluster_id = $1) as size,
-        0 as score
-      ON CONFLICT (cluster_id) DO UPDATE SET
-        lead_article_id = EXCLUDED.lead_article_id,
-        size = EXCLUDED.size,
-        updated_at = NOW()
-    `,
-      [clusterId],
-    );
-  } catch (error) {
-    console.error(
-      `Failed to update cluster metadata for cluster ${clusterId}:`,
-      error,
-    );
-    // Don't fail the whole process if metadata update fails
-  }
-}
-
-// Centroid-based semantic clustering with size cap.
-// Compares new article embedding against cluster centroids (AVG of member embeddings)
-// instead of individual members, preventing semantic drift.
-async function ensureSemanticClusterForArticle(
-  articleId: number,
-  title: string,
-  embedding?: string | null,
-) {
-  // Skip if already clustered (e.g. duplicate title returned existing article)
-  const existing = await query<{ cluster_id: number }>(
-    `SELECT cluster_id FROM article_clusters WHERE article_id = $1`,
-    [articleId],
-  );
-  if (existing.rows.length > 0) return;
-
-  // Resolve embedding: use passed value, or fetch from DB as fallback
-  let articleEmbedding = embedding;
-  if (!articleEmbedding) {
-    const articleResult = await query<{ embedding: string }>(
-      `SELECT embedding FROM articles WHERE id = $1 AND embedding IS NOT NULL`,
-      [articleId],
-    );
-    if (articleResult.rows.length === 0) {
-      console.log(`Article ${articleId} has no embedding, skipping clustering`);
-      return;
-    }
-    articleEmbedding = articleResult.rows[0].embedding;
-  }
-
-  // Find candidate clusters by comparing against cluster centroids
-  const candidates = await query<{
-    cluster_id: number;
-    similarity: number;
-    size: number;
-  }>(`
-    WITH cluster_centroids AS (
-      SELECT
-        ac.cluster_id,
-        COUNT(*)::int AS size,
-        AVG(a.embedding) AS centroid
-      FROM article_clusters ac
-      JOIN articles a ON a.id = ac.article_id
-      WHERE a.embedding IS NOT NULL
-        AND a.fetched_at >= now() - make_interval(days => $4)
-      GROUP BY ac.cluster_id
-      HAVING COUNT(*) < $2
-    )
-    SELECT
-      cluster_id,
-      1 - (centroid <=> $1::vector) AS similarity,
-      size
-    FROM cluster_centroids
-    WHERE 1 - (centroid <=> $1::vector) > $3
-    ORDER BY centroid <=> $1::vector
-    LIMIT 1
-  `, [
-    articleEmbedding,
-    CLUSTER_CONFIG.MAX_CLUSTER_SIZE,
-    CLUSTER_CONFIG.SIMILARITY_THRESHOLD,
-    CLUSTER_CONFIG.LOOKBACK_DAYS,
-  ]);
-
-  if (candidates.rows.length > 0) {
-    const best = candidates.rows[0];
-    console.log(
-      `Article ${articleId} matched cluster ${best.cluster_id} (centroid sim: ${best.similarity.toFixed(3)}, size: ${best.size})`,
-    );
-    await query(
-      `INSERT INTO article_clusters (article_id, cluster_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
-      [articleId, best.cluster_id],
-    );
-    await updateClusterMetadata(best.cluster_id);
-    return;
-  }
-
-  // No matching cluster — create singleton
-  const key = clusterKey(title) || `semantic-${Date.now()}`;
-  const cluster = await query<{ id: number }>(
-    `INSERT INTO clusters (key) VALUES ($1)
-     ON CONFLICT (key) DO UPDATE SET key = excluded.key RETURNING id`,
-    [key],
-  );
-  const clusterId = cluster.rows[0].id;
-  await query(
-    `INSERT INTO article_clusters (article_id, cluster_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
-    [articleId, clusterId],
-  );
-  console.log(`Created singleton cluster ${clusterId} for article ${articleId}`);
-  await updateClusterMetadata(clusterId);
-}
-
 // ---------- Source health tracking ----------
 async function updateSourceHealth(
   sourceId: number,
@@ -678,7 +445,9 @@ async function ingestFromFeed(feedUrl: string, sourceId: number, limit = 20) {
       inserted++;
       // Use semantic clustering instead of keyword-based clustering
       try {
-        await ensureSemanticClusterForArticle(result.id, title, result.embedding);
+        await assignArticleToCluster(result.id, title, {
+          embedding: result.embedding,
+        });
       } catch (error) {
         console.error(
           `  ❌ CLUSTERING FAILED for article ${result.id}: ${error instanceof Error ? error.message : String(error)}`,

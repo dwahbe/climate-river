@@ -3,7 +3,8 @@ import Parser from "rss-parser";
 import dayjs from "dayjs";
 import { query, endPool } from "@/lib/db";
 import { isClimateRelevant } from "@/lib/tagger";
-import { generateEmbedding, CLUSTER_CONFIG } from "@/lib/clustering";
+import { generateEmbedding, assignArticleToCluster } from "@/lib/clustering";
+import { canonical, mapLimit } from "@/lib/utils";
 
 type RssItem = {
   title?: string;
@@ -46,53 +47,6 @@ function slugify(input: string) {
     .slice(0, 80);
 }
 
-function canonical(url: string) {
-  try {
-    const u = new URL(url);
-    [...u.searchParams.keys()].forEach((k) => {
-      if (/^utm_|^fbclid$|^gclid$|^mc_/i.test(k)) u.searchParams.delete(k);
-    });
-    u.hash = "";
-    return u.toString();
-  } catch {
-    return url;
-  }
-}
-
-function clusterKey(title: string) {
-  const t = title
-    .toLowerCase()
-    .normalize("NFKD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^a-z0-9\s]/g, " ");
-  const words = t.split(/\s+/).filter(Boolean);
-  const SKIP = new Set([
-    "the",
-    "a",
-    "an",
-    "and",
-    "or",
-    "but",
-    "to",
-    "of",
-    "in",
-    "on",
-    "for",
-    "with",
-    "by",
-    "from",
-    "at",
-    "is",
-    "are",
-    "was",
-    "were",
-    "be",
-    "as",
-  ]);
-  const kept = words.filter((w) => !SKIP.has(w) && w.length >= 3);
-  return kept.slice(0, 8).join("-");
-}
-
 /** Google News sometimes links to news.google.com/... with a ?url= param. Extract it if present. */
 function resolveGoogleNewsLink(link: string) {
   try {
@@ -105,33 +59,6 @@ function resolveGoogleNewsLink(link: string) {
     // Ignore malformed URLs and fall back to the original link
   }
   return link;
-}
-
-async function mapLimit<T, R>(
-  items: T[],
-  limit: number,
-  fn: (t: T, idx: number) => Promise<R>,
-) {
-  const ret: R[] = new Array(items.length);
-  let i = 0;
-  let active = 0;
-  return new Promise<R[]>((resolve, reject) => {
-    const next = () => {
-      if (i >= items.length && active === 0) return resolve(ret);
-      while (active < limit && i < items.length) {
-        const cur = i++;
-        active++;
-        fn(items[cur], cur)
-          .then((v) => (ret[cur] = v))
-          .catch(reject)
-          .finally(() => {
-            active--;
-            next();
-          });
-      }
-    };
-    next();
-  });
 }
 
 // ------- minimal schema guards (safe if already run elsewhere) -------
@@ -231,64 +158,6 @@ async function insertArticle(
   return row.rows[0]?.id;
 }
 
-async function ensureClusterForArticle(articleId: number, title: string) {
-  // Check if article has an embedding for centroid-based clustering
-  const embResult = await query<{ embedding: string }>(
-    `SELECT embedding FROM articles WHERE id = $1 AND embedding IS NOT NULL`,
-    [articleId],
-  );
-
-  if (embResult.rows.length > 0) {
-    // Centroid-based semantic clustering (same as ingest.ts)
-    const candidates = await query<{
-      cluster_id: number;
-      similarity: number;
-      size: number;
-    }>(`
-      WITH cluster_centroids AS (
-        SELECT ac.cluster_id, COUNT(*)::int AS size, AVG(a.embedding) AS centroid
-        FROM article_clusters ac
-        JOIN articles a ON a.id = ac.article_id
-        WHERE a.embedding IS NOT NULL
-          AND a.fetched_at >= now() - make_interval(days => $4)
-        GROUP BY ac.cluster_id
-        HAVING COUNT(*) < $2
-      )
-      SELECT cluster_id, 1 - (centroid <=> $1::vector) AS similarity, size
-      FROM cluster_centroids
-      WHERE 1 - (centroid <=> $1::vector) > $3
-      ORDER BY centroid <=> $1::vector
-      LIMIT 1
-    `, [
-      embResult.rows[0].embedding,
-      CLUSTER_CONFIG.MAX_CLUSTER_SIZE,
-      CLUSTER_CONFIG.SIMILARITY_THRESHOLD,
-      CLUSTER_CONFIG.LOOKBACK_DAYS,
-    ]);
-
-    if (candidates.rows.length > 0) {
-      await query(
-        `INSERT INTO article_clusters (article_id, cluster_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
-        [articleId, candidates.rows[0].cluster_id],
-      );
-      return;
-    }
-  }
-
-  // Fallback: keyword-based clustering (for articles without embeddings)
-  const key = clusterKey(title);
-  if (!key) return;
-  const cluster = await query<{ id: number }>(
-    `INSERT INTO clusters (key) VALUES ($1)
-     ON CONFLICT (key) DO UPDATE SET key = excluded.key RETURNING id`,
-    [key],
-  );
-  await query(
-    `INSERT INTO article_clusters (article_id, cluster_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
-    [articleId, cluster.rows[0].id],
-  );
-}
-
 // ------- main work -------
 function googleNewsUrl(q: string) {
   const base = "https://news.google.com/rss/search";
@@ -355,7 +224,7 @@ async function ingestQuery(q: string, limitPerQuery = 25) {
     );
     if (id) {
       inserted++;
-      await ensureClusterForArticle(id, title);
+      await assignArticleToCluster(id, title);
     }
   }
 

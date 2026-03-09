@@ -4,7 +4,7 @@
 // 2. Merge similar clusters (centroid-to-centroid comparison)
 // 3. Create singleton clusters for remaining orphans
 import { query, endPool } from "@/lib/db";
-import { CLUSTER_CONFIG } from "@/lib/clustering";
+import { CLUSTER_CONFIG, findBestCluster, clusterKey } from "@/lib/clustering";
 
 /**
  * Find unclustered articles with embeddings and add them to the best matching
@@ -17,7 +17,8 @@ async function retroactivelyClusterArticles() {
     article_id: number;
     title: string;
     embedding: string;
-  }>(`
+  }>(
+    `
     SELECT a.id AS article_id, a.title, a.embedding::text AS embedding
     FROM articles a
     LEFT JOIN article_clusters ac ON a.id = ac.article_id
@@ -26,55 +27,27 @@ async function retroactivelyClusterArticles() {
       AND a.fetched_at >= now() - make_interval(days => $1)
     ORDER BY a.fetched_at DESC
     LIMIT 100
-  `, [CLUSTER_CONFIG.LOOKBACK_DAYS]);
+  `,
+    [CLUSTER_CONFIG.LOOKBACK_DAYS],
+  );
 
-  console.log(`  Found ${unclustered.length} unclustered articles with embeddings`);
+  console.log(
+    `  Found ${unclustered.length} unclustered articles with embeddings`,
+  );
 
   let addedCount = 0;
 
   for (const article of unclustered) {
-    // Compare against cluster centroids (not individual members)
-    const { rows: matches } = await query<{
-      cluster_id: number;
-      similarity: number;
-      size: number;
-    }>(`
-      WITH cluster_centroids AS (
-        SELECT
-          ac.cluster_id,
-          COUNT(*)::int AS size,
-          AVG(a.embedding) AS centroid
-        FROM article_clusters ac
-        JOIN articles a ON a.id = ac.article_id
-        WHERE a.embedding IS NOT NULL
-          AND a.fetched_at >= now() - make_interval(days => $3)
-        GROUP BY ac.cluster_id
-        HAVING COUNT(*) < $2
-      )
-      SELECT
-        cluster_id,
-        1 - (centroid <=> $1::vector) AS similarity,
-        size
-      FROM cluster_centroids
-      WHERE 1 - (centroid <=> $1::vector) > $4
-      ORDER BY centroid <=> $1::vector
-      LIMIT 1
-    `, [
-      article.embedding,
-      CLUSTER_CONFIG.MAX_CLUSTER_SIZE,
-      CLUSTER_CONFIG.LOOKBACK_DAYS,
-      CLUSTER_CONFIG.SIMILARITY_THRESHOLD,
-    ]);
+    const match = await findBestCluster(article.embedding);
 
-    if (matches.length > 0) {
-      const best = matches[0];
+    if (match) {
       await query(
         `INSERT INTO article_clusters (article_id, cluster_id)
          VALUES ($1, $2) ON CONFLICT DO NOTHING`,
-        [article.article_id, best.cluster_id],
+        [article.article_id, match.clusterId],
       );
       console.log(
-        `  ✓ Added article ${article.article_id} to cluster ${best.cluster_id} (centroid sim: ${(best.similarity * 100).toFixed(1)}%)`,
+        `  ✓ Added article ${article.article_id} to cluster ${match.clusterId} (centroid sim: ${(match.similarity * 100).toFixed(1)}%)`,
       );
       console.log(`    "${article.title.slice(0, 60)}..."`);
       addedCount++;
@@ -99,7 +72,8 @@ async function mergeSimilarClusters() {
     centroid_similarity: number;
     size1: number;
     size2: number;
-  }>(`
+  }>(
+    `
     WITH cluster_centroids AS (
       SELECT
         ac.cluster_id,
@@ -124,13 +98,17 @@ async function mergeSimilarClusters() {
       AND c1.size + c2.size <= $3
     ORDER BY c1.centroid <=> c2.centroid
     LIMIT 10
-  `, [
-    CLUSTER_CONFIG.LOOKBACK_DAYS,
-    CLUSTER_CONFIG.MERGE_THRESHOLD,
-    CLUSTER_CONFIG.MAX_CLUSTER_SIZE,
-  ]);
+  `,
+    [
+      CLUSTER_CONFIG.LOOKBACK_DAYS,
+      CLUSTER_CONFIG.MERGE_THRESHOLD,
+      CLUSTER_CONFIG.MAX_CLUSTER_SIZE,
+    ],
+  );
 
-  console.log(`  Found ${clusterPairs.length} cluster pairs that might need merging`);
+  console.log(
+    `  Found ${clusterPairs.length} cluster pairs that might need merging`,
+  );
 
   let mergedCount = 0;
 
@@ -146,18 +124,25 @@ async function mergeSimilarClusters() {
     );
 
     // Move articles from mergeCluster to keepCluster
-    await query(`
+    await query(
+      `
       UPDATE article_clusters
       SET cluster_id = $1
       WHERE cluster_id = $2
         AND article_id NOT IN (
           SELECT article_id FROM article_clusters WHERE cluster_id = $1
         )
-    `, [keepCluster, mergeCluster]);
+    `,
+      [keepCluster, mergeCluster],
+    );
 
     // Clean up merged cluster
-    await query("DELETE FROM article_clusters WHERE cluster_id = $1", [mergeCluster]);
-    await query("DELETE FROM cluster_scores WHERE cluster_id = $1", [mergeCluster]);
+    await query("DELETE FROM article_clusters WHERE cluster_id = $1", [
+      mergeCluster,
+    ]);
+    await query("DELETE FROM cluster_scores WHERE cluster_id = $1", [
+      mergeCluster,
+    ]);
     await query("DELETE FROM clusters WHERE id = $1", [mergeCluster]);
 
     mergedCount++;
@@ -177,7 +162,8 @@ async function createSingletonClusters() {
   const { rows: orphans } = await query<{
     article_id: number;
     title: string;
-  }>(`
+  }>(
+    `
     SELECT a.id as article_id, a.title
     FROM articles a
     LEFT JOIN article_clusters ac ON a.id = ac.article_id
@@ -185,19 +171,16 @@ async function createSingletonClusters() {
       AND a.embedding IS NOT NULL
       AND a.fetched_at >= now() - make_interval(days => $1)
     ORDER BY a.fetched_at DESC
-  `, [CLUSTER_CONFIG.LOOKBACK_DAYS]);
+  `,
+    [CLUSTER_CONFIG.LOOKBACK_DAYS],
+  );
 
   console.log(`  Found ${orphans.length} orphaned articles`);
 
   for (const article of orphans) {
     const key =
-      article.title
-        .toLowerCase()
-        .replace(/[^a-z0-9\s]/g, " ")
-        .split(/\s+/)
-        .filter(Boolean)
-        .slice(0, 6)
-        .join("-") || `singleton-${Date.now()}`;
+      clusterKey(article.title) ||
+      `singleton-${Date.now()}-${article.article_id}`;
 
     const { rows } = await query<{ id: number }>(
       `INSERT INTO clusters (key) VALUES ($1)
@@ -226,10 +209,11 @@ async function createSingletonClusters() {
  * NOTE: Does NOT update score - that's handled by rescore.ts which has the
  * proper scoring algorithm. We only update lead_article_id and size here.
  */
-async function updateClusterMetadata() {
+async function updateAllClusterMetadata() {
   console.log("\n📊 Updating cluster metadata...");
 
-  await query(`
+  await query(
+    `
     INSERT INTO cluster_scores (cluster_id, lead_article_id, size, score)
     SELECT
       ac.cluster_id,
@@ -249,7 +233,9 @@ async function updateClusterMetadata() {
       lead_article_id = EXCLUDED.lead_article_id,
       size = EXCLUDED.size,
       updated_at = NOW()
-  `, [CLUSTER_CONFIG.LOOKBACK_DAYS]);
+  `,
+    [CLUSTER_CONFIG.LOOKBACK_DAYS],
+  );
 
   console.log("  ✓ Cluster metadata updated");
 }
@@ -263,7 +249,7 @@ export async function run(opts: { closePool?: boolean } = {}) {
   const singletons = await createSingletonClusters();
 
   if (added > 0 || merged > 0 || singletons > 0) {
-    await updateClusterMetadata();
+    await updateAllClusterMetadata();
   }
 
   console.log("\n✅ Cluster maintenance complete!");

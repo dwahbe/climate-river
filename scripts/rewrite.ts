@@ -3,6 +3,7 @@ import { query, endPool } from "@/lib/db";
 import { isClimateRelevant } from "@/lib/tagger";
 import { generateText } from "ai";
 import { openai } from "@ai-sdk/openai";
+import { mapLimit } from "@/lib/utils";
 
 type Row = {
   id: number;
@@ -624,33 +625,6 @@ async function generateWithOpenAI(
 }
 
 /* ------------------------------- Runner -------------------------------- */
-
-async function mapLimit<T, R>(
-  items: T[],
-  limit: number,
-  fn: (t: T, i: number) => Promise<R>,
-) {
-  const ret: R[] = new Array(items.length);
-  let i = 0;
-  let active = 0;
-  return new Promise<R[]>((resolve, reject) => {
-    const next = () => {
-      if (i >= items.length && active === 0) return resolve(ret);
-      while (active < limit && i < items.length) {
-        const cur = i++;
-        active++;
-        fn(items[cur], cur)
-          .then((v) => (ret[cur] = v))
-          .catch(reject)
-          .finally(() => {
-            active--;
-            next();
-          });
-      }
-    };
-    next();
-  });
-}
 
 async function fetchBatch(limit = 40) {
   const { rows } = await query<Row>(

@@ -220,8 +220,12 @@ async function logClusterHealth(): Promise<ClusterHealth> {
 
   const h = rows[0];
   console.log("\n📊 Cluster Health:");
-  console.log(`   Total: ${h.total_clusters} | Singletons: ${h.singletons} | 2-5: ${h.small} | 6-15: ${h.medium} | 16-25: ${h.large} | 25+: ${h.oversized}`);
-  console.log(`   Max size: ${h.max_size} | Embedding coverage: ${h.embedded_pct}%`);
+  console.log(
+    `   Total: ${h.total_clusters} | Singletons: ${h.singletons} | 2-5: ${h.small} | 6-15: ${h.medium} | 16-25: ${h.large} | 25+: ${h.oversized}`,
+  );
+  console.log(
+    `   Max size: ${h.max_size} | Embedding coverage: ${h.embedded_pct}%`,
+  );
 
   if (h.oversized > 0) {
     console.warn(`   ⚠️  ${h.oversized} clusters exceed max size!`);
