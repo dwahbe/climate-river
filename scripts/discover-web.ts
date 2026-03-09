@@ -10,7 +10,12 @@ import {
   CURATED_CLIMATE_OUTLETS,
   type ClimateOutlet,
 } from "@/config/climateOutlets";
-import { generateEmbedding, CLUSTER_CONFIG } from "@/lib/clustering";
+import { generateEmbedding, assignArticleToCluster } from "@/lib/clustering";
+import {
+  canonical,
+  cleanGoogleNewsTitle,
+  isValidArticleDate,
+} from "@/lib/utils";
 
 // Tavily client for cost-effective site-specific search
 // Only initialize if API key exists (SDK throws on empty key)
@@ -1028,20 +1033,6 @@ async function searchGoogleNewsRSS(query: string): Promise<WebSearchResult[]> {
   }
 }
 
-const GOOGLE_TRACKING_PARAMS = new Set([
-  "utm_source",
-  "utm_medium",
-  "utm_campaign",
-  "utm_term",
-  "utm_content",
-  "ved",
-  "usg",
-  "oc",
-  "si",
-  "gclid",
-  "fbclid",
-]);
-
 function extractRealUrl(googleUrl: string): string {
   try {
     const url = new URL(googleUrl);
@@ -1087,12 +1078,12 @@ function resolveGoogleNewsCandidate(
   if (!trimmed) return null;
 
   if (trimmed.startsWith("http")) {
-    return stripTrackingParams(trimmed);
+    return canonical(trimmed);
   }
 
   const decoded = maybeDecodeBase64Url(trimmed);
   if (decoded?.startsWith("http")) {
-    return stripTrackingParams(decoded);
+    return canonical(decoded);
   }
 
   return null;
@@ -1114,54 +1105,12 @@ function maybeDecodeBase64Url(value: string): string | null {
   }
 }
 
-function stripTrackingParams(rawUrl: string): string {
-  try {
-    const parsed = new URL(rawUrl);
-    for (const param of GOOGLE_TRACKING_PARAMS) {
-      parsed.searchParams.delete(param);
-    }
-    parsed.hash = "";
-    return parsed.toString();
-  } catch {
-    return rawUrl;
-  }
-}
-
 function normalizePublishedDate(
   value: string | Date | null | undefined,
 ): Date | null {
   if (!value) return null;
   const date = value instanceof Date ? value : new Date(value);
   return Number.isNaN(date.getTime()) ? null : date;
-}
-
-// Validate that a date is reasonable for a news article
-function isValidArticleDate(date: Date | null): {
-  valid: boolean;
-  reason?: string;
-} {
-  if (!date) return { valid: false, reason: "missing date" };
-
-  const now = new Date();
-  const sevenDaysAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-  const oneMinuteFromNow = new Date(now.getTime() + 60 * 1000);
-
-  // Reject future dates (with 1 minute grace for clock skew)
-  if (date > oneMinuteFromNow) {
-    return { valid: false, reason: `future date: ${date.toISOString()}` };
-  }
-
-  // Warn if date is very close to now (within 30 seconds) - likely a fallback to NOW()
-  if (Math.abs(date.getTime() - now.getTime()) < 30 * 1000) {
-    return { valid: false, reason: "date suspiciously close to current time" };
-  }
-
-  // Web discovery should only get articles from the last 7 days
-  if (date < sevenDaysAgo) {
-    return { valid: false, reason: `too old: ${date.toISOString()}` };
-  }
-
-  return { valid: true };
 }
 
 function isResultFresh(result: WebSearchResult, cutoffMs: number): boolean {
@@ -1172,11 +1121,6 @@ function isResultFresh(result: WebSearchResult, cutoffMs: number): boolean {
     return false;
   }
   return publishedAt.getTime() >= cutoffMs;
-}
-
-function cleanGoogleNewsTitle(title: string): string {
-  // Remove trailing " - Source Name" from Google News titles
-  return title.replace(/\s-\s[^-]+$/, "").trim();
 }
 
 function parseContentForArticles(content: string): WebSearchResult[] {
@@ -1586,7 +1530,7 @@ async function insertWebDiscoveredArticle(
   try {
     // Validate the published date
     const publishedDate = normalizePublishedDate(result.publishedDate);
-    const dateValidation = isValidArticleDate(publishedDate);
+    const dateValidation = isValidArticleDate(publishedDate, 7);
 
     if (!dateValidation.valid) {
       console.log(
@@ -1596,7 +1540,10 @@ async function insertWebDiscoveredArticle(
     }
 
     // Generate embedding for semantic clustering
-    const embedding = await generateEmbedding(result.title, result.snippet ?? undefined);
+    const embedding = await generateEmbedding(
+      result.title,
+      result.snippet ?? undefined,
+    );
 
     const { rows } = await query<{ id: number }>(
       `
@@ -1664,65 +1611,6 @@ async function getOrCreateWebDiscoverySource(): Promise<number> {
   return rows[0].id;
 }
 
-async function ensureClusterForArticle(articleId: number, title: string) {
-  // Try centroid-based semantic clustering first
-  const embResult = await query<{ embedding: string }>(
-    `SELECT embedding FROM articles WHERE id = $1 AND embedding IS NOT NULL`,
-    [articleId],
-  );
-
-  if (embResult.rows.length > 0) {
-    const candidates = await query<{
-      cluster_id: number;
-      similarity: number;
-    }>(`
-      WITH cluster_centroids AS (
-        SELECT ac.cluster_id, COUNT(*)::int AS size, AVG(a.embedding) AS centroid
-        FROM article_clusters ac
-        JOIN articles a ON a.id = ac.article_id
-        WHERE a.embedding IS NOT NULL
-          AND a.fetched_at >= now() - make_interval(days => $4)
-        GROUP BY ac.cluster_id
-        HAVING COUNT(*) < $2
-      )
-      SELECT cluster_id, 1 - (centroid <=> $1::vector) AS similarity
-      FROM cluster_centroids
-      WHERE 1 - (centroid <=> $1::vector) > $3
-      ORDER BY centroid <=> $1::vector
-      LIMIT 1
-    `, [
-      embResult.rows[0].embedding,
-      CLUSTER_CONFIG.MAX_CLUSTER_SIZE,
-      CLUSTER_CONFIG.SIMILARITY_THRESHOLD,
-      CLUSTER_CONFIG.LOOKBACK_DAYS,
-    ]);
-
-    if (candidates.rows.length > 0) {
-      await query(
-        `INSERT INTO article_clusters (article_id, cluster_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
-        [articleId, candidates.rows[0].cluster_id],
-      );
-      return;
-    }
-  }
-
-  // Fallback: keyword-based singleton (same stop-word approach as ingest/discover)
-  const STOP = new Set(["the","a","an","and","or","but","to","of","in","on","for","with","by","from","at","is","are","was","were","be","as"]);
-  const words = title.toLowerCase().normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9\s]/g, " ").split(/\s+/).filter(Boolean);
-  const clusterKey = words.filter((w) => !STOP.has(w) && w.length >= 3).slice(0, 8).join("-") || `article-${articleId}`;
-
-  const { rows: clusters } = await query<{ id: number }>(
-    `INSERT INTO clusters (key, created_at) VALUES ($1, NOW())
-     ON CONFLICT (key) DO UPDATE SET key = EXCLUDED.key RETURNING id`,
-    [clusterKey],
-  );
-
-  await query(
-    `INSERT INTO article_clusters (article_id, cluster_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
-    [articleId, clusters[0].id],
-  );
-}
-
 type DiscoverySegmentStats = {
   inserted: number;
   scanned: number;
@@ -1775,7 +1663,7 @@ async function tryInsertDiscoveredArticle(
     return false;
   }
 
-  await ensureClusterForArticle(articleId, result.title);
+  await assignArticleToCluster(articleId, result.title);
 
   try {
     await categorizeAndStoreArticle(

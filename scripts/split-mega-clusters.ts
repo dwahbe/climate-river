@@ -3,16 +3,15 @@
 // Usage: bun scripts/split-mega-clusters.ts [--dry-run] [--threshold 25]
 
 import { query, endPool } from "@/lib/db";
-import {
-  agglomerativeCluster,
-  CLUSTER_CONFIG,
-} from "@/lib/clustering";
+import { agglomerativeCluster, CLUSTER_CONFIG } from "@/lib/clustering";
 
 const args = process.argv.slice(2);
 const dryRun = args.includes("--dry-run");
 const thresholdIdx = args.indexOf("--threshold");
 const sizeThreshold =
-  thresholdIdx >= 0 ? parseInt(args[thresholdIdx + 1], 10) : CLUSTER_CONFIG.MAX_CLUSTER_SIZE;
+  thresholdIdx >= 0
+    ? parseInt(args[thresholdIdx + 1], 10)
+    : CLUSTER_CONFIG.MAX_CLUSTER_SIZE;
 
 function parseEmbedding(raw: string): number[] {
   if (!raw) return [];
@@ -32,13 +31,16 @@ async function run() {
     cluster_id: number;
     size: number;
     lead_title: string;
-  }>(`
+  }>(
+    `
     SELECT cs.cluster_id, cs.size,
       (SELECT a.title FROM articles a WHERE a.id = cs.lead_article_id) AS lead_title
     FROM cluster_scores cs
     WHERE cs.size > $1
     ORDER BY cs.size DESC
-  `, [sizeThreshold]);
+  `,
+    [sizeThreshold],
+  );
 
   if (megaClusters.length === 0) {
     console.log("✅ No oversized clusters found.");
@@ -48,7 +50,9 @@ async function run() {
 
   console.log(`\nFound ${megaClusters.length} oversized clusters:\n`);
   for (const mc of megaClusters) {
-    console.log(`  Cluster ${mc.cluster_id}: ${mc.size} articles — "${mc.lead_title?.slice(0, 70)}..."`);
+    console.log(
+      `  Cluster ${mc.cluster_id}: ${mc.size} articles — "${mc.lead_title?.slice(0, 70)}..."`,
+    );
   }
 
   let totalSplit = 0;
@@ -56,26 +60,33 @@ async function run() {
   let totalSingletons = 0;
 
   for (const mc of megaClusters) {
-    console.log(`\n--- Splitting cluster ${mc.cluster_id} (${mc.size} articles) ---`);
+    console.log(
+      `\n--- Splitting cluster ${mc.cluster_id} (${mc.size} articles) ---`,
+    );
 
     // Fetch all articles with embeddings
     const { rows: articles } = await query<{
       article_id: number;
       title: string;
       embedding: string | null;
-    }>(`
+    }>(
+      `
       SELECT a.id AS article_id, a.title, a.embedding::text
       FROM article_clusters ac
       JOIN articles a ON ac.article_id = a.id
       WHERE ac.cluster_id = $1
       ORDER BY a.published_at DESC
-    `, [mc.cluster_id]);
+    `,
+      [mc.cluster_id],
+    );
 
     // Separate embedded vs non-embedded
     const embedded = articles.filter((a) => a.embedding);
     const noEmbed = articles.filter((a) => !a.embedding);
 
-    console.log(`  ${embedded.length} with embeddings, ${noEmbed.length} without`);
+    console.log(
+      `  ${embedded.length} with embeddings, ${noEmbed.length} without`,
+    );
 
     // Re-cluster embedded articles
     const parsed = embedded.map((a) => ({
@@ -89,12 +100,18 @@ async function run() {
       CLUSTER_CONFIG.MAX_CLUSTER_SIZE,
     );
 
-    console.log(`  → ${subclusters.length} sub-clusters + ${noEmbed.length} singletons`);
+    console.log(
+      `  → ${subclusters.length} sub-clusters + ${noEmbed.length} singletons`,
+    );
 
     if (dryRun) {
       for (const [i, sc] of subclusters.entries()) {
-        const titles = sc.slice(0, 3).map((idx) => `"${embedded[idx].title.slice(0, 60)}..."`);
-        console.log(`    Sub-cluster ${i + 1} (${sc.length} articles): ${titles.join(", ")}`);
+        const titles = sc
+          .slice(0, 3)
+          .map((idx) => `"${embedded[idx].title.slice(0, 60)}..."`);
+        console.log(
+          `    Sub-cluster ${i + 1} (${sc.length} articles): ${titles.join(", ")}`,
+        );
       }
       totalSplit++;
       totalNewClusters += subclusters.length;
@@ -138,17 +155,25 @@ async function run() {
     }
 
     // Delete old cluster associations and metadata
-    await query(`DELETE FROM article_clusters WHERE cluster_id = $1`, [mc.cluster_id]);
-    await query(`DELETE FROM cluster_scores WHERE cluster_id = $1`, [mc.cluster_id]);
+    await query(`DELETE FROM article_clusters WHERE cluster_id = $1`, [
+      mc.cluster_id,
+    ]);
+    await query(`DELETE FROM cluster_scores WHERE cluster_id = $1`, [
+      mc.cluster_id,
+    ]);
     await query(`DELETE FROM clusters WHERE id = $1`, [mc.cluster_id]);
 
     totalSplit++;
-    console.log(`  ✓ Cluster ${mc.cluster_id} split into ${subclusters.length} clusters + ${noEmbed.length} singletons`);
+    console.log(
+      `  ✓ Cluster ${mc.cluster_id} split into ${subclusters.length} clusters + ${noEmbed.length} singletons`,
+    );
   }
 
   console.log(`\n${"═".repeat(50)}`);
   console.log(`✅ Split ${totalSplit} mega-clusters`);
-  console.log(`   Created ${totalNewClusters} new clusters + ${totalSingletons} singletons`);
+  console.log(
+    `   Created ${totalNewClusters} new clusters + ${totalSingletons} singletons`,
+  );
   console.log(`\n💡 Run "bun scripts/rescore.ts" to recalculate scores.`);
 
   await endPool();

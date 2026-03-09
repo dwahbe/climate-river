@@ -13,22 +13,31 @@ const daysIdx = args.indexOf("--days");
 const days = daysIdx >= 0 ? parseInt(args[daysIdx + 1], 10) : 14;
 
 async function run() {
-  console.log(`📦 Backfill Embeddings (limit: ${limit}, days: ${days}, dry-run: ${dryRun})`);
+  console.log(
+    `📦 Backfill Embeddings (limit: ${limit}, days: ${days}, dry-run: ${dryRun})`,
+  );
   console.log("═".repeat(50));
 
   // Count articles missing embeddings
-  const { rows: [stats] } = await query<{
+  const {
+    rows: [stats],
+  } = await query<{
     missing: number;
     total: number;
-  }>(`
+  }>(
+    `
     SELECT
       COUNT(*) FILTER (WHERE embedding IS NULL) AS missing,
       COUNT(*) AS total
     FROM articles
     WHERE fetched_at >= now() - make_interval(days => $1)
-  `, [days]);
+  `,
+    [days],
+  );
 
-  console.log(`\n  ${stats.missing} of ${stats.total} recent articles (${days}d) missing embeddings`);
+  console.log(
+    `\n  ${stats.missing} of ${stats.total} recent articles (${days}d) missing embeddings`,
+  );
 
   if (stats.missing === 0) {
     console.log("✅ All recent articles have embeddings.");
@@ -41,14 +50,17 @@ async function run() {
     id: number;
     title: string;
     dek: string | null;
-  }>(`
+  }>(
+    `
     SELECT id, title, dek
     FROM articles
     WHERE embedding IS NULL
       AND fetched_at >= now() - make_interval(days => $1)
     ORDER BY published_at DESC
     LIMIT $2
-  `, [days, limit]);
+  `,
+    [days, limit],
+  );
 
   console.log(`  Processing ${articles.length} articles...\n`);
 
@@ -56,7 +68,8 @@ async function run() {
     for (const a of articles.slice(0, 10)) {
       console.log(`  [dry-run] Would embed: "${a.title.slice(0, 70)}..."`);
     }
-    if (articles.length > 10) console.log(`  ... and ${articles.length - 10} more`);
+    if (articles.length > 10)
+      console.log(`  ... and ${articles.length - 10} more`);
     await endPool();
     return;
   }
@@ -67,12 +80,15 @@ async function run() {
   for (let i = 0; i < articles.length; i++) {
     const article = articles[i];
     try {
-      const embedding = await generateEmbedding(article.title, article.dek ?? undefined);
+      const embedding = await generateEmbedding(
+        article.title,
+        article.dek ?? undefined,
+      );
       if (embedding.length > 0) {
-        await query(
-          `UPDATE articles SET embedding = $1 WHERE id = $2`,
-          [JSON.stringify(embedding), article.id],
-        );
+        await query(`UPDATE articles SET embedding = $1 WHERE id = $2`, [
+          JSON.stringify(embedding),
+          article.id,
+        ]);
         success++;
       } else {
         failed++;
@@ -89,14 +105,20 @@ async function run() {
 
     // Progress logging
     if ((i + 1) % 50 === 0) {
-      console.log(`  Progress: ${i + 1}/${articles.length} (${success} ok, ${failed} failed)`);
+      console.log(
+        `  Progress: ${i + 1}/${articles.length} (${success} ok, ${failed} failed)`,
+      );
     }
   }
 
   console.log(`\n${"═".repeat(50)}`);
   console.log(`✅ Backfill complete: ${success} embedded, ${failed} failed`);
-  console.log(`   Remaining: ${stats.missing - success} articles still missing embeddings`);
-  console.log(`\n💡 Run "bun scripts/cluster-maintenance.ts" to cluster newly-embedded articles.`);
+  console.log(
+    `   Remaining: ${stats.missing - success} articles still missing embeddings`,
+  );
+  console.log(
+    `\n💡 Run "bun scripts/cluster-maintenance.ts" to cluster newly-embedded articles.`,
+  );
 
   await endPool();
 }

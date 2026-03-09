@@ -4,6 +4,7 @@ import {
   cosineSimilarity,
   computeCentroid,
   agglomerativeCluster,
+  clusterKey,
   CLUSTER_CONFIG,
 } from "../clustering";
 
@@ -117,11 +118,64 @@ describe("agglomerativeCluster", () => {
   });
 });
 
+describe("clusterKey", () => {
+  it("generates a key from significant words", () => {
+    assert.equal(clusterKey("Climate Bill Passes Congress"), "climate-bill-passes-congress");
+  });
+
+  it("strips stop words", () => {
+    const key = clusterKey("The Impact of Climate on the World");
+    assert.ok(!key.includes("the"));
+    assert.ok(!key.includes("of"));
+    assert.ok(!key.includes("on"));
+    assert.ok(key.includes("impact"));
+    assert.ok(key.includes("climate"));
+    assert.ok(key.includes("world"));
+  });
+
+  it("removes accents and special characters", () => {
+    assert.equal(clusterKey("Élections françaises: résultats"), "elections-francaises-resultats");
+  });
+
+  it("filters short words (< 3 chars)", () => {
+    const key = clusterKey("US EU UK Climate Deal Is On");
+    assert.ok(!key.includes("us"));
+    assert.ok(!key.includes("eu"));
+    assert.ok(!key.includes("uk"));
+    assert.ok(key.includes("climate"));
+    assert.ok(key.includes("deal"));
+  });
+
+  it("limits to 8 words max", () => {
+    const longTitle = "One Two Three Four Five Six Seven Eight Nine Ten Eleven Twelve";
+    const words = clusterKey(longTitle).split("-");
+    assert.ok(words.length <= 8);
+  });
+
+  it("returns empty string for all stop words", () => {
+    assert.equal(clusterKey("The And Or But"), "");
+  });
+
+  it("returns empty string for empty/null input", () => {
+    assert.equal(clusterKey(""), "");
+    assert.equal(clusterKey(null as unknown as string), "");
+  });
+
+  it("handles punctuation-heavy titles", () => {
+    const key = clusterKey("Biden's $2B Climate Plan: What's Next?");
+    assert.ok(key.includes("biden"));
+    assert.ok(key.includes("climate"));
+    assert.ok(key.includes("plan"));
+  });
+});
+
 describe("CLUSTER_CONFIG", () => {
   it("has reasonable thresholds", () => {
     assert.ok(CLUSTER_CONFIG.SIMILARITY_THRESHOLD > 0.5);
     assert.ok(CLUSTER_CONFIG.SIMILARITY_THRESHOLD < 0.9);
-    assert.ok(CLUSTER_CONFIG.MERGE_THRESHOLD > CLUSTER_CONFIG.SIMILARITY_THRESHOLD);
+    assert.ok(
+      CLUSTER_CONFIG.MERGE_THRESHOLD > CLUSTER_CONFIG.SIMILARITY_THRESHOLD,
+    );
     assert.ok(CLUSTER_CONFIG.MAX_CLUSTER_SIZE >= 10);
     assert.ok(CLUSTER_CONFIG.MAX_CLUSTER_SIZE <= 50);
     assert.ok(CLUSTER_CONFIG.LOOKBACK_DAYS >= 3);
