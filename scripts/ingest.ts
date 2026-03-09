@@ -437,11 +437,12 @@ async function insertArticle(
     console.log(
       `⚠️  Duplicate title detected: "${title.substring(0, 50)}..." - skipping (existing ID: ${titleCheck.rows[0].id})`,
     );
-    return titleCheck.rows[0].id; // Return existing article ID
+    return { id: titleCheck.rows[0].id, embedding: null }; // Existing article, no new embedding
   }
 
   // Generate embedding for the article
   const embedding = await generateEmbedding(title, dek ?? undefined);
+  const embeddingJson = embedding.length > 0 ? JSON.stringify(embedding) : null;
 
   const row = await query<{ id: number }>(
     `
@@ -465,10 +466,11 @@ async function insertArticle(
       author ?? null,
       pub.name ?? null,
       pub.homepage ?? null,
-      embedding.length > 0 ? JSON.stringify(embedding) : null,
+      embeddingJson,
     ],
   );
-  return row.rows[0]?.id;
+  const id = row.rows[0]?.id;
+  return id ? { id, embedding: embeddingJson } : null;
 }
 
 // Update cluster metadata (lead article, size) when new articles are added
@@ -479,30 +481,22 @@ async function updateClusterMetadata(clusterId: number) {
     await query(
       `
       INSERT INTO cluster_scores (cluster_id, lead_article_id, size, score)
-      SELECT 
+      SELECT
         $1 as cluster_id,
-        (SELECT a.id 
+        (SELECT a.id
          FROM articles a
          JOIN article_clusters ac ON ac.article_id = a.id
          WHERE ac.cluster_id = $1
          ORDER BY a.published_at DESC, a.id DESC
          LIMIT 1) as lead_article_id,
-        (SELECT COUNT(*) 
-         FROM article_clusters 
+        (SELECT COUNT(*)
+         FROM article_clusters
          WHERE cluster_id = $1) as size,
-        0 as score  -- Placeholder; rescore.ts calculates proper score
+        0 as score
       ON CONFLICT (cluster_id) DO UPDATE SET
-        lead_article_id = (SELECT a.id 
-                          FROM articles a
-                          JOIN article_clusters ac ON ac.article_id = a.id
-                          WHERE ac.cluster_id = $1
-                          ORDER BY a.published_at DESC, a.id DESC
-                          LIMIT 1),
-        size = (SELECT COUNT(*) 
-                FROM article_clusters 
-                WHERE cluster_id = $1),
+        lead_article_id = EXCLUDED.lead_article_id,
+        size = EXCLUDED.size,
         updated_at = NOW()
-        -- NOTE: Do NOT update score here - rescore.ts handles that
     `,
       [clusterId],
     );
@@ -521,25 +515,28 @@ async function updateClusterMetadata(clusterId: number) {
 async function ensureSemanticClusterForArticle(
   articleId: number,
   title: string,
+  embedding?: string | null,
 ) {
-  // Check if already clustered
+  // Skip if already clustered (e.g. duplicate title returned existing article)
   const existing = await query<{ cluster_id: number }>(
     `SELECT cluster_id FROM article_clusters WHERE article_id = $1`,
     [articleId],
   );
   if (existing.rows.length > 0) return;
 
-  // Get article embedding
-  const articleResult = await query<{ embedding: string }>(
-    `SELECT embedding FROM articles WHERE id = $1 AND embedding IS NOT NULL`,
-    [articleId],
-  );
-  if (articleResult.rows.length === 0) {
-    console.log(`Article ${articleId} has no embedding, skipping clustering`);
-    return;
+  // Resolve embedding: use passed value, or fetch from DB as fallback
+  let articleEmbedding = embedding;
+  if (!articleEmbedding) {
+    const articleResult = await query<{ embedding: string }>(
+      `SELECT embedding FROM articles WHERE id = $1 AND embedding IS NOT NULL`,
+      [articleId],
+    );
+    if (articleResult.rows.length === 0) {
+      console.log(`Article ${articleId} has no embedding, skipping clustering`);
+      return;
+    }
+    articleEmbedding = articleResult.rows[0].embedding;
   }
-
-  const articleEmbedding = articleResult.rows[0].embedding;
 
   // Find candidate clusters by comparing against cluster centroids
   const candidates = await query<{
@@ -668,7 +665,7 @@ async function ingestFromFeed(feedUrl: string, sourceId: number, limit = 20) {
     }
 
     const url = canonical(link);
-    const articleId = await insertArticle(
+    const result = await insertArticle(
       sourceId,
       title,
       url,
@@ -677,25 +674,25 @@ async function ingestFromFeed(feedUrl: string, sourceId: number, limit = 20) {
       author,
       pub,
     );
-    if (articleId) {
+    if (result) {
       inserted++;
       // Use semantic clustering instead of keyword-based clustering
       try {
-        await ensureSemanticClusterForArticle(articleId, title);
+        await ensureSemanticClusterForArticle(result.id, title, result.embedding);
       } catch (error) {
         console.error(
-          `  ❌ CLUSTERING FAILED for article ${articleId}: ${error instanceof Error ? error.message : String(error)}`,
+          `  ❌ CLUSTERING FAILED for article ${result.id}: ${error instanceof Error ? error.message : String(error)}`,
         );
         // Don't fail the whole feed if clustering fails — cluster-maintenance cron will pick it up
       }
 
       // Categorize the article using hybrid approach
       try {
-        await categorizeAndStoreArticle(articleId, title, dek || undefined);
+        await categorizeAndStoreArticle(result.id, title, dek || undefined);
         console.log(`  📝 Categorized article: ${title.slice(0, 50)}...`);
       } catch (error) {
         console.error(
-          `  ❌ CATEGORIZATION FAILED for article ${articleId}: ${error instanceof Error ? error.message : String(error)}`,
+          `  ❌ CATEGORIZATION FAILED for article ${result.id}: ${error instanceof Error ? error.message : String(error)}`,
         );
         console.error(`     Title: "${title}"`);
         // Don't fail the whole ingestion if categorization fails — categorize cron will retry

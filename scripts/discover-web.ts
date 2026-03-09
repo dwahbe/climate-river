@@ -1706,10 +1706,10 @@ async function ensureClusterForArticle(articleId: number, title: string) {
     }
   }
 
-  // Fallback: keyword-based singleton
-  const titleWords = title.toLowerCase().split(" ");
-  const keywords = titleWords.filter((w) => w.length > 4).slice(0, 3);
-  const clusterKey = keywords.join("-") || `article-${articleId}`;
+  // Fallback: keyword-based singleton (same stop-word approach as ingest/discover)
+  const STOP = new Set(["the","a","an","and","or","but","to","of","in","on","for","with","by","from","at","is","are","was","were","be","as"]);
+  const words = title.toLowerCase().normalize("NFKD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9\s]/g, " ").split(/\s+/).filter(Boolean);
+  const clusterKey = words.filter((w) => !STOP.has(w) && w.length >= 3).slice(0, 8).join("-") || `article-${articleId}`;
 
   const { rows: clusters } = await query<{ id: number }>(
     `INSERT INTO clusters (key, created_at) VALUES ($1, NOW())
