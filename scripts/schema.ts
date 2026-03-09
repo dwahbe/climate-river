@@ -524,6 +524,22 @@ export async function run() {
   `);
   console.log(`Backfilled ${backfilled} article search vectors`);
 
+  // --- Cluster health diagnostic view ------------------------------------------
+  await query(`
+    CREATE OR REPLACE VIEW cluster_health AS
+    SELECT
+      ac.cluster_id,
+      COUNT(*) AS size,
+      MIN(a.published_at)::date AS oldest,
+      MAX(a.published_at)::date AS newest,
+      COUNT(*) FILTER (WHERE a.embedding IS NOT NULL) AS embedded_count,
+      COUNT(DISTINCT a.source_id) AS distinct_sources
+    FROM article_clusters ac
+    JOIN articles a ON a.id = ac.article_id
+    GROUP BY ac.cluster_id
+    ORDER BY size DESC;
+  `);
+
   console.log("Schema ensured ✅");
 }
 
