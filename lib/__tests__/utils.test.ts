@@ -5,6 +5,8 @@ import {
   mapLimit,
   cleanGoogleNewsTitle,
   isValidArticleDate,
+  extractPublisherFromRssItem,
+  decodeHtmlEntities,
 } from "../utils";
 
 describe("canonical", () => {
@@ -174,5 +176,90 @@ describe("isValidArticleDate", () => {
     const result = isValidArticleDate(justNow);
     assert.equal(result.valid, false);
     assert.ok(result.reason?.includes("suspiciously close"));
+  });
+});
+
+describe("decodeHtmlEntities", () => {
+  it("decodes numeric entities", () => {
+    assert.equal(decodeHtmlEntities("&#38;"), "&");
+    assert.equal(decodeHtmlEntities("&#x26;"), "&");
+  });
+
+  it("decodes named entities", () => {
+    assert.equal(decodeHtmlEntities("&amp; &lt; &gt;"), "& < >");
+    assert.equal(decodeHtmlEntities("&quot;hi&apos;"), '"hi\'');
+  });
+
+  it("handles empty/falsy input", () => {
+    assert.equal(decodeHtmlEntities(""), "");
+  });
+});
+
+describe("extractPublisherFromRssItem", () => {
+  it("extracts name from string source", () => {
+    const result = extractPublisherFromRssItem({
+      source: "The New York Times",
+    });
+    assert.equal(result.name, "The New York Times");
+    assert.equal(result.homepage, undefined);
+  });
+
+  it("extracts name and homepage from object source with $ url", () => {
+    const result = extractPublisherFromRssItem({
+      source: {
+        _: "Reuters",
+        $: { url: "https://www.reuters.com" },
+      },
+    });
+    assert.equal(result.name, "Reuters");
+    assert.equal(result.homepage, "https://www.reuters.com");
+  });
+
+  it("extracts from object source with # text key", () => {
+    const result = extractPublisherFromRssItem({
+      source: { "#": "Bloomberg", url: "https://bloomberg.com" },
+    });
+    assert.equal(result.name, "Bloomberg");
+    assert.equal(result.homepage, "https://bloomberg.com");
+  });
+
+  it("extracts first element from array source", () => {
+    const result = extractPublisherFromRssItem({
+      source: ["The Guardian", "Other Source"],
+    });
+    assert.equal(result.name, "The Guardian");
+  });
+
+  it("falls back to title suffix when no source element", () => {
+    const result = extractPublisherFromRssItem({
+      title: "Climate Bill Passes Senate — Politico",
+    });
+    assert.equal(result.name, "Politico");
+  });
+
+  it("returns empty when no source and no title suffix", () => {
+    const result = extractPublisherFromRssItem({
+      title: "Climate Bill Passes Senate",
+    });
+    assert.deepEqual(result, {});
+  });
+
+  it("returns empty for empty item", () => {
+    assert.deepEqual(extractPublisherFromRssItem({}), {});
+  });
+
+  it("decodes HTML entities in source name", () => {
+    const result = extractPublisherFromRssItem({
+      source: "The Wall Street Journal &amp; More",
+    });
+    assert.equal(result.name, "The Wall Street Journal & More");
+  });
+
+  it("returns homepage only when name is missing but url exists", () => {
+    const result = extractPublisherFromRssItem({
+      source: { $: { url: "https://example.com" } },
+    });
+    assert.equal(result.name, undefined);
+    assert.equal(result.homepage, "https://example.com");
   });
 });

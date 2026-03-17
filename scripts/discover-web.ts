@@ -15,6 +15,7 @@ import {
   canonical,
   cleanGoogleNewsTitle,
   isValidArticleDate,
+  extractPublisherFromRssItem,
 } from "@/lib/utils";
 
 // Tavily client for cost-effective site-specific search
@@ -34,6 +35,7 @@ type WebSearchResult = {
   snippet: string;
   publishedDate?: string;
   source?: string;
+  publisherHomepage?: string;
 };
 
 type WebBrowseStats = {
@@ -1000,6 +1002,9 @@ async function searchGoogleNewsRSS(query: string): Promise<WebSearchResult[]> {
       "User-Agent": "ClimateRiverBot/0.1 (+https://climateriver.org)",
     },
     requestOptions: { timeout: 10000 },
+    customFields: {
+      item: [["source", "source", { keepArray: true }]],
+    },
   });
 
   try {
@@ -1017,12 +1022,16 @@ async function searchGoogleNewsRSS(query: string): Promise<WebSearchResult[]> {
       // Extract the real URL from Google News redirect
       const realUrl = extractRealUrl(item.link);
 
+      // Extract publisher from RSS <source> element (same as ingest pipeline)
+      const publisher = extractPublisherFromRssItem(item);
+
       results.push({
         title: cleanGoogleNewsTitle(item.title),
         url: realUrl,
         snippet: item.contentSnippet || item.content || "",
         publishedDate: item.isoDate || item.pubDate,
-        source: extractSourceFromUrl(realUrl),
+        source: publisher.name || extractSourceFromUrl(realUrl),
+        publisherHomepage: publisher.homepage,
       });
     }
 
@@ -1423,13 +1432,26 @@ async function getOrCreateSourceForResult(
   const host = hostFromUrl(result.url);
 
   if (!host || HOST_BLOCKLIST.has(host)) {
-    // Only use result.source if it's a real name, not a domain
     const sourceName = result.source?.trim();
+    const pubHost = result.publisherHomepage
+      ? hostFromUrl(result.publisherHomepage)
+      : null;
+
+    // If we have a real publisher homepage (e.g. from RSS <source> element),
+    // resolve the source using that host instead of the blocklisted URL
+    if (pubHost && !HOST_BLOCKLIST.has(pubHost)) {
+      // Recurse with a synthetic result pointing to the publisher homepage
+      return getOrCreateSourceForResult(
+        { ...result, url: result.publisherHomepage!, publisherHomepage: undefined },
+        fallbackSourceId,
+      );
+    }
+
     return {
       sourceId: fallbackSourceId,
       publisherName:
         sourceName && !looksLikeDomain(sourceName) ? sourceName : null,
-      publisherHomepage: null,
+      publisherHomepage: result.publisherHomepage ?? null,
     };
   }
 

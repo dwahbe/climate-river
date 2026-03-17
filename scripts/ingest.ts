@@ -10,21 +10,12 @@ import {
   mapLimit,
   cleanGoogleNewsTitle,
   isValidArticleDate,
+  decodeHtmlEntities,
+  extractPublisherFromRssItem,
+  type RssSourceField,
 } from "@/lib/utils";
 
 // ---------- Parser configured once (captures <source>, rich content) ----------
-type RssSourceField =
-  | string
-  | {
-      ["#"]?: string;
-      _?: string;
-      text?: string;
-      value?: string;
-      $?: {
-        url?: string;
-      };
-      url?: string;
-    };
 
 type RssItem = {
   title?: string;
@@ -89,47 +80,7 @@ function unGoogleLink(link: string) {
   }
 }
 
-function extractPublisherFromGoogleItem(item: RssItem): {
-  name?: string;
-  homepage?: string;
-} {
-  const src = item.source;
-  const first = Array.isArray(src) ? src[0] : src;
-  if (typeof first === "string") {
-    const trimmed = first.trim();
-    if (trimmed) return { name: decodeHtmlEntities(trimmed) };
-  } else if (first && typeof first === "object") {
-    const rawName =
-      (typeof first["#"] === "string" && first["#"]) ||
-      (typeof first._ === "string" && first._) ||
-      (typeof first.text === "string" && first.text) ||
-      (typeof first.value === "string" && first.value) ||
-      undefined;
-    const homepage =
-      (typeof first.$?.url === "string" && first.$.url) ||
-      (typeof first.url === "string" && first.url) ||
-      undefined;
-    if (rawName || homepage) {
-      return {
-        name: rawName ? decodeHtmlEntities(rawName.trim()) : undefined,
-        homepage,
-      };
-    }
-  }
-
-  // Fallback: title suffix like "Title — Publisher"
-  if (item.title) {
-    const m = item.title.match(/\s[-—]\s([^]+)$/);
-    if (m) {
-      const name = decodeHtmlEntities(m[1].trim());
-      const homepage = /\b[a-z0-9.-]+\.[a-z]{2,}\b/i.test(name)
-        ? `https://${name}`
-        : undefined;
-      return { name, homepage };
-    }
-  }
-  return {};
-}
+const extractPublisherFromGoogleItem = extractPublisherFromRssItem;
 
 function stripHtml(s: string) {
   return (s || "")
@@ -138,19 +89,6 @@ function stripHtml(s: string) {
     .trim();
 }
 
-function decodeHtmlEntities(s: string) {
-  return (s || "")
-    .replace(/&#(\d+);/g, (_, dec) => String.fromCharCode(parseInt(dec, 10)))
-    .replace(/&#x([0-9a-fA-F]+);/g, (_, hex) =>
-      String.fromCharCode(parseInt(hex, 16)),
-    )
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"')
-    .replace(/&apos;/g, "'")
-    .replace(/&nbsp;/g, " ");
-}
 function pick(...vals: Array<string | undefined | null>) {
   for (const v of vals) if (v && v.trim()) return v;
   return "";
