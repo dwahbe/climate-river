@@ -24,6 +24,9 @@ bun run discover-web # Web discovery via Tavily
 bun run cleanup      # Remove old articles/clusters
 bun run cleanup:dry  # Dry-run cleanup (no DB writes)
 bun run schema       # Init/validate DB schema
+bun run rewrite:eval # Run model comparison eval (profiles in config/evalProfiles.ts)
+bun run rewrite:eval -- --sample-size 10 --profiles structured-gpt-4.1-mini
+bun run rewrite:eval:report -- --out-dir tmp/rewrite-evals/<dir>  # Generate final report
 ```
 
 ## Tech Stack
@@ -76,6 +79,7 @@ All cron/admin endpoints require either:
 - **Hybrid search**: full-text + semantic search with Reciprocal Rank Fusion
 - **ISR** on homepage (5min revalidation)
 - **Pipeline logging** to database for health monitoring
+- **Model eval framework**: config-driven rewrite comparison (`config/evalProfiles.ts` for profiles/pricing, `lib/evalProviders.ts` for AI SDK provider resolution)
 
 ## Conventions
 

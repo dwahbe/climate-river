@@ -14,6 +14,8 @@
     "schema": "bun --env-file=.env.local scripts/schema.ts",
     "discover-web": "bun --env-file=.env.local scripts/discover-web.ts",
     "rewrite": "bun --env-file=.env.local scripts/rewrite.ts",
+    "rewrite:eval": "bun --env-file=.env.local scripts/rewrite-bakeoff.ts",
+    "rewrite:eval:report": "bun --env-file=.env.local scripts/rewrite-bakeoff.ts --mode report",
     "categorize": "bun --env-file=.env.local scripts/categorize.ts",
     "prefetch": "bun --env-file=.env.local scripts/prefetch-content.ts",
     "cleanup": "bun --env-file=.env.local scripts/cleanup.ts",

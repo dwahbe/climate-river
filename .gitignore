@@ -12,6 +12,7 @@ dist/
 coverage/
 .nyc_output/
 *.tsbuildinfo
+tmp/
 
 # ── Caches ───────────────────────────────────────────────────
 .cache/
