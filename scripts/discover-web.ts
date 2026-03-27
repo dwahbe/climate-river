@@ -293,6 +293,31 @@ function hostFromUrl(url: string | undefined): string | null {
   }
 }
 
+const COMPOUND_TLDS = new Set([
+  "co.uk",
+  "org.uk",
+  "ac.uk",
+  "com.au",
+  "org.au",
+  "co.nz",
+  "org.in",
+  "co.in",
+  "co.za",
+  "com.br",
+  "co.jp",
+]);
+
+/** Extract registrable root domain: "assets.canarymedia.com" → "canarymedia.com" */
+export function rootDomain(host: string): string {
+  const parts = host.split(".");
+  if (parts.length <= 2) return host;
+  const lastTwo = parts.slice(-2).join(".");
+  if (COMPOUND_TLDS.has(lastTwo)) {
+    return parts.slice(-3).join(".");
+  }
+  return lastTwo;
+}
+
 // Common TLDs and country codes to strip when humanizing hostnames
 const COMMON_TLDS = new Set([
   // Generic TLDs
@@ -1462,7 +1487,8 @@ async function getOrCreateSourceForResult(
   const homepage = `https://${host}`;
 
   // Check in-memory cache first to avoid DB round-trip
-  const cached = sourceCache.get(host);
+  const root = rootDomain(host);
+  const cached = sourceCache.get(host) ?? sourceCache.get(root);
   if (cached) {
     return {
       sourceId: cached,
@@ -1473,8 +1499,11 @@ async function getOrCreateSourceForResult(
 
   const slug = slugifyHost(host);
   const feedUrl = `web://${host}`;
+  const rootSlug = slugifyHost(root);
+  const rootFeedUrl = `web://${root}`;
 
-  // Check if we already have this source with a proper name
+  // Check if we already have this source (also match root domain to prevent
+  // subdomain duplicates like assets.canarymedia.com vs www.canarymedia.com)
   const existing = await query<{ id: number; name: string }>(
     `
       SELECT id, name
@@ -1482,15 +1511,19 @@ async function getOrCreateSourceForResult(
       WHERE slug = $1
          OR feed_url = $2
          OR lower(coalesce(homepage_url, '')) LIKE $3
+         OR slug = $4
+         OR feed_url = $5
+         OR lower(coalesce(homepage_url, '')) LIKE $6
       ORDER BY weight DESC
       LIMIT 1
     `,
-    [slug, feedUrl, `%${host}%`],
+    [slug, feedUrl, `%${host}%`, rootSlug, rootFeedUrl, `%${root}%`],
   );
 
   if (existing.rows[0]) {
     const sourceId = existing.rows[0].id;
     sourceCache.set(host, sourceId);
+    sourceCache.set(root, sourceId);
 
     // The source table has a proper name, so don't override with publisher_name
     // Let the query's coalesce fall back to the source name
@@ -1538,6 +1571,7 @@ async function getOrCreateSourceForResult(
   }
 
   sourceCache.set(host, sourceId);
+  sourceCache.set(root, sourceId);
 
   // New source was just created with publisherName, so set it on the article too
   return {
