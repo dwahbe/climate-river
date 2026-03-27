@@ -36,6 +36,7 @@ type RssItem = {
 const parser = new Parser<RssItem>({
   headers: {
     "User-Agent": "ClimateRiverBot/0.1 (+https://climateriver.org)",
+    Accept: "application/rss+xml, application/xml, text/xml, */*",
   },
   requestOptions: { timeout: 20000 },
   customFields: {
