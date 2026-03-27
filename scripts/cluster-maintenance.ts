@@ -220,8 +220,9 @@ async function updateAllClusterMetadata() {
       (SELECT a.id
        FROM articles a
        JOIN article_clusters ac2 ON ac2.article_id = a.id
+       LEFT JOIN sources s ON s.id = a.source_id
        WHERE ac2.cluster_id = ac.cluster_id
-       ORDER BY a.published_at DESC, a.id DESC
+       ORDER BY COALESCE(s.weight, 3) DESC, a.published_at DESC, a.id DESC
        LIMIT 1) as lead_article_id,
       COUNT(*) as size,
       0 as score

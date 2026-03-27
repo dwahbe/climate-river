@@ -80,8 +80,10 @@ export async function run(opts: { closePool?: boolean } = {}) {
       SELECT
         article_id,
         cluster_id,
-        -- article_score: give MUCH more weight to freshness
-        (0.40 * editorial_q) + (0.60 * fresh) AS article_score
+        -- article_score: freshness-heavy for cluster ranking & pool strength
+        (0.40 * editorial_q) + (0.60 * fresh) AS article_score,
+        -- lead_score: quality-heavy for lead article selection (Techmeme-style)
+        (0.80 * editorial_q) + (0.20 * fresh) AS lead_score
       FROM art_scored
     ),
     clust AS (
@@ -116,11 +118,12 @@ export async function run(opts: { closePool?: boolean } = {}) {
         ) AS coverage,
         -- cluster freshness with bounds to prevent overflow
         GREATEST(0.0001, EXP( LN(0.5) * LEAST(EXTRACT(EPOCH FROM (now() - c.latest_pub)) / ($2 * ${HOUR}), 10) )) AS fresh,
-        -- lead article by article_score
+        -- lead article by editorial quality (source weight, author, dek)
+        -- with freshness only as tiebreaker
         (SELECT af.article_id
            FROM art_final af
           WHERE af.cluster_id = c.cluster_id
-          ORDER BY af.article_score DESC NULLS LAST
+          ORDER BY af.lead_score DESC NULLS LAST
           LIMIT 1) AS lead_article_id,
         -- pooled strength for a soft boost
         (SELECT COALESCE(SUM(af.article_score),0)
