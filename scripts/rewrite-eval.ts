@@ -506,7 +506,11 @@ export function validateDraft(
       );
     }
   } else if (draftWords < 6) {
-    return failValidation("too_short", `Rewrite too short (${draftWords} words)`, t);
+    return failValidation(
+      "too_short",
+      `Rewrite too short (${draftWords} words)`,
+      t,
+    );
   }
 
   const draftNumbers = extractNumericTokens(t);
@@ -609,7 +613,11 @@ export function validateDraft(
   return { ok: true, code: null, message: null };
 }
 
-function buildSourceText(row: Row, contentSnippet: string | null, previewExcerpt: string | null) {
+function buildSourceText(
+  row: Row,
+  contentSnippet: string | null,
+  previewExcerpt: string | null,
+) {
   return [
     row.title,
     row.dek,
@@ -618,18 +626,24 @@ function buildSourceText(row: Row, contentSnippet: string | null, previewExcerpt
     row.content_text,
     row.content_html,
   ]
-    .filter((part): part is string => typeof part === "string" && part.trim().length > 0)
+    .filter(
+      (part): part is string =>
+        typeof part === "string" && part.trim().length > 0,
+    )
     .join(" ");
 }
 
-export async function fetchRewriteCandidates(opts: {
-  limit?: number;
-  pendingOnly?: boolean;
-  recentDays?: number;
-} = {}) {
+export async function fetchRewriteCandidates(
+  opts: {
+    limit?: number;
+    pendingOnly?: boolean;
+    recentDays?: number;
+  } = {},
+) {
   const limit = opts.limit ?? 40;
   const recentDays = Math.max(1, Math.floor(opts.recentDays ?? 21));
-  const pendingClause = opts.pendingOnly === false ? "" : "and a.rewritten_title is null";
+  const pendingClause =
+    opts.pendingOnly === false ? "" : "and a.rewritten_title is null";
 
   const { rows } = await query<Row>(
     `
@@ -815,7 +829,10 @@ export async function executeRewriteProfile(
   prepared: PreparedRewriteCandidate,
   profile: EvalProfile,
 ): Promise<RewriteExecutionResult> {
-  const firstGeneration = await generateWithProfile(prepared.promptInput, profile);
+  const firstGeneration = await generateWithProfile(
+    prepared.promptInput,
+    profile,
+  );
   const firstDraft = firstGeneration.text || "";
   const firstValidation = validateDraft(
     prepared.row.title,
@@ -839,10 +856,14 @@ export async function executeRewriteProfile(
     };
   }
 
-  const retryGeneration = await generateWithProfile(prepared.promptInput, profile, {
-    promptVariant: profile.retryPromptVariant,
-    systemPrompt: buildRetrySystemPrompt(profile.retryPromptVariant),
-  });
+  const retryGeneration = await generateWithProfile(
+    prepared.promptInput,
+    profile,
+    {
+      promptVariant: profile.retryPromptVariant,
+      systemPrompt: buildRetrySystemPrompt(profile.retryPromptVariant),
+    },
+  );
   const retryDraft = retryGeneration.text || "";
   const retryValidation = validateDraft(
     prepared.row.title,

@@ -155,7 +155,9 @@ export function stringifyCsv(
   columns: string[],
 ) {
   const header = columns.map(csvEscape).join(",");
-  const body = rows.map((row) => columns.map((column) => csvEscape(row[column])).join(","));
+  const body = rows.map((row) =>
+    columns.map((column) => csvEscape(row[column])).join(","),
+  );
   return [header, ...body].join("\n") + "\n";
 }
 
@@ -210,7 +212,9 @@ export function parseCsv(raw: string): Array<Record<string, string>> {
 
   const [header, ...data] = rows;
   return data.map((values) =>
-    Object.fromEntries(header.map((column, idx) => [column, values[idx] ?? ""])),
+    Object.fromEntries(
+      header.map((column, idx) => [column, values[idx] ?? ""]),
+    ),
   );
 }
 
@@ -299,7 +303,7 @@ function toBakeoffRecord(
       : result.firstAttempt.validation.code,
     retryFailureCode: result.retryAttempt?.validation.ok
       ? null
-      : result.retryAttempt?.validation.code ?? null,
+      : (result.retryAttempt?.validation.code ?? null),
     finalFailureCode: result.finalAttempt.validation.ok
       ? null
       : result.finalAttempt.validation.code,
@@ -500,7 +504,9 @@ function buildAutoSummaryMarkdown(records: BakeoffResultRecord[]) {
 
   lines.push("", "## Failure Breakdown", "");
   for (const pid of profileIds) {
-    lines.push(`- **${pid}**: ${topFailureCounts(summaries.get(pid)!.failureCounts) || "none"}`);
+    lines.push(
+      `- **${pid}**: ${topFailureCounts(summaries.get(pid)!.failureCounts) || "none"}`,
+    );
   }
 
   return lines.join("\n") + "\n";
@@ -510,15 +516,19 @@ export function summarizeHumanReview(
   reviewRows: Array<Record<string, string>>,
   blindKey: BlindKeyEntry[],
 ) {
-  const blindLookup = new Map(blindKey.map((entry) => [entry.articleId, entry]));
+  const blindLookup = new Map(
+    blindKey.map((entry) => [entry.articleId, entry]),
+  );
   const wins = new Map<string, number>();
   const accuracyFails = new Map<string, number>();
 
   for (const entry of blindKey) {
     if (!wins.has(entry.candidateA)) wins.set(entry.candidateA, 0);
     if (!wins.has(entry.candidateB)) wins.set(entry.candidateB, 0);
-    if (!accuracyFails.has(entry.candidateA)) accuracyFails.set(entry.candidateA, 0);
-    if (!accuracyFails.has(entry.candidateB)) accuracyFails.set(entry.candidateB, 0);
+    if (!accuracyFails.has(entry.candidateA))
+      accuracyFails.set(entry.candidateA, 0);
+    if (!accuracyFails.has(entry.candidateB))
+      accuracyFails.set(entry.candidateB, 0);
   }
 
   let scored = 0;
@@ -531,10 +541,16 @@ export function summarizeHumanReview(
     if (!blind) continue;
 
     if (row.accuracy_a.trim().toLowerCase() === "fail") {
-      accuracyFails.set(blind.candidateA, (accuracyFails.get(blind.candidateA) ?? 0) + 1);
+      accuracyFails.set(
+        blind.candidateA,
+        (accuracyFails.get(blind.candidateA) ?? 0) + 1,
+      );
     }
     if (row.accuracy_b.trim().toLowerCase() === "fail") {
-      accuracyFails.set(blind.candidateB, (accuracyFails.get(blind.candidateB) ?? 0) + 1);
+      accuracyFails.set(
+        blind.candidateB,
+        (accuracyFails.get(blind.candidateB) ?? 0) + 1,
+      );
     }
 
     const winner = row.winner.trim().toUpperCase();
@@ -546,8 +562,10 @@ export function summarizeHumanReview(
       continue;
     }
 
-    if (winner === "A") wins.set(blind.candidateA, (wins.get(blind.candidateA) ?? 0) + 1);
-    if (winner === "B") wins.set(blind.candidateB, (wins.get(blind.candidateB) ?? 0) + 1);
+    if (winner === "A")
+      wins.set(blind.candidateA, (wins.get(blind.candidateA) ?? 0) + 1);
+    if (winner === "B")
+      wins.set(blind.candidateB, (wins.get(blind.candidateB) ?? 0) + 1);
   }
 
   return { wins, accuracyFails, scored, ties };
@@ -616,7 +634,8 @@ function parseCliArgs(argv: string[]): CliOptions {
     match = parseCliArg(argv, i, "--sample-size");
     if (match) {
       const parsed = Number(match.value);
-      if (Number.isFinite(parsed)) opts.sampleSize = Math.max(1, Math.floor(parsed));
+      if (Number.isFinite(parsed))
+        opts.sampleSize = Math.max(1, Math.floor(parsed));
       i += match.skip;
       continue;
     }
@@ -624,7 +643,8 @@ function parseCliArgs(argv: string[]): CliOptions {
     match = parseCliArg(argv, i, "--window-days");
     if (match) {
       const parsed = Number(match.value);
-      if (Number.isFinite(parsed)) opts.windowDays = Math.max(1, Math.floor(parsed));
+      if (Number.isFinite(parsed))
+        opts.windowDays = Math.max(1, Math.floor(parsed));
       i += match.skip;
       continue;
     }
@@ -632,7 +652,8 @@ function parseCliArgs(argv: string[]): CliOptions {
     match = parseCliArg(argv, i, "--concurrency");
     if (match) {
       const parsed = Number(match.value);
-      if (Number.isFinite(parsed)) opts.concurrency = Math.max(1, Math.floor(parsed));
+      if (Number.isFinite(parsed))
+        opts.concurrency = Math.max(1, Math.floor(parsed));
       i += match.skip;
       continue;
     }
@@ -646,7 +667,10 @@ function parseCliArgs(argv: string[]): CliOptions {
 
     match = parseCliArg(argv, i, "--profiles");
     if (match) {
-      opts.profiles = match.value.split(",").map((s) => s.trim()).filter(Boolean);
+      opts.profiles = match.value
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean);
       i += match.skip;
       continue;
     }
@@ -686,7 +710,9 @@ function resolveReviewPair(
 ): [string, string] {
   if (opts.reviewA && opts.reviewB) return [opts.reviewA, opts.reviewB];
   if (profileIds.length >= 2) return [profileIds[0], profileIds[1]];
-  throw new Error("Blind review requires at least 2 profiles (or use --review-a / --review-b)");
+  throw new Error(
+    "Blind review requires at least 2 profiles (or use --review-a / --review-b)",
+  );
 }
 
 async function loadEvalSample(
@@ -738,11 +764,7 @@ async function writeArtifacts(
     "utf8",
   );
 
-  await writeFile(
-    path.join(outDir, "outputs.jsonl"),
-    toJsonl(records),
-    "utf8",
-  );
+  await writeFile(path.join(outDir, "outputs.jsonl"), toJsonl(records), "utf8");
 
   const columns = comparisonColumns(profileIds);
   const comparisonRows = buildComparisonRows(records, profileIds);
@@ -780,7 +802,10 @@ async function generateEval(opts: CliOptions) {
   const outDir = opts.outDir || defaultOutDir();
   const profiles = resolveProfiles(opts);
   const sample = await loadEvalSample(opts.sampleSize, opts.windowDays);
-  const reviewPair = resolveReviewPair(opts, profiles.map((p) => p.id));
+  const reviewPair = resolveReviewPair(
+    opts,
+    profiles.map((p) => p.id),
+  );
 
   console.log(
     `🧪 Running rewrite eval on ${sample.length} articles across ${profiles.length} profiles...`,
@@ -801,11 +826,16 @@ async function generateEval(opts: CliOptions) {
 
 async function reportEval(opts: CliOptions) {
   if (!opts.outDir) {
-    throw new Error("report mode requires --out-dir pointing at an existing eval directory");
+    throw new Error(
+      "report mode requires --out-dir pointing at an existing eval directory",
+    );
   }
   const outDir = opts.outDir;
   const outputsRaw = await readFile(path.join(outDir, "outputs.jsonl"), "utf8");
-  const blindKeyRaw = await readFile(path.join(outDir, "blind-key.json"), "utf8");
+  const blindKeyRaw = await readFile(
+    path.join(outDir, "blind-key.json"),
+    "utf8",
+  );
   const reviewRaw = await readFile(path.join(outDir, "review.csv"), "utf8");
 
   const records = parseJsonl<BakeoffResultRecord>(outputsRaw);
@@ -818,7 +848,9 @@ async function reportEval(opts: CliOptions) {
     "utf8",
   );
 
-  console.log(`✅ Final report written to ${path.join(outDir, "summary.final.md")}`);
+  console.log(
+    `✅ Final report written to ${path.join(outDir, "summary.final.md")}`,
+  );
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

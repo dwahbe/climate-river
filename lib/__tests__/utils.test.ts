@@ -187,7 +187,7 @@ describe("decodeHtmlEntities", () => {
 
   it("decodes named entities", () => {
     assert.equal(decodeHtmlEntities("&amp; &lt; &gt;"), "& < >");
-    assert.equal(decodeHtmlEntities("&quot;hi&apos;"), '"hi\'');
+    assert.equal(decodeHtmlEntities("&quot;hi&apos;"), "\"hi'");
   });
 
   it("handles empty/falsy input", () => {

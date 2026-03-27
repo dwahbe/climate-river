@@ -120,7 +120,10 @@ describe("agglomerativeCluster", () => {
 
 describe("clusterKey", () => {
   it("generates a key from significant words", () => {
-    assert.equal(clusterKey("Climate Bill Passes Congress"), "climate-bill-passes-congress");
+    assert.equal(
+      clusterKey("Climate Bill Passes Congress"),
+      "climate-bill-passes-congress",
+    );
   });
 
   it("strips stop words", () => {
@@ -134,7 +137,10 @@ describe("clusterKey", () => {
   });
 
   it("removes accents and special characters", () => {
-    assert.equal(clusterKey("Élections françaises: résultats"), "elections-francaises-resultats");
+    assert.equal(
+      clusterKey("Élections françaises: résultats"),
+      "elections-francaises-resultats",
+    );
   });
 
   it("filters short words (< 3 chars)", () => {
@@ -147,7 +153,8 @@ describe("clusterKey", () => {
   });
 
   it("limits to 8 words max", () => {
-    const longTitle = "One Two Three Four Five Six Seven Eight Nine Ten Eleven Twelve";
+    const longTitle =
+      "One Two Three Four Five Six Seven Eight Nine Ten Eleven Twelve";
     const words = clusterKey(longTitle).split("-");
     assert.ok(words.length <= 8);
   });

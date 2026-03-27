@@ -10,9 +10,7 @@ import {
   type BakeoffResultRecord,
 } from "../rewrite-bakeoff";
 
-function record(
-  overrides: Partial<BakeoffResultRecord>,
-): BakeoffResultRecord {
+function record(overrides: Partial<BakeoffResultRecord>): BakeoffResultRecord {
   return {
     articleId: 42,
     sourceName: "Climate Wire",
@@ -83,7 +81,8 @@ describe("review artifact helpers", () => {
       record({
         articleId: 42,
         profileId: "profile-b",
-        finalDraft: "EPA finalizes rule requiring utilities to cut emissions 80% by 2032",
+        finalDraft:
+          "EPA finalizes rule requiring utilities to cut emissions 80% by 2032",
       }),
     ];
 
@@ -91,10 +90,14 @@ describe("review artifact helpers", () => {
     assert.equal(review.rows.length, 1);
     assert.equal(review.blindKey.length, 1);
     assert.ok(
-      [review.blindKey[0].candidateA, review.blindKey[0].candidateB].includes("profile-a"),
+      [review.blindKey[0].candidateA, review.blindKey[0].candidateB].includes(
+        "profile-a",
+      ),
     );
     assert.ok(
-      [review.blindKey[0].candidateA, review.blindKey[0].candidateB].includes("profile-b"),
+      [review.blindKey[0].candidateA, review.blindKey[0].candidateB].includes(
+        "profile-b",
+      ),
     );
   });
 

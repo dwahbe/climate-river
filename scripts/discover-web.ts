@@ -1442,7 +1442,11 @@ async function getOrCreateSourceForResult(
     if (pubHost && !HOST_BLOCKLIST.has(pubHost)) {
       // Recurse with a synthetic result pointing to the publisher homepage
       return getOrCreateSourceForResult(
-        { ...result, url: result.publisherHomepage!, publisherHomepage: undefined },
+        {
+          ...result,
+          url: result.publisherHomepage!,
+          publisherHomepage: undefined,
+        },
         fallbackSourceId,
       );
     }

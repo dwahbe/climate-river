@@ -1,10 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 
-import {
-  computeRankChanges,
-  type RawRow,
-} from "../leaderboardRepository";
+import { computeRankChanges, type RawRow } from "../leaderboardRepository";
 
 function row(overrides: Partial<RawRow> & Pick<RawRow, "rank_key">): RawRow {
   return {
@@ -88,9 +85,7 @@ describe("computeRankChanges", () => {
   });
 
   it("does not expose rankKey in returned entries", () => {
-    const current = [
-      row({ rank_key: "host:example.com", name: "Example" }),
-    ];
+    const current = [row({ rank_key: "host:example.com", name: "Example" })];
 
     const entries = computeRankChanges(current, []);
 

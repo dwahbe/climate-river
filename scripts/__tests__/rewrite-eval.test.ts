@@ -88,7 +88,11 @@ describe("rewrite-eval validation", () => {
       "CEO Andy Jassy says Amazon will produce 100 million units next year under the new climate product plan";
     const draft =
       "Amazon will produce 100M units next year under new climate product plan";
-    const result = validateDraft("Amazon climate product plan", draft, ctx(false, source));
+    const result = validateDraft(
+      "Amazon climate product plan",
+      draft,
+      ctx(false, source),
+    );
     assert.equal(result.ok, false);
     assert.equal(result.code, "missing_attribution");
   });
@@ -99,7 +103,10 @@ describe("rewrite-eval validation", () => {
     const result = validateDraft(
       "Climate report",
       draft,
-      ctx(false, "A new report says global clean energy investment rose sharply"),
+      ctx(
+        false,
+        "A new report says global clean energy investment rose sharply",
+      ),
     );
     assert.equal(result.ok, false);
     assert.equal(result.code, "vague_topic_summary");
