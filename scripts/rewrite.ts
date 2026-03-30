@@ -1,9 +1,29 @@
 // scripts/rewrite.ts
 import { query, endPool } from "@/lib/db";
+import {
+  ATTRIBUTION_REQUIRED_SOURCE_PATTERNS,
+  ATTRIBUTION_TRIGGER_PATTERNS,
+  CLICKBAIT_PATTERNS,
+  POLITICAL_FIGURES,
+  VAGUE_PATTERNS,
+  WEAK_PATTERNS,
+  WEAK_PRIORITIZATION_PATTERNS,
+  buildRetrySystemPrompt,
+  buildSourceQuantContext,
+  buildSystemPrompt,
+  buildUserPrompt,
+  containsQuantifier,
+  extractContentSnippet,
+  extractNumericTokens,
+  hasAttribution,
+  sanitizeHeadline,
+  type PromptInput,
+  type ValidationContext,
+} from "@/lib/rewriteShared";
 import { isClimateRelevant } from "@/lib/tagger";
-import { generateText } from "ai";
-import { openai } from "@ai-sdk/openai";
 import { mapLimit } from "@/lib/utils";
+import { openai } from "@ai-sdk/openai";
+import { generateText } from "ai";
 
 type Row = {
   id: number;
@@ -16,361 +36,7 @@ type Row = {
   published_at: string | null;
 };
 
-/* ------------------------- Content Extraction with Safety Checks ------------------------- */
-
-/**
- * Extract a meaningful snippet from article content with comprehensive safety checks
- * Prioritizes first few paragraphs (the lede) while filtering out paywalls and garbage
- */
-export function extractContentSnippet(
-  contentText: string | null,
-  contentHtml: string | null,
-  maxChars = 600,
-  articleId?: number,
-): string | null {
-  const text = contentText || contentHtml;
-  if (!text) return null;
-
-  // Strip HTML tags if present
-  let cleaned = text.replace(/<[^>]+>/g, " "); // TODO: Use a HTML parser to strip tags
-  cleaned = cleaned.replace(/\s+/g, " ").trim();
-
-  // 🛡️ SAFETY CHECK 1: Minimum viable length
-  const idLabel = articleId ? `[${articleId}] ` : "";
-  if (cleaned.length < 100) {
-    console.warn(`⚠️  ${idLabel}Content too short (<100 chars), skipping`);
-    return null;
-  }
-
-  // 🛡️ SAFETY CHECK 2: Detect paywall language (require 2+ distinct matches
-  // to avoid false positives from words like "premium" or "member" in articles)
-  const paywallPatterns = [
-    /subscribe/i,
-    /subscription/i,
-    /sign in/i,
-    /member/i,
-    /premium/i,
-    /paywall/i,
-  ];
-  const firstPart = cleaned.slice(0, 200);
-  const paywallMatches = paywallPatterns.filter((p) => p.test(firstPart));
-  if (paywallMatches.length >= 2) {
-    console.warn(
-      `⚠️  ${idLabel}Paywall detected (${paywallMatches.length} signals): "${firstPart.slice(0, 80)}..."`,
-    );
-    return null;
-  }
-
-  // 🛡️ SAFETY CHECK 3: Word count sanity
-  const words = cleaned.split(/\s+/).filter((w) => w.length > 0);
-  if (words.length < 30) {
-    console.warn(`⚠️  ${idLabel}Content too few words (<30), skipping`);
-    return null;
-  }
-
-  // 🛡️ SAFETY CHECK 4: Uniqueness ratio (detect repetitive error pages)
-  const uniqueWords = new Set(words.map((w) => w.toLowerCase()));
-  if (uniqueWords.size < words.length * 0.3) {
-    console.warn(`⚠️  ${idLabel}Content too repetitive, skipping`);
-    return null;
-  }
-
-  // Extract first few sentences (usually the lead)
-  const sentences = cleaned.split(/[.!?]+\s+/);
-  let snippet = "";
-
-  for (const sentence of sentences) {
-    const trimmed = sentence.trim();
-    if (trimmed.length < 10) continue; // Skip tiny fragments
-
-    if (snippet.length + trimmed.length > maxChars) break;
-    snippet += (snippet ? " " : "") + trimmed + ".";
-  }
-
-  // Final validation
-  return snippet.length >= 50 ? snippet : null;
-}
-
-/* ------------------------- Techmeme-Style Prompt ------------------------- */
-
-function todayLabel() {
-  return new Date().toLocaleDateString("en-US", {
-    year: "numeric",
-    month: "long",
-    day: "numeric",
-  });
-}
-
-function buildSystemPrompt() {
-  return `Today is ${todayLabel()}.
-
-You rewrite climate news headlines in the style of Techmeme: dense, factual, scannable.
-
-RULES:
-- Lead with WHO (named entity from the source: "EPA", "Ørsted", "9th Circuit") + strong action verb
-- Present tense, active voice, no period at end
-- 140-200 characters ideal; use commas and semicolons to pack detail
-- Only include numbers/dates/measurements that appear in the source material; do not convert relative time ("last year", "this year") into specific years
-- NEVER add, replace, or change names of people, politicians, or political figures — use exactly the names and attributions from the source material
-- If no numbers exist, stay concrete and qualitative — never pad with filler
-- Prefer named entities, policies, products from the source over vague references like "regulators", "a company", "a bank"
-- The headline IS the news, not a description of an article about the news
-- Match the certainty of the source: facts as facts, projections with "may"/"could"
-
-NEVER USE these vague filler patterns (they will be rejected):
-- "aiming to", "impacting", "reflecting", "amid concerns/issues/challenges"
-- "detailing", "outlining", "addressing", "emphasizing"
-- "faces issues/challenges", "raises concerns/doubts", "sparking debate"
-- "building momentum", "gaining traction", "making progress"
-- "reports on", "explores", "discusses", "covers"
-- "likely", "expected to", "set to", "poised to"
-- "revolutionary", "game-changer", "unprecedented", "major breakthrough"
-- "significant", "important" (show with numbers instead)
-
-EXAMPLES:
-
-BEFORE: "Report shows solar installations grew significantly last year"
-AFTER: "Global solar installations hit record 593GW in 2024, up 29% year-over-year"
-
-BEFORE: "Company announces progress on offshore wind project"
-AFTER: "Ørsted resumes 2.6GW Ocean Wind project after 9th Circuit blocks permit freeze"
-
-BEFORE: "Study raises concerns about Amazon deforestation"
-AFTER: "Amazon emitted 10-170M tons of carbon in 2023 as extreme drought ravaged rainforest, Max Planck study finds"
-
-BEFORE: "New policy aims to address carbon emissions in the transport sector"
-AFTER: "EU tightens truck CO2 standards, requires 45% emissions cut by 2030 and 90% by 2040"
-
-BEFORE: "Bank launches framework to assess biodiversity risks"
-AFTER: "BNP Paribas launches country-level biodiversity risk scoring for lending and investment portfolios"
-
-BEFORE: "India's solar manufacturing industry faces oversupply issues, turning a boom into a glut, impacting market stability"
-AFTER: "India's solar manufacturing hits oversupply glut as factory capacity outpaces domestic demand"
-
-Output ONLY the rewritten headline — no quotes, no explanation, no preamble.`;
-}
-
-function buildRetrySystemPrompt() {
-  return `Today is ${todayLabel()}.
-
-You rewrite climate news headlines. Your previous attempt was too vague.
-
-This time: state EXACTLY what happened, who did it per the source material, and include any specific numbers or names from the source. Do not introduce names, people, or organizations not mentioned in the source. Do not use filler phrases like "aiming to", "impacting", "amid concerns", or "addressing challenges". Every clause must add a concrete fact.
-
-Output ONLY the rewritten headline — no quotes, no explanation, no preamble.`;
-}
-
-type PromptInput = {
-  title: string;
-  dek?: string | null;
-  contentSnippet?: string | null;
-  previewExcerpt?: string | null;
-  publishedAt?: string | null;
-};
-
-function formatPublishedDate(iso: string | null | undefined): string | null {
-  if (!iso) return null;
-  const d = new Date(iso);
-  if (isNaN(d.getTime())) return null;
-  return d.toLocaleDateString("en-US", {
-    year: "numeric",
-    month: "long",
-    day: "numeric",
-  });
-}
-
-function buildUserPrompt(input: PromptInput) {
-  const lines = [`Original headline: ${input.title}`];
-
-  const pubDate = formatPublishedDate(input.publishedAt);
-  if (pubDate) {
-    lines.push(`Published: ${pubDate}`);
-  }
-
-  if (input.dek) {
-    lines.push(`Summary: ${input.dek}`);
-  }
-
-  if (input.contentSnippet) {
-    lines.push(`Article excerpt: ${input.contentSnippet}`);
-  }
-
-  if (input.previewExcerpt) {
-    lines.push(`Full article excerpt: ${input.previewExcerpt}`);
-  }
-
-  lines.push("");
-  lines.push("Rewrite this headline.");
-
-  return lines.join("\n");
-}
-
-export function sanitizeHeadline(s: string) {
-  let t = (s || "")
-    .replace(/^[""'\s]+|[""'\s]+$/g, "") // strip quotes
-    .replace(/\s+/g, " ") // collapse spaces
-    .trim();
-  // Remove trailing periods and other decorative punctuation
-  t = t.replace(/[-.|•–—]+$/g, "").trim();
-  return t;
-}
-
-const QUANTIFIER_WORDS = [
-  "one",
-  "two",
-  "three",
-  "four",
-  "five",
-  "six",
-  "seven",
-  "eight",
-  "nine",
-  "ten",
-  "eleven",
-  "twelve",
-  "thirteen",
-  "fourteen",
-  "fifteen",
-  "sixteen",
-  "seventeen",
-  "eighteen",
-  "nineteen",
-  "twenty",
-  "thirty",
-  "forty",
-  "fifty",
-  "sixty",
-  "seventy",
-  "eighty",
-  "ninety",
-  "hundred",
-  "thousand",
-  "million",
-  "billion",
-  "trillion",
-  "percent",
-  "percentage",
-];
-
-const QUANTIFIER_REGEXES = QUANTIFIER_WORDS.map(
-  (word) => new RegExp(`\\b${word}\\b`, "i"),
-);
-
-function containsQuantifier(headline: string) {
-  if (/\d/.test(headline)) return true;
-  return QUANTIFIER_REGEXES.some((regex) => regex.test(headline));
-}
-
-const NUMBER_WORD_MAP: Record<string, string> = {
-  zero: "0",
-  one: "1",
-  two: "2",
-  three: "3",
-  four: "4",
-  five: "5",
-  six: "6",
-  seven: "7",
-  eight: "8",
-  nine: "9",
-  ten: "10",
-  eleven: "11",
-  twelve: "12",
-  thirteen: "13",
-  fourteen: "14",
-  fifteen: "15",
-  sixteen: "16",
-  seventeen: "17",
-  eighteen: "18",
-  nineteen: "19",
-  twenty: "20",
-  thirty: "30",
-  forty: "40",
-  fifty: "50",
-  sixty: "60",
-  seventy: "70",
-  eighty: "80",
-  ninety: "90",
-};
-
-const SPELLED_NUMBER_REGEX = new RegExp(
-  `\\b(${Object.keys(NUMBER_WORD_MAP).join("|")})\\b`,
-  "gi",
-);
-
-const NUMERIC_TOKEN_REGEX = /\d[\d,]*(?:\.\d+)?(?:\s?(?:%|percent))?/gi;
-
-function normalizeNumericToken(token: string): string | null {
-  if (!token) return null;
-  let normalized = token.toLowerCase().trim();
-  if (!normalized) return null;
-  normalized = normalized.replace(/,/g, "");
-  normalized = normalized.replace(/percent$/i, "%");
-  normalized = normalized.replace(/\s+/g, "");
-  normalized = normalized.replace(/[^0-9.%]/g, "");
-  normalized = normalized.replace(/\.(?=.*\.)/g, "");
-  normalized = normalized.replace(/\.$/, "");
-  if (!/\d/.test(normalized)) return null;
-  return normalized;
-}
-
-function extractNumericTokens(text: string | null | undefined): string[] {
-  if (!text) return [];
-  const matches = text.match(NUMERIC_TOKEN_REGEX);
-  if (!matches) return [];
-  return matches
-    .map((token) => normalizeNumericToken(token))
-    .filter((token): token is string => Boolean(token));
-}
-
-function extractSpelledNumberTokens(text: string | null | undefined): string[] {
-  if (!text) return [];
-  const tokens: string[] = [];
-  SPELLED_NUMBER_REGEX.lastIndex = 0;
-  let match: RegExpExecArray | null;
-  while ((match = SPELLED_NUMBER_REGEX.exec(text)) !== null) {
-    const mapped = NUMBER_WORD_MAP[match[1].toLowerCase()];
-    if (mapped) tokens.push(mapped);
-  }
-  return tokens;
-}
-
-type QuantContext = {
-  hasQuantEvidence: boolean;
-  numbers: Set<string>;
-};
-
-type ValidationContext = {
-  hasContent: boolean;
-  sourceQuant: QuantContext;
-  sourceText: string;
-};
-
-export function buildSourceQuantContext(
-  parts: Array<string | null | undefined>,
-): QuantContext {
-  const filtered = parts.filter(
-    (p): p is string => typeof p === "string" && p.trim().length > 0,
-  );
-  if (filtered.length === 0) {
-    return { hasQuantEvidence: false, numbers: new Set() };
-  }
-  const MAX_SEGMENT_LENGTH = 12000;
-  const combined = filtered
-    .map((segment) =>
-      segment.length > MAX_SEGMENT_LENGTH
-        ? segment.slice(0, MAX_SEGMENT_LENGTH)
-        : segment,
-    )
-    .join(" ");
-  const numbers = new Set([
-    ...extractNumericTokens(combined),
-    ...extractSpelledNumberTokens(combined),
-  ]);
-  return {
-    hasQuantEvidence: containsQuantifier(combined),
-    numbers,
-  };
-}
+const MAX_SOURCE_SEGMENT = 12_000;
 
 /* ------------------------- Enhanced Validation ------------------------- */
 
@@ -452,21 +118,9 @@ export function passesChecks(
     }
   }
 
-  // Reject hallucinated political figures not present in source material
-  const politicalFigures = [
-    "biden",
-    "trump",
-    "obama",
-    "harris",
-    "pence",
-    "clinton",
-    "desantis",
-    "newsom",
-    "vance",
-  ];
   const srcLower = context.sourceText.toLowerCase();
   const draftLower = t.toLowerCase();
-  for (const name of politicalFigures) {
+  for (const name of POLITICAL_FIGURES) {
     if (new RegExp(`\\b${name}\\b`).test(draftLower)) {
       if (!new RegExp(`\\b${name}\\b`).test(srcLower)) {
         console.warn(
@@ -477,85 +131,44 @@ export function passesChecks(
     }
   }
 
-  // Check for vague/hype phrases that shouldn't be in good headlines
-  const badPatterns = [
-    /\bmajor\b.*\bbreakthrough\b/i,
-    /\bgame.?chang/i,
-    /\brevolutionary\b/i,
-    /\bunprecedented\b/i,
-    /\bslam/i, // "X slams Y" - too casual
-    /\bblast/i, // "X blasts Y" - too tabloid
-    /\brip/i, // "X rips Y" - too informal
-  ];
-
-  if (badPatterns.some((p) => p.test(t))) {
+  if (CLICKBAIT_PATTERNS.some((p) => p.test(t))) {
     console.warn(`⚠️  Rejected vague/hype language: "${t.slice(0, 50)}..."`);
     return false;
   }
 
-  // Check for weak hedging language (allow "could"/"may" for scientific projections)
-  // Reject hedging words that soften confirmed facts
-  const weakPatterns = [
-    /\bmight\b/i,
-    /\bpossibly\b/i,
-    /\blikely\b/i,
-    /\bexpected to\b/i,
-    /\bset to\b/i,
-    /\bpoised to\b/i,
-  ];
-
-  if (weakPatterns.some((p) => p.test(t))) {
+  if (WEAK_PATTERNS.some((p) => p.test(t))) {
     console.warn(`⚠️  Rejected weak hedging language: "${t.slice(0, 50)}..."`);
     return false;
   }
 
-  // Check for vague/meta-reporting patterns that produce headlines about articles, not news
-  const vaguePatterns = [
-    // Meta-reporting (headline about article, not news)
-    /\breports on\b/i,
-    /\breports that\b/i,
-    /\bcovers\b/i,
-    /\bexplores\b/i,
-    /\bdiscusses\b/i,
-    /\bemphasiz(es|ing)\b/i,
-
-    // Vague concern/debate language
-    /\braising concerns\b/i,
-    /\braise[sd]? doubts\b/i,
-    /\bsparking debate\b/i,
-    /\bprompting questions\b/i,
-    /\bdrawing attention\b/i,
-
-    // Empty citations
-    /\bciting challenges\b/i,
-    /\bciting concerns\b/i,
-    /\bciting issues\b/i,
-    /\bciting ongoing\b/i,
-
-    // Hollow momentum phrases
-    /\bbuild(s|ing)? (new )?momentum\b/i,
-    /\bgain(s|ing)? traction\b/i,
-    /\bmake(s|ing)? progress\b/i,
-
-    // Generic implications
-    /\bhealth implications\b/i,
-    /\bbroader implications\b/i,
-    /\bongoing research\b/i,
-
-    // Vague filler clauses (pad headlines without adding info)
-    /\baiming to\b/i,
-    /\bimpacting\b/i,
-    /\breflecting\b/i,
-    /\bamid (concerns|issues|challenges|shifts)\b/i,
-    /\bdetailing\b/i,
-    /\boutlines?\b/i,
-    /\baddressing\b/i,
-    /\bfaces? (issues|challenges|concerns)\b/i,
-  ];
-
-  if (vaguePatterns.some((p) => p.test(t))) {
+  if (VAGUE_PATTERNS.some((p) => p.test(t))) {
     console.warn(
       `⚠️  Rejected vague/meta-reporting pattern: "${t.slice(0, 50)}..."`,
+    );
+    return false;
+  }
+
+  const sourceNeedsAttribution = ATTRIBUTION_REQUIRED_SOURCE_PATTERNS.some(
+    (p) => p.test(context.sourceText),
+  );
+  const draftNeedsAttribution = ATTRIBUTION_TRIGGER_PATTERNS.some((p) =>
+    p.test(t),
+  );
+  if (sourceNeedsAttribution && draftNeedsAttribution && !hasAttribution(t)) {
+    console.warn(
+      `⚠️  Rejected missing attribution: "${t.slice(0, 50)}..."`,
+    );
+    return false;
+  }
+
+  if (
+    hasContent &&
+    WEAK_PRIORITIZATION_PATTERNS.some((p) => p.test(t)) &&
+    !containsQuantifier(t) &&
+    !hasAttribution(t)
+  ) {
+    console.warn(
+      `⚠️  Rejected weak prioritization: "${t.slice(0, 50)}..."`,
     );
     return false;
   }
@@ -578,8 +191,8 @@ async function generateWithOpenAI(
     retries?: number;
   } = {},
 ): Promise<{ text: string | null; model: string; notes: string }> {
-  const system = opts.systemPrompt ?? buildSystemPrompt();
-  const prompt = buildUserPrompt(input);
+  const system = opts.systemPrompt ?? buildSystemPrompt("legacy");
+  const prompt = buildUserPrompt(input, "legacy");
   const abortMs = opts.abortMs ?? 20000;
   const retries = opts.retries ?? 2;
   const model = "gpt-4.1-mini";
@@ -745,8 +358,16 @@ async function processOne(r: Row) {
     publishedAt: r.published_at,
   };
 
-  const sourceText = [r.title, r.dek, contentSnippet, previewExcerpt]
+  const sourceText = [
+    r.title,
+    r.dek,
+    contentSnippet,
+    previewExcerpt,
+    r.content_text,
+    r.content_html,
+  ]
     .filter((p): p is string => typeof p === "string" && p.trim().length > 0)
+    .map((s) => (s.length > MAX_SOURCE_SEGMENT ? s.slice(0, MAX_SOURCE_SEGMENT) : s))
     .join(" ");
 
   const validationContext: ValidationContext = {
@@ -778,7 +399,7 @@ async function processOne(r: Row) {
 
   // Retry once with a more direct prompt
   const retryLlm = await generateWithOpenAI(promptInput, {
-    systemPrompt: buildRetrySystemPrompt(),
+    systemPrompt: buildRetrySystemPrompt("legacy"),
   });
   const retryDraft = retryLlm.text || "";
 
@@ -959,8 +580,16 @@ async function dryRun(limit = 10) {
       publishedAt: r.published_at,
     };
 
-    const sourceText = [r.title, r.dek, contentSnippet, previewExcerpt]
+    const sourceText = [
+      r.title,
+      r.dek,
+      contentSnippet,
+      previewExcerpt,
+      r.content_text,
+      r.content_html,
+    ]
       .filter((p): p is string => typeof p === "string" && p.trim().length > 0)
+      .map((s) => (s.length > MAX_SOURCE_SEGMENT ? s.slice(0, MAX_SOURCE_SEGMENT) : s))
       .join(" ");
 
     const validationContext: ValidationContext = {
@@ -979,7 +608,7 @@ async function dryRun(limit = 10) {
 
     if (!pass1 && draft) {
       const retryLlm = await generateWithOpenAI(promptInput, {
-        systemPrompt: buildRetrySystemPrompt(),
+        systemPrompt: buildRetrySystemPrompt("legacy"),
       });
       const retryDraft = retryLlm.text || "";
       finalPass = passesChecks(r.title, retryDraft, validationContext);

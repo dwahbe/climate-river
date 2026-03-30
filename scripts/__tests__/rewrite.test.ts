@@ -2,11 +2,11 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  buildSourceQuantContext,
   extractContentSnippet,
   sanitizeHeadline,
-  passesChecks,
-  buildSourceQuantContext,
-} from "../rewrite";
+} from "@/lib/rewriteShared";
+import { passesChecks } from "../rewrite";
 
 /* ------------------------------------------------------------------ */
 /*  Helper: build a ValidationContext for passesChecks                  */
