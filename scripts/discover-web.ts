@@ -29,7 +29,7 @@ const TAVILY_SEARCH_DEPTH = (process.env.TAVILY_SEARCH_DEPTH || "basic") as
   | "advanced";
 const TAVILY_COST_PER_SEARCH = TAVILY_SEARCH_DEPTH === "basic" ? 0.002 : 0.004;
 
-type WebSearchResult = {
+export type WebSearchResult = {
   title: string;
   url: string;
   snippet: string;
@@ -143,6 +143,23 @@ function isValidHeadlineTitle(title: string): boolean {
   }
 
   return true;
+}
+
+/**
+ * Detect URLs that look fabricated by LLMs — e.g. placeholder article IDs
+ * like "-000000" or paths with long runs of zeros.
+ */
+export function isLikelyFabricatedUrl(url: string): boolean {
+  try {
+    const { pathname } = new URL(url);
+    // Reject paths ending with a slug segment of all zeros (e.g. "-000000")
+    if (/-0{4,}$/.test(pathname)) return true;
+    // Reject paths where the last numeric segment is all zeros (e.g. "/00000000")
+    if (/\/0{5,}(?:\/|$)/.test(pathname)) return true;
+    return false;
+  } catch {
+    return false;
+  }
 }
 
 function normalizeDomain(domain: string): string {
@@ -405,6 +422,55 @@ function looksLikeApologyResult(result: WebSearchResult): boolean {
   return APOLOGY_PATTERNS.some((pattern) => pattern.test(haystack));
 }
 
+/**
+ * Drop results whose hostname was never cited by the web search tool's sources.
+ * This catches hallucinated URLs where the model fabricates links for domains
+ * the tool never actually visited.
+ */
+export function filterUncitedResults(
+  results: WebSearchResult[],
+  sources: Array<{ url?: string }>,
+): WebSearchResult[] {
+  if (sources.length === 0) return results;
+
+  const citedHosts = new Set<string>();
+  for (const src of sources) {
+    if (src && typeof src.url === "string") {
+      try {
+        const u = new URL(src.url);
+        citedHosts.add(u.hostname.replace(/^www\./, ""));
+      } catch {
+        // skip malformed source URLs
+      }
+    }
+  }
+
+  if (citedHosts.size === 0) return results;
+
+  const beforeCount = results.length;
+  const filtered = results.filter((result) => {
+    try {
+      const u = new URL(result.url);
+      const host = u.hostname.replace(/^www\./, "");
+      if (citedHosts.has(host)) return true;
+      console.log(
+        `⚠️  Dropped result with URL not cited in web search sources: ${result.url}`,
+      );
+      return false;
+    } catch {
+      return false;
+    }
+  });
+
+  if (beforeCount !== filtered.length) {
+    console.log(
+      `Source cross-validation dropped ${beforeCount - filtered.length} uncited results`,
+    );
+  }
+
+  return filtered;
+}
+
 function updateDomainHitCounts(
   hitCounts: Map<string, number>,
   results: WebSearchResult[],
@@ -527,7 +593,7 @@ function cleanSnippet(
   return cleaned;
 }
 
-function parseWebSearchJson(
+export function parseWebSearchJson(
   content: string | null | undefined,
   query: string,
 ): WebSearchResult[] {
@@ -586,6 +652,14 @@ function parseWebSearchJson(
 
       // Validate the title before adding to results
       if (!isValidHeadlineTitle(title)) {
+        continue;
+      }
+
+      // Reject URLs with placeholder/fabricated patterns (LLM hallucination)
+      if (isLikelyFabricatedUrl(url)) {
+        console.log(
+          `⚠️  Rejected likely fabricated URL: ${url} ("${title.substring(0, 60)}...")`,
+        );
         continue;
       }
 
@@ -766,6 +840,14 @@ Rules:
     if (WEB_SEARCH_DEBUG && beforeApologyFilter !== results.length) {
       console.log(
         `Dropped ${beforeApologyFilter - results.length} apology-style results`,
+      );
+    }
+
+    // Cross-validate model-claimed URLs against tool-cited sources.
+    if (Array.isArray(response.sources) && response.sources.length > 0) {
+      results = filterUncitedResults(
+        results,
+        response.sources as Array<{ url?: string }>,
       );
     }
 
@@ -1581,6 +1663,40 @@ async function getOrCreateSourceForResult(
   };
 }
 
+/**
+ * Verify a URL is reachable via HEAD request before inserting.
+ * Returns true if the URL appears valid (2xx/3xx), false if definitely dead (404/410).
+ * On timeout or ambiguous errors (403, network issues), returns true (benefit of the doubt).
+ */
+async function isUrlReachable(url: string): Promise<boolean> {
+  // Skip validation for Google News redirect URLs — they always resolve
+  if (url.includes("news.google.com/rss/articles/")) return true;
+
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 5000);
+    const response = await fetch(url, {
+      method: "HEAD",
+      signal: controller.signal,
+      redirect: "follow",
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (compatible; ClimateRiver/1.0; +https://climateriver.org)",
+        Accept: "text/html",
+      },
+    });
+    clearTimeout(timeout);
+
+    if (response.status === 404 || response.status === 410) {
+      return false;
+    }
+    return true;
+  } catch {
+    // Network error or timeout — give benefit of the doubt
+    return true;
+  }
+}
+
 async function insertWebDiscoveredArticle(
   result: WebSearchResult,
   sourceId: number,
@@ -1595,6 +1711,21 @@ async function insertWebDiscoveredArticle(
     if (!dateValidation.valid) {
       console.log(
         `⚠️  Skipping web-discovered article with invalid date (${dateValidation.reason}): "${result.title.substring(0, 60)}..."`,
+      );
+      return null;
+    }
+
+    // Final fabrication guard: reject placeholder URL patterns
+    if (isLikelyFabricatedUrl(result.url)) {
+      console.log(`⚠️  Skipping article with fabricated URL: ${result.url}`);
+      return null;
+    }
+
+    // Verify the URL actually resolves (catches hallucinated URLs that pass pattern checks)
+    const reachable = await isUrlReachable(result.url);
+    if (!reachable) {
+      console.log(
+        `⚠️  Skipping unreachable URL (404/410): ${result.url} ("${result.title.substring(0, 60)}...")`,
       );
       return null;
     }
