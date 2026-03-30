@@ -6,6 +6,9 @@ import {
   isLikelyFabricatedUrl,
   parseWebSearchJson,
   filterUncitedResults,
+  extractRealUrl,
+  resolveGoogleNewsCandidate,
+  maybeDecodeBase64Url,
 } from "../discover-web";
 
 describe("rootDomain", () => {
@@ -381,5 +384,158 @@ describe("filterUncitedResults", () => {
     assert.equal(filtered.length, 2);
     assert.equal(filtered[0].url, "https://reuters.com/climate/report");
     assert.equal(filtered[1].url, "https://www.nytimes.com/climate/analysis");
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/*  maybeDecodeBase64Url                                               */
+/* ------------------------------------------------------------------ */
+
+describe("maybeDecodeBase64Url", () => {
+  it("decodes a standard base64-encoded URL", () => {
+    const encoded = Buffer.from(
+      "https://example.com/article",
+    ).toString("base64");
+    assert.equal(maybeDecodeBase64Url(encoded), "https://example.com/article");
+  });
+
+  it("decodes URL-safe base64 (with - and _)", () => {
+    // URL-safe base64 uses - instead of + and _ instead of /
+    const standard = Buffer.from(
+      "https://example.com/path?q=a+b",
+    ).toString("base64");
+    const urlSafe = standard.replace(/\+/g, "-").replace(/\//g, "_");
+    assert.equal(
+      maybeDecodeBase64Url(urlSafe),
+      "https://example.com/path?q=a+b",
+    );
+  });
+
+  it("returns null for characters outside base64 alphabet", () => {
+    assert.equal(maybeDecodeBase64Url("not a base64 value!"), null);
+    assert.equal(maybeDecodeBase64Url("hello world"), null);
+    assert.equal(maybeDecodeBase64Url("<script>alert(1)</script>"), null);
+  });
+
+  it("returns null on empty string", () => {
+    assert.equal(maybeDecodeBase64Url(""), null);
+  });
+
+  it("handles base64 without padding", () => {
+    // Encode then strip padding
+    const encoded = Buffer.from("https://example.com").toString("base64");
+    const stripped = encoded.replace(/=+$/, "");
+    assert.equal(maybeDecodeBase64Url(stripped), "https://example.com");
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/*  resolveGoogleNewsCandidate                                         */
+/* ------------------------------------------------------------------ */
+
+describe("resolveGoogleNewsCandidate", () => {
+  it("returns canonical URL for an http URL", () => {
+    const result = resolveGoogleNewsCandidate(
+      "https://example.com/article?utm_source=google",
+    );
+    assert.equal(result, "https://example.com/article");
+  });
+
+  it("returns canonical URL for an https URL", () => {
+    const result = resolveGoogleNewsCandidate("https://reuters.com/climate");
+    assert.equal(result, "https://reuters.com/climate");
+  });
+
+  it("decodes base64-encoded http URL", () => {
+    const encoded = Buffer.from(
+      "https://example.com/decoded-article",
+    ).toString("base64");
+    assert.equal(
+      resolveGoogleNewsCandidate(encoded),
+      "https://example.com/decoded-article",
+    );
+  });
+
+  it("returns null for non-URL strings", () => {
+    assert.equal(resolveGoogleNewsCandidate("rss"), null);
+    assert.equal(resolveGoogleNewsCandidate("search"), null);
+    assert.equal(resolveGoogleNewsCandidate("articles"), null);
+  });
+
+  it("returns null for empty string", () => {
+    assert.equal(resolveGoogleNewsCandidate(""), null);
+  });
+
+  it("returns null for undefined", () => {
+    assert.equal(resolveGoogleNewsCandidate(undefined), null);
+  });
+
+  it("returns null for whitespace-only string", () => {
+    assert.equal(resolveGoogleNewsCandidate("   "), null);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/*  extractRealUrl                                                     */
+/* ------------------------------------------------------------------ */
+
+describe("extractRealUrl", () => {
+  it("extracts URL from ?url= query parameter", () => {
+    const googleUrl =
+      "https://news.google.com/rss/articles?url=https%3A%2F%2Fexample.com%2Farticle";
+    assert.equal(extractRealUrl(googleUrl), "https://example.com/article");
+  });
+
+  it("extracts URL from ?q= query parameter", () => {
+    const googleUrl =
+      "https://news.google.com/rss/articles?q=https%3A%2F%2Fexample.com%2Fstory";
+    assert.equal(extractRealUrl(googleUrl), "https://example.com/story");
+  });
+
+  it("extracts URL from ?u= query parameter", () => {
+    const googleUrl =
+      "https://news.google.com/rss/articles?u=https%3A%2F%2Fexample.com%2Fnews";
+    assert.equal(extractRealUrl(googleUrl), "https://example.com/news");
+  });
+
+  it("strips tracking params from extracted URL via canonical()", () => {
+    const googleUrl =
+      "https://news.google.com/rss/articles?url=https%3A%2F%2Fexample.com%2Farticle%3Futm_source%3Dgoogle%26utm_medium%3Drss";
+    assert.equal(extractRealUrl(googleUrl), "https://example.com/article");
+  });
+
+  it("passes through non-Google URLs unchanged", () => {
+    const url = "https://reuters.com/climate/report";
+    assert.equal(extractRealUrl(url), url);
+  });
+
+  it("passes through non-Google URLs even with query params", () => {
+    const url = "https://reuters.com/climate?page=2&sort=date";
+    assert.equal(extractRealUrl(url), url);
+  });
+
+  it("returns original Google URL when no real URL can be extracted", () => {
+    const googleUrl =
+      "https://news.google.com/rss/articles/CBMiSomeOpaqueToken";
+    const result = extractRealUrl(googleUrl);
+    assert.equal(result, googleUrl);
+  });
+
+  it("returns malformed input unchanged", () => {
+    assert.equal(extractRealUrl("not-a-url"), "not-a-url");
+    assert.equal(extractRealUrl(""), "");
+  });
+
+  it("extracts base64-encoded URL from path segment", () => {
+    const realUrl = "https://example.com/base64-article";
+    const encoded = Buffer.from(realUrl).toString("base64");
+    const googleUrl = `https://news.google.com/rss/articles/${encoded}`;
+    assert.equal(extractRealUrl(googleUrl), realUrl);
+  });
+
+  it("prefers query params over path segments", () => {
+    const googleUrl =
+      "https://news.google.com/rss/articles/somepath?url=https%3A%2F%2Fexample.com%2Fprimary";
+    assert.equal(extractRealUrl(googleUrl), "https://example.com/primary");
   });
 });

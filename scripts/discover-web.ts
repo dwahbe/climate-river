@@ -90,11 +90,8 @@ const DISCOVERY_PAUSE_MS = 1000; // Reduced from 2000ms for faster processing
 const DEFAULT_OUTLET_FRESHNESS_HOURS = 72; // Reduced from 96 for fresher content
 const HOST_BLOCKLIST = new Set([
   "news.google.com",
-  "www.news.google.com",
   "news.yahoo.com",
-  "www.news.yahoo.com",
   "msn.com",
-  "www.msn.com",
 ]);
 
 const APOLOGY_PATTERNS = [
@@ -280,7 +277,7 @@ function estimateWebSearchCost(
 function dedupeWebResults(results: WebSearchResult[]): WebSearchResult[] {
   const seen = new Set<string>();
   return results.filter((result) => {
-    const urlKey = result.url ? result.url.trim().toLowerCase() : "";
+    const urlKey = result.url ? canonical(result.url).toLowerCase() : "";
     const titleKey = result.title ? result.title.trim().toLowerCase() : "";
     const key = urlKey || titleKey;
     if (!key) return false;
@@ -1128,6 +1125,11 @@ async function searchGoogleNewsRSS(query: string): Promise<WebSearchResult[]> {
 
       // Extract the real URL from Google News redirect
       const realUrl = extractRealUrl(item.link);
+      if (hostFromUrl(realUrl) === "news.google.com") {
+        console.warn(
+          `⚠️  Failed to resolve Google News URL: ${item.link}`,
+        );
+      }
 
       // Extract publisher from RSS <source> element (same as ingest pipeline)
       const publisher = extractPublisherFromRssItem(item);
@@ -1149,10 +1151,11 @@ async function searchGoogleNewsRSS(query: string): Promise<WebSearchResult[]> {
   }
 }
 
-function extractRealUrl(googleUrl: string): string {
+export function extractRealUrl(googleUrl: string): string {
   try {
     const url = new URL(googleUrl);
-    if (!url.hostname.includes("news.google.com")) {
+    const host = url.hostname.replace(/^www\./, "").toLowerCase();
+    if (host !== "news.google.com") {
       return googleUrl;
     }
 
@@ -1186,7 +1189,7 @@ function extractRealUrl(googleUrl: string): string {
   }
 }
 
-function resolveGoogleNewsCandidate(
+export function resolveGoogleNewsCandidate(
   candidate: string | undefined,
 ): string | null {
   if (!candidate) return null;
@@ -1205,7 +1208,7 @@ function resolveGoogleNewsCandidate(
   return null;
 }
 
-function maybeDecodeBase64Url(value: string): string | null {
+export function maybeDecodeBase64Url(value: string): string | null {
   if (!/^[A-Za-z0-9+/=_-]+$/.test(value)) {
     return null;
   }
@@ -1669,8 +1672,15 @@ async function getOrCreateSourceForResult(
  * On timeout or ambiguous errors (403, network issues), returns true (benefit of the doubt).
  */
 async function isUrlReachable(url: string): Promise<boolean> {
-  // Skip validation for Google News redirect URLs — they always resolve
-  if (url.includes("news.google.com/rss/articles/")) return true;
+  // Defense-in-depth: aggregator URLs should be caught by the blocklist guard
+  // in tryInsertDiscoveredArticle. If one reaches here, log and reject.
+  const reachHost = hostFromUrl(url);
+  if (reachHost && HOST_BLOCKLIST.has(reachHost)) {
+    console.warn(
+      `⚠️  Aggregator URL reached reachability check (should have been caught earlier): ${url}`,
+    );
+    return false;
+  }
 
   try {
     const controller = new AbortController();
@@ -1833,6 +1843,18 @@ async function tryInsertDiscoveredArticle(
     return false;
   }
 
+  // Match ingest pipeline normalization
+  result = { ...result, url: canonical(extractRealUrl(result.url)) };
+
+  // Reject URLs still pointing at aggregator hosts after resolution
+  const normalizedHost = hostFromUrl(result.url);
+  if (normalizedHost && HOST_BLOCKLIST.has(normalizedHost)) {
+    console.warn(
+      `⚠️  Skipping unresolved aggregator URL (${normalizedHost}): ${result.title.substring(0, 60)}...`,
+    );
+    return false;
+  }
+
   const duplicate = await isDuplicate(result.title, result.url);
 
   if (duplicate) {
@@ -1865,7 +1887,9 @@ async function tryInsertDiscoveredArticle(
     console.log(`✓ Added & categorized: ${result.title.substring(0, 60)}...`);
   } catch (error) {
     console.error(`  ❌ Failed to categorize article ${articleId}:`, error);
-    console.log(`✓ Added (uncategorized): ${result.title.substring(0, 60)}...`);
+    console.log(
+      `✓ Added (uncategorized): ${result.title.substring(0, 60)}...`,
+    );
   }
 
   return true;
