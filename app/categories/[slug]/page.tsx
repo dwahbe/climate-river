@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import FeedCardGrid from "@/components/FeedCardGrid";
+import FeedCard from "@/components/FeedCard";
 import { getRiverData } from "@/lib/services/riverService";
 import { getCategoryBySlug } from "@/lib/tagger";
 import { CategoryIcon } from "@/components/categoryIcons";
@@ -96,10 +96,17 @@ export default async function CategoryDetailPage(props: {
             {category.longDescription}
           </p>
         )}
-        <FeedCardGrid
-          clusters={clusters}
-          emptyMessage="No stories available right now."
-        />
+        {clusters.length === 0 ? (
+          <p className="py-6 text-sm text-zinc-500">
+            No stories available right now.
+          </p>
+        ) : (
+          <div className="divide-y divide-zinc-200/80 -mx-4 sm:mx-0">
+            {clusters.map((cluster) => (
+              <FeedCard key={cluster.cluster_id} cluster={cluster} />
+            ))}
+          </div>
+        )}
       </div>
     </>
   );

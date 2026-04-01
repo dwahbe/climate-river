@@ -23,7 +23,7 @@ type FeedCardProps = {
   cluster: Cluster;
   onPreview?: (articleId: number, title: string, url: string) => void;
   isSelected?: boolean;
-  variant?: "list" | "grid";
+  variant?: "list" | "summaryGrid";
 };
 
 export default function FeedCard({
@@ -33,13 +33,13 @@ export default function FeedCard({
   variant = "list",
 }: FeedCardProps) {
   const [isExpanded, setIsExpanded] = useState(false);
-  const isGrid = variant === "grid";
+  const isSummaryGrid = variant === "summaryGrid";
   const publisher = cluster.lead_source || hostFrom(cluster.lead_url);
   const publisherDomain = cluster.lead_homepage
     ? hostFrom(cluster.lead_homepage)
     : hostFrom(cluster.lead_url);
   const leadPing = `/api/click?aid=${cluster.lead_article_id}`;
-  const hasImage = !!cluster.lead_image;
+  const hasImage = !!cluster.lead_image && !isSummaryGrid;
   const isCluster = cluster.size > 1;
   const relatedCount = cluster.subs_total;
 
@@ -50,10 +50,10 @@ export default function FeedCard({
 
   return (
     <article
-      className={`bg-white ${isGrid ? "flex flex-col overflow-hidden rounded-xl border border-zinc-200/80" : "border-b border-zinc-200/80"} ${!isGrid && isSelected ? "lg:bg-zinc-50 lg:ring-2 lg:ring-inset lg:ring-zinc-200" : ""}`}
+      className={`bg-white ${isSummaryGrid ? "flex h-full flex-col overflow-hidden rounded-xl border border-zinc-200/80 transition-colors hover:border-zinc-300" : "border-b border-zinc-200/80"} ${!isSummaryGrid && isSelected ? "lg:bg-zinc-50 lg:ring-2 lg:ring-inset lg:ring-zinc-200" : ""}`}
     >
       {/* Header with padding */}
-      <div className="px-4 pt-4 sm:px-5 sm:pt-5">
+      <div className={`px-4 pt-4 sm:px-5 sm:pt-5 ${isSummaryGrid ? "flex-1" : ""}`}>
         <div className="flex gap-3">
           {/* Publisher Icon */}
           <div className="shrink-0 pt-0.5">
@@ -106,7 +106,9 @@ export default function FeedCard({
             </div>
 
             {/* Title */}
-            <h2 className="text-[17px] sm:text-lg font-semibold leading-snug text-zinc-900 mb-1.5 text-pretty">
+            <h2
+              className={`text-[17px] sm:text-lg font-semibold leading-snug text-zinc-900 mb-1.5 text-pretty ${isSummaryGrid ? "line-clamp-4" : ""}`}
+            >
               <a
                 href={cluster.lead_url}
                 ping={leadPing}
@@ -118,7 +120,9 @@ export default function FeedCard({
 
             {/* Dek/Description */}
             {cluster.lead_dek && (
-              <p className="hidden sm:block text-[15px] text-zinc-600 leading-relaxed mb-2 text-pretty">
+              <p
+                className={`${isSummaryGrid ? "text-[15px] text-zinc-600 leading-relaxed line-clamp-3 text-pretty" : "hidden sm:block text-[15px] text-zinc-600 leading-relaxed mb-2 text-pretty"}`}
+              >
                 {cluster.lead_dek}
               </p>
             )}
@@ -138,7 +142,9 @@ export default function FeedCard({
       )}
 
       {/* Footer - aligned with content column */}
-      <div className="pl-[68px] pr-4 pb-4 sm:pl-[72px] sm:pr-5 sm:pb-5">
+      <div
+        className={`${isSummaryGrid ? "mt-auto pl-[68px] pr-4 pt-4 pb-4 sm:pl-[72px] sm:pr-5 sm:pb-5" : "pl-[68px] pr-4 pb-4 sm:pl-[72px] sm:pr-5 sm:pb-5"}`}
+      >
         {/* Related coverage dropdown */}
         {isCluster && relatedCount > 0 && (
           <div className="mt-3 mb-3">
