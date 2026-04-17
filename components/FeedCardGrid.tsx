@@ -17,9 +17,7 @@ export default function FeedCardGrid({
   }
 
   return (
-    <div
-      className={`grid grid-cols-1 gap-4 lg:grid-cols-2 ${className}`}
-    >
+    <div className={`grid grid-cols-1 gap-4 lg:grid-cols-2 ${className}`}>
       {clusters.map((cluster) => (
         <FeedCard
           key={cluster.cluster_id}

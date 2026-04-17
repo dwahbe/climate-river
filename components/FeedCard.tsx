@@ -53,7 +53,9 @@ export default function FeedCard({
       className={`bg-white ${isSummaryGrid ? "flex h-full flex-col overflow-hidden rounded-xl border border-zinc-200/80 transition-colors hover:border-zinc-300" : "border-b border-zinc-200/80"} ${!isSummaryGrid && isSelected ? "lg:bg-zinc-50 lg:ring-2 lg:ring-inset lg:ring-zinc-200" : ""}`}
     >
       {/* Header with padding */}
-      <div className={`px-4 pt-4 sm:px-5 sm:pt-5 ${isSummaryGrid ? "flex-1" : ""}`}>
+      <div
+        className={`px-4 pt-4 sm:px-5 sm:pt-5 ${isSummaryGrid ? "flex-1" : ""}`}
+      >
         <div className="flex gap-3">
           {/* Publisher Icon */}
           <div className="shrink-0 pt-0.5">

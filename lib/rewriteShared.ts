@@ -137,8 +137,7 @@ const SPELLED_NUMBER_REGEX = new RegExp(
   "gi",
 );
 
-export const NUMERIC_TOKEN_REGEX =
-  /\d[\d,]*(?:\.\d+)?(?:\s?(?:%|percent))?/gi;
+export const NUMERIC_TOKEN_REGEX = /\d[\d,]*(?:\.\d+)?(?:\s?(?:%|percent))?/gi;
 
 export function normalizeNumericToken(token: string): string | null {
   if (!token) return null;
@@ -165,9 +164,7 @@ export function extractNumericTokens(
     .filter((token): token is string => Boolean(token));
 }
 
-function extractSpelledNumberTokens(
-  text: string | null | undefined,
-): string[] {
+function extractSpelledNumberTokens(text: string | null | undefined): string[] {
   if (!text) return [];
   const tokens: string[] = [];
   SPELLED_NUMBER_REGEX.lastIndex = 0;

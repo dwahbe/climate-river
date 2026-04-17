@@ -155,9 +155,7 @@ export function passesChecks(
     p.test(t),
   );
   if (sourceNeedsAttribution && draftNeedsAttribution && !hasAttribution(t)) {
-    console.warn(
-      `⚠️  Rejected missing attribution: "${t.slice(0, 50)}..."`,
-    );
+    console.warn(`⚠️  Rejected missing attribution: "${t.slice(0, 50)}..."`);
     return false;
   }
 
@@ -167,9 +165,7 @@ export function passesChecks(
     !containsQuantifier(t) &&
     !hasAttribution(t)
   ) {
-    console.warn(
-      `⚠️  Rejected weak prioritization: "${t.slice(0, 50)}..."`,
-    );
+    console.warn(`⚠️  Rejected weak prioritization: "${t.slice(0, 50)}..."`);
     return false;
   }
 
@@ -367,7 +363,9 @@ async function processOne(r: Row) {
     r.content_html,
   ]
     .filter((p): p is string => typeof p === "string" && p.trim().length > 0)
-    .map((s) => (s.length > MAX_SOURCE_SEGMENT ? s.slice(0, MAX_SOURCE_SEGMENT) : s))
+    .map((s) =>
+      s.length > MAX_SOURCE_SEGMENT ? s.slice(0, MAX_SOURCE_SEGMENT) : s,
+    )
     .join(" ");
 
   const validationContext: ValidationContext = {
@@ -589,7 +587,9 @@ async function dryRun(limit = 10) {
       r.content_html,
     ]
       .filter((p): p is string => typeof p === "string" && p.trim().length > 0)
-      .map((s) => (s.length > MAX_SOURCE_SEGMENT ? s.slice(0, MAX_SOURCE_SEGMENT) : s))
+      .map((s) =>
+        s.length > MAX_SOURCE_SEGMENT ? s.slice(0, MAX_SOURCE_SEGMENT) : s,
+      )
       .join(" ");
 
     const validationContext: ValidationContext = {

@@ -1126,9 +1126,7 @@ async function searchGoogleNewsRSS(query: string): Promise<WebSearchResult[]> {
       // Extract the real URL from Google News redirect
       const realUrl = extractRealUrl(item.link);
       if (hostFromUrl(realUrl) === "news.google.com") {
-        console.warn(
-          `⚠️  Failed to resolve Google News URL: ${item.link}`,
-        );
+        console.warn(`⚠️  Failed to resolve Google News URL: ${item.link}`);
       }
 
       // Extract publisher from RSS <source> element (same as ingest pipeline)
@@ -1887,9 +1885,7 @@ async function tryInsertDiscoveredArticle(
     console.log(`✓ Added & categorized: ${result.title.substring(0, 60)}...`);
   } catch (error) {
     console.error(`  ❌ Failed to categorize article ${articleId}:`, error);
-    console.log(
-      `✓ Added (uncategorized): ${result.title.substring(0, 60)}...`,
-    );
+    console.log(`✓ Added (uncategorized): ${result.title.substring(0, 60)}...`);
   }
 
   return true;

@@ -393,17 +393,17 @@ describe("filterUncitedResults", () => {
 
 describe("maybeDecodeBase64Url", () => {
   it("decodes a standard base64-encoded URL", () => {
-    const encoded = Buffer.from(
-      "https://example.com/article",
-    ).toString("base64");
+    const encoded = Buffer.from("https://example.com/article").toString(
+      "base64",
+    );
     assert.equal(maybeDecodeBase64Url(encoded), "https://example.com/article");
   });
 
   it("decodes URL-safe base64 (with - and _)", () => {
     // URL-safe base64 uses - instead of + and _ instead of /
-    const standard = Buffer.from(
-      "https://example.com/path?q=a+b",
-    ).toString("base64");
+    const standard = Buffer.from("https://example.com/path?q=a+b").toString(
+      "base64",
+    );
     const urlSafe = standard.replace(/\+/g, "-").replace(/\//g, "_");
     assert.equal(
       maybeDecodeBase64Url(urlSafe),
@@ -447,9 +447,9 @@ describe("resolveGoogleNewsCandidate", () => {
   });
 
   it("decodes base64-encoded http URL", () => {
-    const encoded = Buffer.from(
-      "https://example.com/decoded-article",
-    ).toString("base64");
+    const encoded = Buffer.from("https://example.com/decoded-article").toString(
+      "base64",
+    );
     assert.equal(
       resolveGoogleNewsCandidate(encoded),
       "https://example.com/decoded-article",

@@ -108,7 +108,6 @@ export type RewriteExecutionResult = {
   finalDraft: string;
 };
 
-
 export function getEvalProfiles(): EvalProfile[] {
   return DEFAULT_EVAL_PROFILES.map((profile) => ({ ...profile }));
 }
@@ -133,7 +132,6 @@ function snapshotUsage(
     cachedInputTokens: usage.inputTokenDetails?.cacheReadTokens,
   };
 }
-
 
 function failValidation(
   code: RewriteFailureCode,
