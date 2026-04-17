@@ -185,14 +185,16 @@ export default function SearchLink() {
           <button
             type="button"
             onClick={expandDesktop}
-            className="h-full w-full flex items-center gap-2 rounded-lg border border-zinc-200 bg-white px-2.5 text-sm text-zinc-400 hover:border-zinc-300 hover:text-zinc-500 transition-colors cursor-pointer"
+            className="group h-full w-full rounded-lg p-[1.5px] bg-zinc-200 hover:bg-zinc-300 transition-colors cursor-pointer"
             aria-label="Search"
           >
-            <SearchIcon className="h-3.5 w-3.5 shrink-0" />
-            <span className="flex-1 text-left">Find...</span>
-            <kbd className="text-[10px] leading-none border border-zinc-200 rounded px-1 py-0.5 font-sans">
-              F
-            </kbd>
+            <div className="h-full flex items-center gap-2 rounded-[calc(0.5rem-1.5px)] bg-white px-2.5 text-sm text-zinc-400 group-hover:text-zinc-500 transition-colors">
+              <SearchIcon className="h-3.5 w-3.5 shrink-0" />
+              <span className="flex-1 text-left">Find...</span>
+              <kbd className="text-[10px] leading-none border border-zinc-200 rounded px-1 py-0.5 font-sans">
+                F
+              </kbd>
+            </div>
           </button>
         )}
       </div>
