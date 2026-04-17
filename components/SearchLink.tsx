@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback } from "react";
-import { flushSync } from "react-dom";
 import { useRouter } from "next/navigation";
 
 const SearchIcon = ({ className }: { className?: string }) => (
@@ -87,16 +86,16 @@ export default function SearchLink() {
   const desktopInputRef = useRef<HTMLInputElement>(null);
 
   const expandDesktop = useCallback(() => {
-    flushSync(() => setDesktopOpen(true));
     desktopInputRef.current?.focus();
   }, []);
 
   const collapseDesktop = useCallback(() => {
-    setDesktopOpen(false);
+    desktopInputRef.current?.blur();
   }, []);
 
   function navigate(q: string) {
-    setDesktopOpen(false);
+    if (desktopInputRef.current) desktopInputRef.current.value = "";
+    desktopInputRef.current?.blur();
     setMobileOpen(false);
     router.push(`/search?q=${encodeURIComponent(q)}`);
   }
@@ -147,57 +146,49 @@ export default function SearchLink() {
         onSearch={navigate}
       />
 
-      {/* Desktop: pill / inline input */}
-      <div className="hidden md:block w-48 h-8">
-        {desktopOpen ? (
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              const q = desktopInputRef.current?.value.trim();
-              if (q) navigate(q);
-            }}
-            className="h-full"
-          >
-            <div
-              className="h-full rounded-lg p-[1.5px] animate-[gradient-spin_3s_linear_infinite]"
-              style={{
-                background:
-                  "conic-gradient(from var(--border-angle), #3B82F6, #EC4899, #06B6D4, #EF4444, #10B981, #8B5CF6, #3B82F6)",
-              }}
-            >
-              <div className="relative h-full flex items-center rounded-[calc(0.5rem-1.5px)] bg-white">
-                <SearchIcon className="absolute left-2.5 h-3.5 w-3.5 text-zinc-400 pointer-events-none" />
-                <input
-                  ref={desktopInputRef}
-                  type="search"
-                  placeholder="Find..."
-                  autoComplete="off"
-                  onBlur={collapseDesktop}
-                  className="h-full w-full rounded-[calc(0.5rem-1.5px)] bg-transparent py-0 pl-8 pr-10 text-sm placeholder:text-zinc-400 focus:outline-none [&::-webkit-search-cancel-button]:hidden"
-                />
-                <kbd className="absolute right-2 text-[10px] leading-none text-zinc-400 border border-zinc-200 rounded px-1 py-0.5 font-sans pointer-events-none">
-                  Esc
-                </kbd>
-              </div>
-            </div>
-          </form>
-        ) : (
-          <button
-            type="button"
-            onClick={expandDesktop}
-            className="group h-full w-full rounded-lg p-[1.5px] bg-zinc-200 hover:bg-zinc-300 transition-colors cursor-pointer"
-            aria-label="Search"
-          >
-            <div className="h-full flex items-center gap-2 rounded-[calc(0.5rem-1.5px)] bg-white px-2.5 text-sm text-zinc-400 group-hover:text-zinc-500 transition-colors">
-              <SearchIcon className="h-3.5 w-3.5 shrink-0" />
-              <span className="flex-1 text-left">Find...</span>
-              <kbd className="text-[10px] leading-none border border-zinc-200 rounded px-1 py-0.5 font-sans">
-                F
-              </kbd>
-            </div>
-          </button>
-        )}
-      </div>
+      {/* Desktop: always-rendered input; focus toggles the gradient border */}
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          const q = desktopInputRef.current?.value.trim();
+          if (q) navigate(q);
+        }}
+        className="hidden md:block w-48 h-8"
+      >
+        <div
+          onClick={() => desktopInputRef.current?.focus()}
+          className={`h-full w-full rounded-lg p-[1.5px] transition-colors ${
+            desktopOpen
+              ? "animate-[gradient-spin_3s_linear_infinite]"
+              : "bg-zinc-200 hover:bg-zinc-300"
+          }`}
+          style={
+            desktopOpen
+              ? {
+                  background:
+                    "conic-gradient(from var(--border-angle), #3B82F6, #EC4899, #06B6D4, #EF4444, #10B981, #8B5CF6, #3B82F6)",
+                }
+              : undefined
+          }
+        >
+          <div className="relative h-full flex items-center rounded-[calc(0.5rem-1.5px)] bg-white">
+            <SearchIcon className="absolute left-2.5 h-3.5 w-3.5 text-zinc-400 pointer-events-none" />
+            <input
+              ref={desktopInputRef}
+              type="text"
+              placeholder="Find..."
+              autoComplete="off"
+              aria-label="Search"
+              onFocus={() => setDesktopOpen(true)}
+              onBlur={() => setDesktopOpen(false)}
+              className="h-full w-full appearance-none rounded-[calc(0.5rem-1.5px)] bg-transparent py-0 pl-8 pr-10 text-sm placeholder:text-zinc-400 focus:outline-none cursor-pointer focus:cursor-text"
+            />
+            <kbd className="absolute right-2 text-[10px] leading-none text-zinc-400 border border-zinc-200 rounded px-1 py-0.5 font-sans pointer-events-none">
+              {desktopOpen ? "Esc" : "F"}
+            </kbd>
+          </div>
+        </div>
+      </form>
     </>
   );
 }
