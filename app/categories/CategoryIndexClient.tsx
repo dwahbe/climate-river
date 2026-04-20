@@ -78,7 +78,8 @@ export default function CategoryIndexClient({
 
               <Link
                 href={`/categories/${category.slug}`}
-                className="inline-flex items-center gap-1 text-sm font-medium text-sky-600 hover:text-sky-700"
+                className="inline-flex items-center gap-1 text-sm font-medium transition-opacity hover:opacity-80"
+                style={{ color: category.color }}
               >
                 View more stories <span aria-hidden="true">→</span>
               </Link>
