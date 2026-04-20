@@ -118,12 +118,19 @@ export default function AboutPage() {
         >
           six categories
         </Link>
-        : <span style={{ color: "#3B82F6" }}>government policy</span>,{" "}
-        <span style={{ color: "#EC4899" }}>activism</span>,{" "}
-        <span style={{ color: "#06B6D4" }}>business</span>,{" "}
-        <span style={{ color: "#EF4444" }}>climate impacts</span>,{" "}
-        <span style={{ color: "#10B981" }}>clean technology</span>, and{" "}
-        <span style={{ color: "#8B5CF6" }}>research</span>.
+        :{" "}
+        <span style={{ color: "var(--color-cat-government)" }}>
+          government policy
+        </span>
+        , <span style={{ color: "var(--color-cat-activism)" }}>activism</span>,{" "}
+        <span style={{ color: "var(--color-cat-business)" }}>business</span>,{" "}
+        <span style={{ color: "var(--color-cat-impacts)" }}>
+          climate impacts
+        </span>
+        ,{" "}
+        <span style={{ color: "var(--color-cat-tech)" }}>clean technology</span>
+        , and{" "}
+        <span style={{ color: "var(--color-cat-research)" }}>research</span>.
       </p>
       <p className="mt-2 text-zinc-700 text-pretty">
         Built with Next.js, Tailwind, and Postgres.{" "}

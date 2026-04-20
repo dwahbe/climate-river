@@ -45,12 +45,27 @@ export default function ClimateRiverLogo({
       {variant === "colored" && (
         <defs>
           <linearGradient id={gradientId} x1="0%" y1="0%" x2="100%" y2="100%">
-            <stop offset="0%" stopColor="#3B82F6" />
-            <stop offset="20%" stopColor="#EC4899" />
-            <stop offset="40%" stopColor="#06B6D4" />
-            <stop offset="60%" stopColor="#EF4444" />
-            <stop offset="80%" stopColor="#10B981" />
-            <stop offset="100%" stopColor="#8B5CF6" />
+            <stop
+              offset="0%"
+              style={{ stopColor: "var(--color-cat-government)" }}
+            />
+            <stop
+              offset="20%"
+              style={{ stopColor: "var(--color-cat-activism)" }}
+            />
+            <stop
+              offset="40%"
+              style={{ stopColor: "var(--color-cat-business)" }}
+            />
+            <stop
+              offset="60%"
+              style={{ stopColor: "var(--color-cat-impacts)" }}
+            />
+            <stop offset="80%" style={{ stopColor: "var(--color-cat-tech)" }} />
+            <stop
+              offset="100%"
+              style={{ stopColor: "var(--color-cat-research)" }}
+            />
           </linearGradient>
         </defs>
       )}

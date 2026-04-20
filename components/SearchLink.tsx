@@ -166,7 +166,7 @@ export default function SearchLink() {
             desktopOpen
               ? {
                   background:
-                    "conic-gradient(from var(--border-angle), #3B82F6, #EC4899, #06B6D4, #EF4444, #10B981, #8B5CF6, #3B82F6)",
+                    "conic-gradient(from var(--border-angle), var(--color-cat-government), var(--color-cat-activism), var(--color-cat-business), var(--color-cat-impacts), var(--color-cat-tech), var(--color-cat-research), var(--color-cat-government))",
                 }
               : undefined
           }

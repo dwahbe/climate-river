@@ -2,6 +2,15 @@
 @import "tailwindcss";
 @plugin '@tailwindcss/typography';
 
+@theme {
+  --color-cat-government: #3b82f6;
+  --color-cat-activism: #ec4899;
+  --color-cat-business: #06b6d4;
+  --color-cat-impacts: #ef4444;
+  --color-cat-tech: #10b981;
+  --color-cat-research: #8b5cf6;
+}
+
 /* Details element animation */
 details {
   @media (prefers-reduced-motion: no-preference) {
