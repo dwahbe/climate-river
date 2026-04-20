@@ -69,7 +69,7 @@ export default function PublicationLeaderboard({ entries }: Props) {
           href={entry.homepage}
           target="_blank"
           rel="noopener noreferrer"
-          className="group flex items-center gap-3 px-4 py-3 hover:bg-zinc-50 transition-colors"
+          className="group flex items-center gap-3 px-4 py-3 no-underline hover:no-underline hover:bg-zinc-50 transition-colors"
         >
           <span className="text-xs font-medium text-zinc-400 w-5 text-right tabular-nums shrink-0">
             {i + 1}
@@ -82,10 +82,10 @@ export default function PublicationLeaderboard({ entries }: Props) {
           />
 
           <div className="min-w-0 flex-1">
-            <span className="text-sm font-medium text-zinc-900 group-hover:text-zinc-700 truncate block">
+            <span className="text-sm font-medium text-zinc-900 group-hover:text-zinc-700 group-hover:underline truncate block">
               {entry.name}
             </span>
-            <span className="text-xs text-zinc-500">
+            <span className="text-xs text-zinc-500 group-hover:underline">
               {entry.leads} impact · {entry.articles}{" "}
               {entry.articles === 1 ? "story" : "stories"}
             </span>

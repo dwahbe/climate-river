@@ -41,10 +41,6 @@ summary::-webkit-details-marker {
 @layer base {
   :root {
     color-scheme: light;
-    --bg: #fffdf8;
-    --ink: #0f0f0f;
-    --muted: #6b6b6b;
-    --line: #eceae4;
   }
 
   html {
@@ -57,15 +53,17 @@ summary::-webkit-details-marker {
     @apply h-full bg-zinc-50 text-zinc-900 antialiased;
     max-width: 100%;
   }
-
-  /* No global <a> styling here on purpose */
 }
 
 /* --- Components (scoped helpers) --- */
 @layer components {
-  /* Article/content links only */
+  /* Content links: no underline at rest, underline on hover */
   .content a {
-    @apply underline underline-offset-4 decoration-zinc-300 hover:decoration-zinc-400;
+    text-decoration: none;
+    text-underline-offset: 2px;
+  }
+  .content a:hover {
+    @apply underline underline-offset-4 decoration-zinc-300;
   }
   .content a.headline-link {
     @apply no-underline;
@@ -84,24 +82,10 @@ summary::-webkit-details-marker {
   box-sizing: border-box;
 }
 
-/* Quiet links, underline only on hover */
-.content a {
-  text-decoration: none;
-  text-underline-offset: 2px;
-}
-.content a:hover {
-  text-decoration: underline;
-}
-
 /* Reusable focus ring helper (used via focus-visible:focus-ring) */
 .focus-ring {
   outline: none;
   box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.25);
-}
-
-/* Subtle body text color baseline (optional) */
-body {
-  color: #0a0a0a;
 }
 
 /* Animated gradient border for search input */
