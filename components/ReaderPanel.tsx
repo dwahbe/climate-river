@@ -44,11 +44,7 @@ export default function ReaderPanel({
     : null;
 
   useEffect(() => {
-    if (!articleId) {
-      setData(null);
-      setError(null);
-      return;
-    }
+    if (!articleId) return;
 
     const fetchContent = async () => {
       setLoading(true);
