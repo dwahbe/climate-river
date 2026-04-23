@@ -133,14 +133,14 @@ export default function AboutPage() {
         <span style={{ color: "var(--color-cat-research)" }}>research</span>.
       </p>
       <p className="mt-2 text-zinc-700 text-pretty">
-        Built with Next.js, Tailwind, and Postgres.{" "}
+        Built with Next.js, Tailwind, and Postgres. Climate River is{" "}
         <a
           href="https://github.com/dwahbe/climate-river"
           target="_blank"
           rel="noreferrer"
           className="underline decoration-zinc-300 hover:decoration-zinc-500"
         >
-          Code&nbsp;available on GitHub
+          open source
         </a>
         . Inspired by{" "}
         <a

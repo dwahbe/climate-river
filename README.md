@@ -577,6 +577,8 @@ flowchart LR
 
 ---
 
-**Copyright © 2026 Dylan Wahbe. All rights reserved.**
+## License
 
-This project is **Code Available** - the source code is publicly accessible for learning and reference purposes, but is not open source software. The codebase, design, and intellectual property remain the exclusive property of Dylan Wahbe.
+Copyright © 2026 Dylan Wahbe.
+
+Climate River is open source software licensed under the [Apache License 2.0](./LICENSE). See [`LICENSE`](./LICENSE) and [`NOTICE`](./NOTICE) for full terms.
