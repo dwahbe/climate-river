@@ -5,6 +5,7 @@ import { query, endPool } from "@/lib/db";
 import { isClimateRelevant } from "@/lib/tagger";
 import { generateEmbedding, assignArticleToCluster } from "@/lib/clustering";
 import { canonical, mapLimit } from "@/lib/utils";
+import { resolveTier } from "@/config/sourceTiers";
 
 type RssItem = {
   title?: string;
@@ -69,7 +70,7 @@ async function ensureSchema() {
       name          text not null,
       homepage_url  text,
       feed_url      text not null unique,
-      weight        int not null default 1,
+      weight        int not null default 2,
       slug          text not null
     );
   `);
@@ -110,18 +111,19 @@ async function upsertSourceForHost(host: string) {
   const homepage = `https://${name}`;
   const slug = slugify(name);
   const feed = `discover://${name}`; // stable pseudo-URL to satisfy NOT NULL + uniqueness
+  const weight = resolveTier(name) ?? 2;
 
   const { rows } = await query<{ id: number }>(
     `
       insert into sources (name, homepage_url, feed_url, weight, slug)
-      values ($1, $2, $3, 1, $4)
+      values ($1, $2, $3, $4, $5)
       on conflict (feed_url) do update set
         name = excluded.name,
         homepage_url = excluded.homepage_url,
         slug = excluded.slug
       returning id
     `,
-    [name, homepage, feed, slug],
+    [name, homepage, feed, weight, slug],
   );
   return rows[0].id;
 }

@@ -18,7 +18,7 @@ export async function run() {
       name          text not null,
       homepage_url  text,
       feed_url      text not null unique,
-      weight        int  not null default 1,
+      weight        int  not null default 2,
       slug          text
     );
   `);

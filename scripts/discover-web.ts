@@ -1625,9 +1625,10 @@ async function getOrCreateSourceForResult(
       ? resultSource
       : humanizeHost(host);
 
-  // Default weight of 2 for web-discovered sources (lower than curated RSS sources)
-  // This prevents random/low-quality sites from ranking as high as major outlets
-  const DEFAULT_WEB_DISCOVERED_WEIGHT = 2;
+  // Default weight of 4 for web-discovered sources (lower than curated RSS sources)
+  // This prevents random/low-quality sites from ranking as high as major outlets.
+  // Scale is 1–10; see config/sourceTiers.ts.
+  const DEFAULT_WEB_DISCOVERED_WEIGHT = 4;
 
   const inserted = await query<{ id: number }>(
     `
@@ -1802,7 +1803,7 @@ async function getOrCreateWebDiscoverySource(): Promise<number> {
       "Web Discovery",
       "https://climateriver.org",
       "web-discovery://openai",
-      4.0, // High weight for curated discoveries
+      8, // High weight for curated discoveries (scale 1–10)
       "web-discovery",
     ],
   );

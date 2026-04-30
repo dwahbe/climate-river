@@ -21,6 +21,10 @@
     "prefetch": "bun --env-file=.env.local scripts/prefetch-content.ts",
     "cleanup": "bun --env-file=.env.local scripts/cleanup.ts",
     "cleanup:dry": "bun --env-file=.env.local scripts/cleanup.ts --dry-run",
+    "tier-sources": "bun --env-file=.env.local scripts/set-source-tiers.ts",
+    "tier-sources:apply": "bun --env-file=.env.local scripts/set-source-tiers.ts --apply",
+    "migrate-weights": "bun --env-file=.env.local scripts/migrate-weights-x2.ts",
+    "migrate-weights:apply": "bun --env-file=.env.local scripts/migrate-weights-x2.ts --apply",
     "format": "prettier --write ."
   },
   "dependencies": {

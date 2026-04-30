@@ -47,7 +47,7 @@ export async function run(opts: { closePool?: boolean } = {}) {
           a.dek,
           a.author,
           a.canonical_url,
-          COALESCE(s.weight, 3)         AS src_weight,
+          COALESCE(s.weight, 6)         AS src_weight,
           -- penalties (ints, not booleans)
           (a.canonical_url LIKE 'https://news.google.com%')::int                             AS is_gn,
           (a.canonical_url ~ '(prnewswire|businesswire)\\.com')::int                          AS is_wire,
@@ -68,7 +68,7 @@ export async function run(opts: { closePool?: boolean } = {}) {
         -- freshness: exp( ln(0.5) * age / HL ) with bounds to prevent overflow
         GREATEST(0.0001, EXP( LN(0.5) * LEAST(EXTRACT(EPOCH FROM (now() - COALESCE(published_at, now()))) / ($1 * ${HOUR}), 10) )) AS fresh,
         -- editorial quality (cold-start): source + author + dek - penalties
-        (COALESCE(src_weight,3)) +
+        (COALESCE(src_weight,6)) +
         CASE WHEN NULLIF(TRIM(COALESCE(author,'')), '') IS NOT NULL THEN 0.25 ELSE 0 END +
         CASE WHEN LENGTH(COALESCE(dek,'')) >= 120 THEN 0.10 ELSE 0 END
         - (is_gn * 0.50)  -- demote aggregator
@@ -112,7 +112,7 @@ export async function run(opts: { closePool?: boolean } = {}) {
         c.avg_w,
         c.v4,
         -- coverage: capped to prevent mega-clusters from dominating
-        ( LN(1 + LEAST(COALESCE(c.sum_w,0), 50))
+        ( LN(1 + LEAST(COALESCE(c.sum_w,0), 100))
           + 0.8*LN(1 + LEAST(COALESCE(c.distinct_sources,0), 10))
           + 0.4*LN(1 + LEAST(COALESCE(c.size,0), 15))
         ) AS coverage,
