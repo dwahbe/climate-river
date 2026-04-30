@@ -24,6 +24,10 @@ bun run discover-web # Web discovery via Tavily
 bun run cleanup      # Remove old articles/clusters
 bun run cleanup:dry  # Dry-run cleanup (no DB writes)
 bun run schema       # Init/validate DB schema
+bun run tier-sources         # Preview source-weight changes from config/sourceTiers.ts
+bun run tier-sources:apply   # Apply source-weight changes (writes to DB)
+bun run migrate-weights      # Preview one-shot rescale (legacy 1–5 → 1–10)
+bun run migrate-weights:apply # Apply weight rescale (idempotent: skipped if max>5)
 bun run rewrite:eval # Run model comparison eval (profiles in config/evalProfiles.ts)
 bun run rewrite:eval -- --sample-size 10 --profiles structured-gpt-4.1-mini
 bun run rewrite:eval:report -- --out-dir tmp/rewrite-evals/<dir>  # Generate final report
@@ -78,7 +82,10 @@ All cron/admin endpoints require either:
 - **Semantic clustering** via pgvector cosine similarity
 - **Hybrid search**: full-text + semantic search with Reciprocal Rank Fusion
 - **ISR** on homepage (5min revalidation)
-- **Pipeline logging** to database for health monitoring
+- **Pipeline logging** to database for health monitoring (`pipeline_runs`)
+- **Source weighting**: integer 1–10 tier per outlet (`config/sourceTiers.ts` maps known domains; default 2 for unknown). Drives the editorial-quality term in cluster scoring (`scripts/rescore.ts`)
+- **Engagement events**: `article_events` table records clicks (via `app/api/click/route.ts`) and is the substrate for future CTR-based ranking signals
+- **Rewrite telemetry**: `rewrite_attempts` table captures every model attempt — accepted or rejected — with latency, token counts, and a structured `validation_failures.reason` for failure-mode breakdowns
 - **Model eval framework**: config-driven rewrite comparison (`config/evalProfiles.ts` for profiles/pricing, `lib/evalProviders.ts` for AI SDK provider resolution)
 
 ## Conventions
