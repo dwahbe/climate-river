@@ -222,6 +222,54 @@ export async function run() {
   // RLS: pipeline_runs is internal-only, block all PostgREST access
   await query(`alter table pipeline_runs enable row level security;`);
 
+  // --- article_events (engagement tracking) ---------------------------------
+  // Click handler at app/api/click/route.ts inserts here; the table is also
+  // the substrate for future engagement→ranking feedback (CTR boosts).
+  await query(`
+    create table if not exists article_events (
+      id          bigserial primary key,
+      article_id  bigint references articles(id) on delete cascade,
+      event       text not null,
+      session_id  text,
+      occurred_at timestamptz not null default now()
+    );
+  `);
+  await query(`
+    create index if not exists idx_article_events_lookup
+      on article_events(article_id, event, occurred_at desc);
+  `);
+  // RLS: internal-only, block PostgREST access
+  await query(`alter table article_events enable row level security;`);
+
+  // --- rewrite_attempts (per-attempt rewrite telemetry) ---------------------
+  // Captures every model attempt — accepted or rejected — so failure modes
+  // are observable without crawling logs.
+  await query(`
+    create table if not exists rewrite_attempts (
+      id                  bigserial primary key,
+      article_id          bigint references articles(id) on delete cascade,
+      attempt_idx         int not null,
+      model               text,
+      prompt_tokens       int,
+      cached_tokens       int,
+      output_tokens       int,
+      validation_failures jsonb,
+      accepted            boolean,
+      latency_ms          int,
+      created_at          timestamptz not null default now()
+    );
+  `);
+  await query(`
+    create index if not exists idx_rewrite_attempts_article
+      on rewrite_attempts(article_id, created_at desc);
+  `);
+  await query(`
+    create index if not exists idx_rewrite_attempts_recent
+      on rewrite_attempts(created_at desc);
+  `);
+  // RLS: internal-only, block PostgREST access
+  await query(`alter table rewrite_attempts enable row level security;`);
+
   // --- source feed health columns -------------------------------------------
   await query(
     `alter table if exists sources add column if not exists last_fetched_at timestamptz;`,

@@ -40,12 +40,38 @@ const MAX_SOURCE_SEGMENT = 12_000;
 
 /* ------------------------- Enhanced Validation ------------------------- */
 
-export function passesChecks(
+export type HeadlineFailureReason =
+  | "empty"
+  | "length"
+  | "unchanged"
+  | "too_short_social"
+  | "too_compressed"
+  | "too_short_no_content"
+  | "numeric_missing_in_source"
+  | "numeric_mismatch"
+  | "hallucinated_political_figure"
+  | "clickbait"
+  | "weak_hedging"
+  | "vague_meta_reporting"
+  | "missing_attribution"
+  | "weak_prioritization"
+  | "llm_error";
+
+export type HeadlineCheck =
+  | { ok: true; reason: null }
+  | { ok: false; reason: HeadlineFailureReason };
+
+/**
+ * Structured validator for rewritten headlines. Returns a stable failure
+ * `reason` identifier so per-attempt telemetry (rewrite_attempts) can break
+ * down rejections by failure mode.
+ */
+export function validateHeadline(
   original: string,
   draft: string,
   context: ValidationContext,
-) {
-  if (!draft) return false;
+): HeadlineCheck {
+  if (!draft) return { ok: false, reason: "empty" };
   const t = sanitizeHeadline(draft);
   const { hasContent, sourceQuant } = context;
 
@@ -54,12 +80,8 @@ export function passesChecks(
     console.warn(
       `⚠️  Length check failed (${t.length} chars): "${t.slice(0, 50)}..."`,
     );
-    return false;
+    return { ok: false, reason: "length" };
   }
-
-  // Note: Removed "require quantifier if headline has numbers" check
-  // Rationale: Hallucination check still catches invented numbers,
-  // and LLM may intentionally omit numbers that aren't central to the story
 
   const norm = (s: string) =>
     s
@@ -67,10 +89,9 @@ export function passesChecks(
       .replace(/[\W_]+/g, " ")
       .trim();
 
-  // Must be different from original
   if (!norm(t) || norm(t) === norm(original)) {
     console.warn(`⚠️  Headline unchanged from original`);
-    return false;
+    return { ok: false, reason: "unchanged" };
   }
 
   const draftWords = t.split(/\s+/).length;
@@ -80,21 +101,20 @@ export function passesChecks(
   if (isLikelySocialPost) {
     if (draftWords < 8) {
       console.warn(`⚠️  Headline too short for social post condensation`);
-      return false;
+      return { ok: false, reason: "too_short_social" };
     }
   } else if (hasContent) {
     if (draftWords < originalWords * 0.5) {
       console.warn(`⚠️  Headline too compressed despite having content`);
-      return false;
+      return { ok: false, reason: "too_compressed" };
     }
   } else {
     if (draftWords < 6) {
       console.warn(`⚠️  Headline too short (${draftWords} words)`);
-      return false;
+      return { ok: false, reason: "too_short_no_content" };
     }
   }
 
-  // Ensure numeric claims exist in source material
   const draftNumbers = extractNumericTokens(t);
   if (draftNumbers.length > 0) {
     if (sourceQuant.numbers.size === 0) {
@@ -103,7 +123,7 @@ export function passesChecks(
           ", ",
         )}`,
       );
-      return false;
+      return { ok: false, reason: "numeric_missing_in_source" };
     }
     const missingNumbers = draftNumbers.filter(
       (num) => !sourceQuant.numbers.has(num),
@@ -114,7 +134,7 @@ export function passesChecks(
           ", ",
         )} not found in source material`,
       );
-      return false;
+      return { ok: false, reason: "numeric_mismatch" };
     }
   }
 
@@ -126,26 +146,26 @@ export function passesChecks(
         console.warn(
           `⚠️  Hallucinated political figure "${name}" not found in source material: "${t.slice(0, 60)}..."`,
         );
-        return false;
+        return { ok: false, reason: "hallucinated_political_figure" };
       }
     }
   }
 
   if (CLICKBAIT_PATTERNS.some((p) => p.test(t))) {
     console.warn(`⚠️  Rejected vague/hype language: "${t.slice(0, 50)}..."`);
-    return false;
+    return { ok: false, reason: "clickbait" };
   }
 
   if (WEAK_PATTERNS.some((p) => p.test(t))) {
     console.warn(`⚠️  Rejected weak hedging language: "${t.slice(0, 50)}..."`);
-    return false;
+    return { ok: false, reason: "weak_hedging" };
   }
 
   if (VAGUE_PATTERNS.some((p) => p.test(t))) {
     console.warn(
       `⚠️  Rejected vague/meta-reporting pattern: "${t.slice(0, 50)}..."`,
     );
-    return false;
+    return { ok: false, reason: "vague_meta_reporting" };
   }
 
   const sourceNeedsAttribution = ATTRIBUTION_REQUIRED_SOURCE_PATTERNS.some(
@@ -156,7 +176,7 @@ export function passesChecks(
   );
   if (sourceNeedsAttribution && draftNeedsAttribution && !hasAttribution(t)) {
     console.warn(`⚠️  Rejected missing attribution: "${t.slice(0, 50)}..."`);
-    return false;
+    return { ok: false, reason: "missing_attribution" };
   }
 
   if (
@@ -166,18 +186,34 @@ export function passesChecks(
     !hasAttribution(t)
   ) {
     console.warn(`⚠️  Rejected weak prioritization: "${t.slice(0, 50)}..."`);
-    return false;
+    return { ok: false, reason: "weak_prioritization" };
   }
 
-  // Note: Removed output headline climate term check
-  // Articles already passed isClimateRelevant() during categorization AND rewrite input
-  // The LLM naturally produces climate-relevant headlines from climate content
-  // Removing this check prevents false negatives like "Heat Pumps Prevail..." or "EU ETS reform..."
+  return { ok: true, reason: null };
+}
 
-  return true;
+/**
+ * Backwards-compatible boolean wrapper around {@link validateHeadline}.
+ * Existing tests assert against this signature.
+ */
+export function passesChecks(
+  original: string,
+  draft: string,
+  context: ValidationContext,
+): boolean {
+  return validateHeadline(original, draft, context).ok;
 }
 
 /* ------------------------- LLM Generation ------------------------- */
+
+type GenerateResult = {
+  text: string | null;
+  model: string;
+  notes: string;
+  latencyMs: number;
+  promptTokens: number | null;
+  outputTokens: number | null;
+};
 
 async function generateWithOpenAI(
   input: PromptInput,
@@ -186,15 +222,16 @@ async function generateWithOpenAI(
     abortMs?: number;
     retries?: number;
   } = {},
-): Promise<{ text: string | null; model: string; notes: string }> {
+): Promise<GenerateResult> {
   const system = opts.systemPrompt ?? buildSystemPrompt("legacy");
   const prompt = buildUserPrompt(input, "legacy");
   const abortMs = opts.abortMs ?? 20000;
   const retries = opts.retries ?? 2;
   const model = "gpt-4.1-mini";
+  const startedAt = Date.now();
 
   try {
-    const { text } = await generateText({
+    const result = await generateText({
       model: openai(model),
       system,
       prompt,
@@ -204,7 +241,7 @@ async function generateWithOpenAI(
       abortSignal: AbortSignal.timeout(abortMs),
     });
 
-    const sanitized = sanitizeHeadline(text);
+    const sanitized = sanitizeHeadline(result.text);
     const notesParts = [
       input.contentSnippet
         ? `with_content:${input.contentSnippet.length}chars`
@@ -217,10 +254,22 @@ async function generateWithOpenAI(
       notesParts.push("no_preview");
     }
 
+    const usage = result.usage as
+      | {
+          inputTokens?: number;
+          outputTokens?: number;
+          promptTokens?: number;
+          completionTokens?: number;
+        }
+      | undefined;
+
     return {
       text: sanitized,
       model,
       notes: `success:${notesParts.join(":")}`,
+      latencyMs: Date.now() - startedAt,
+      promptTokens: usage?.inputTokens ?? usage?.promptTokens ?? null,
+      outputTokens: usage?.outputTokens ?? usage?.completionTokens ?? null,
     };
   } catch (error: unknown) {
     console.error("❌ Error generating text with AI SDK:", error);
@@ -229,7 +278,49 @@ async function generateWithOpenAI(
       text: null,
       model,
       notes: `failed:${message}`,
+      latencyMs: Date.now() - startedAt,
+      promptTokens: null,
+      outputTokens: null,
     };
+  }
+}
+
+/**
+ * Telemetry insert. Awaited so it completes before the pool closes; errors
+ * are swallowed so a logging failure never breaks a rewrite.
+ */
+async function logAttempt(args: {
+  articleId: number;
+  attemptIdx: number;
+  model: string;
+  latencyMs: number;
+  accepted: boolean;
+  validationFailures: object | null;
+  promptTokens: number | null;
+  outputTokens: number | null;
+}): Promise<void> {
+  try {
+    await query(
+      `insert into rewrite_attempts
+         (article_id, attempt_idx, model, latency_ms, accepted,
+          validation_failures, prompt_tokens, output_tokens)
+       values ($1, $2, $3, $4, $5, $6::jsonb, $7, $8)`,
+      [
+        args.articleId,
+        args.attemptIdx,
+        args.model,
+        args.latencyMs,
+        args.accepted,
+        args.validationFailures === null
+          ? null
+          : JSON.stringify(args.validationFailures),
+        args.promptTokens,
+        args.outputTokens,
+      ],
+    );
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.warn(`⚠️  Failed to log rewrite attempt: ${msg}`);
   }
 }
 
@@ -377,8 +468,24 @@ async function processOne(r: Row) {
   // First attempt
   const llm = await generateWithOpenAI(promptInput);
   const draft = llm.text || "";
+  const firstCheck: HeadlineCheck = llm.text
+    ? validateHeadline(r.title, draft, validationContext)
+    : { ok: false, reason: "llm_error" };
 
-  if (passesChecks(r.title, draft, validationContext)) {
+  await logAttempt({
+    articleId: r.id,
+    attemptIdx: 1,
+    model: llm.model,
+    latencyMs: llm.latencyMs,
+    accepted: firstCheck.ok,
+    validationFailures: firstCheck.ok
+      ? null
+      : { reason: firstCheck.reason, notes: llm.notes },
+    promptTokens: llm.promptTokens,
+    outputTokens: llm.outputTokens,
+  });
+
+  if (firstCheck.ok) {
     const notes = llm.notes + contentNote;
     await query(
       `update articles
@@ -400,8 +507,24 @@ async function processOne(r: Row) {
     systemPrompt: buildRetrySystemPrompt("legacy"),
   });
   const retryDraft = retryLlm.text || "";
+  const retryCheck: HeadlineCheck = retryLlm.text
+    ? validateHeadline(r.title, retryDraft, validationContext)
+    : { ok: false, reason: "llm_error" };
 
-  if (passesChecks(r.title, retryDraft, validationContext)) {
+  await logAttempt({
+    articleId: r.id,
+    attemptIdx: 2,
+    model: retryLlm.model,
+    latencyMs: retryLlm.latencyMs,
+    accepted: retryCheck.ok,
+    validationFailures: retryCheck.ok
+      ? null
+      : { reason: retryCheck.reason, notes: retryLlm.notes },
+    promptTokens: retryLlm.promptTokens,
+    outputTokens: retryLlm.outputTokens,
+  });
+
+  if (retryCheck.ok) {
     const notes =
       retryLlm.notes.replace("success:", "success:retry:") + contentNote;
     await query(
