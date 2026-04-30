@@ -10,7 +10,7 @@ https://climateriver.org
 
 ```bash
 bun dev              # Dev server (Turbopack default)
-bun run build        # Production build (Turbopack default)
+bun run build        # Production build (webpack; Turbopack mishandles serverExternalPackages for jsdom)
 bun run lint         # ESLint
 bun run format       # Prettier
 bun run test         # Node.js test runner via tsx
@@ -32,7 +32,7 @@ bun run rewrite:eval:report -- --out-dir tmp/rewrite-evals/<dir>  # Generate fin
 ## Tech Stack
 
 - **Runtime**: Node.js, **Bun** as package manager
-- **Framework**: Next.js 16 (App Router, ISR, Turbopack default)
+- **Framework**: Next.js 16 (App Router, ISR; dev uses Turbopack, build uses webpack)
 - **Language**: TypeScript 5.9 (strict mode)
 - **Styling**: Tailwind CSS 4
 - **Database**: PostgreSQL via Supabase (direct `pg` client, no ORM), pgvector for embeddings

@@ -25,6 +25,11 @@ function resolveAllowedOrigins(): string[] {
 }
 
 const nextConfig: NextConfig = {
+  // Keep jsdom unbundled so its transitive ESM deps (html-encoding-sniffer →
+  // @exodus/bytes) resolve at runtime instead of crashing with ERR_REQUIRE_ESM.
+  // Requires the webpack builder; Turbopack rewrites the require() and ignores
+  // this directive (see package.json build script).
+  serverExternalPackages: ["jsdom"],
   experimental: {
     serverActions: { allowedOrigins: resolveAllowedOrigins() },
     useCache: true,
