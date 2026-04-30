@@ -214,19 +214,21 @@ function detectBlocked(text: string): boolean {
   return BLOCKED_INDICATORS.some((pattern) => text.match(pattern));
 }
 
-/**
- * Fetch article content using Defuddle
- * Uses dynamic imports to reduce cold start time
- */
+// Module-scoped import promises. Resolving them at module init (instead of
+// per-call) avoids a race condition where concurrent fetches each trigger
+// dynamic ESM evaluation in parallel, leaving @asamuzakjp/dom-selector in a
+// temporal-dead-zone state ("Cannot access 'DOMSelector' before initialization").
+const jsdomModule = import("jsdom");
+const defuddleModule = import("defuddle/node");
+
 async function fetchArticleContent(url: string): Promise<ReaderResult> {
   const startTime = Date.now();
   const TIMEOUT = 12000; // 12 seconds (increased for slower sites)
 
   try {
-    // Dynamic imports to reduce cold start
     const [{ JSDOM }, { Defuddle }] = await Promise.all([
-      import("jsdom"),
-      import("defuddle/node"),
+      jsdomModule,
+      defuddleModule,
     ]);
 
     // Race between fetch and timeout
