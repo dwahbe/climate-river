@@ -206,6 +206,12 @@ export function passesChecks(
 
 /* ------------------------- LLM Generation ------------------------- */
 
+// OpenAI prompt-cache routing keys. Stable per logical workload — bump the
+// suffix when the system prompt changes materially. Each key stays well
+// under OpenAI's 15 req/min/prefix-key cache-overflow guidance.
+const CACHE_KEY_FIRST_ATTEMPT = "climate-river-rewrite-legacy-v1";
+const CACHE_KEY_RETRY = "climate-river-rewrite-legacy-retry-v1";
+
 type GenerateResult = {
   text: string | null;
   model: string;
@@ -213,12 +219,14 @@ type GenerateResult = {
   latencyMs: number;
   promptTokens: number | null;
   outputTokens: number | null;
+  cachedTokens: number | null;
 };
 
 async function generateWithOpenAI(
   input: PromptInput,
   opts: {
     systemPrompt?: string;
+    cacheKey?: string;
     abortMs?: number;
     retries?: number;
   } = {},
@@ -227,6 +235,7 @@ async function generateWithOpenAI(
   const prompt = buildUserPrompt(input, "legacy");
   const abortMs = opts.abortMs ?? 20000;
   const retries = opts.retries ?? 2;
+  const cacheKey = opts.cacheKey ?? CACHE_KEY_FIRST_ATTEMPT;
   const model = "gpt-4.1-mini";
   const startedAt = Date.now();
 
@@ -239,6 +248,9 @@ async function generateWithOpenAI(
       maxOutputTokens: 80,
       maxRetries: retries,
       abortSignal: AbortSignal.timeout(abortMs),
+      providerOptions: {
+        openai: { promptCacheKey: cacheKey },
+      },
     });
 
     const sanitized = sanitizeHeadline(result.text);
@@ -260,8 +272,21 @@ async function generateWithOpenAI(
           outputTokens?: number;
           promptTokens?: number;
           completionTokens?: number;
+          cachedInputTokens?: number;
+          inputTokenDetails?: { cacheReadTokens?: number };
         }
       | undefined;
+    // AI SDK v6 exposes cached tokens at usage.inputTokenDetails.cacheReadTokens.
+    // Older shapes (usage.cachedInputTokens, providerMetadata.openai.cachedPromptTokens)
+    // are kept as fallbacks for forward/back compat.
+    const openaiMeta = result.providerMetadata?.openai as
+      | { cachedPromptTokens?: number }
+      | undefined;
+    const cachedTokens =
+      usage?.inputTokenDetails?.cacheReadTokens ??
+      usage?.cachedInputTokens ??
+      openaiMeta?.cachedPromptTokens ??
+      null;
 
     return {
       text: sanitized,
@@ -270,6 +295,7 @@ async function generateWithOpenAI(
       latencyMs: Date.now() - startedAt,
       promptTokens: usage?.inputTokens ?? usage?.promptTokens ?? null,
       outputTokens: usage?.outputTokens ?? usage?.completionTokens ?? null,
+      cachedTokens: typeof cachedTokens === "number" ? cachedTokens : null,
     };
   } catch (error: unknown) {
     console.error("❌ Error generating text with AI SDK:", error);
@@ -281,6 +307,7 @@ async function generateWithOpenAI(
       latencyMs: Date.now() - startedAt,
       promptTokens: null,
       outputTokens: null,
+      cachedTokens: null,
     };
   }
 }
@@ -297,14 +324,15 @@ async function logAttempt(args: {
   accepted: boolean;
   validationFailures: object | null;
   promptTokens: number | null;
+  cachedTokens: number | null;
   outputTokens: number | null;
 }): Promise<void> {
   try {
     await query(
       `insert into rewrite_attempts
          (article_id, attempt_idx, model, latency_ms, accepted,
-          validation_failures, prompt_tokens, output_tokens)
-       values ($1, $2, $3, $4, $5, $6::jsonb, $7, $8)`,
+          validation_failures, prompt_tokens, cached_tokens, output_tokens)
+       values ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9)`,
       [
         args.articleId,
         args.attemptIdx,
@@ -315,6 +343,7 @@ async function logAttempt(args: {
           ? null
           : JSON.stringify(args.validationFailures),
         args.promptTokens,
+        args.cachedTokens,
         args.outputTokens,
       ],
     );
@@ -482,6 +511,7 @@ async function processOne(r: Row) {
       ? null
       : { reason: firstCheck.reason, notes: llm.notes },
     promptTokens: llm.promptTokens,
+    cachedTokens: llm.cachedTokens,
     outputTokens: llm.outputTokens,
   });
 
@@ -502,9 +532,11 @@ async function processOne(r: Row) {
     return { ok: 1, failed: 0 };
   }
 
-  // Retry once with a more direct prompt
+  // Retry once with a more direct prompt — different system prompt means a
+  // different stable prefix, so route it under its own cache key.
   const retryLlm = await generateWithOpenAI(promptInput, {
     systemPrompt: buildRetrySystemPrompt("legacy"),
+    cacheKey: CACHE_KEY_RETRY,
   });
   const retryDraft = retryLlm.text || "";
   const retryCheck: HeadlineCheck = retryLlm.text
@@ -521,6 +553,7 @@ async function processOne(r: Row) {
       ? null
       : { reason: retryCheck.reason, notes: retryLlm.notes },
     promptTokens: retryLlm.promptTokens,
+    cachedTokens: retryLlm.cachedTokens,
     outputTokens: retryLlm.outputTokens,
   });
 
