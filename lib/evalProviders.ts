@@ -12,6 +12,13 @@ const PROVIDER_LOADERS: Record<string, () => Promise<ProviderFactory>> = {
     const { openai } = await import("@ai-sdk/openai");
     return (modelId) => openai(modelId);
   },
+  // Vercel AI Gateway — routes "<provider>/<model>" through ai-gateway.vercel.sh
+  // using AI_GATEWAY_API_KEY. Lets us test Anthropic/Google/etc without
+  // installing per-provider SDK packages.
+  gateway: async () => {
+    const { gateway } = await import("ai");
+    return (modelId) => gateway(modelId);
+  },
 };
 
 /**

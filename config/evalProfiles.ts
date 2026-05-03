@@ -29,8 +29,15 @@ export const MODEL_PRICING: Record<string, ModelPricing> = {
   "gpt-4.1-mini": { inputPerMillion: 0.4, outputPerMillion: 1.6 },
   "gpt-4.1-nano": { inputPerMillion: 0.1, outputPerMillion: 0.4 },
   "gpt-4o-mini": { inputPerMillion: 0.15, outputPerMillion: 0.6 },
+  "gpt-5.4-nano": { inputPerMillion: 0.2, outputPerMillion: 1.25 },
   "claude-sonnet-4-20250514": { inputPerMillion: 3.0, outputPerMillion: 15.0 },
   "claude-haiku-3-5-20241022": { inputPerMillion: 0.8, outputPerMillion: 4.0 },
+  // Gateway-routed: pricing is provider's published rate (no Vercel markup).
+  "anthropic/claude-haiku-4-5": { inputPerMillion: 1.0, outputPerMillion: 5.0 },
+  "google/gemini-2.5-flash-lite": {
+    inputPerMillion: 0.1,
+    outputPerMillion: 0.4,
+  },
 };
 
 /**
@@ -50,6 +57,33 @@ export const DEFAULT_EVAL_PROFILES: EvalProfile[] = [
     maxOutputTokens: 80,
   },
   {
+    id: "legacy-gpt-4.1-nano",
+    provider: "openai",
+    modelId: "gpt-4.1-nano",
+    promptVariant: "legacy",
+    retryPromptVariant: "legacy",
+    temperature: 0.15,
+    maxOutputTokens: 80,
+  },
+  {
+    id: "legacy-gpt-4o-mini",
+    provider: "openai",
+    modelId: "gpt-4o-mini",
+    promptVariant: "legacy",
+    retryPromptVariant: "legacy",
+    temperature: 0.15,
+    maxOutputTokens: 80,
+  },
+  {
+    id: "legacy-gpt-5.4-nano",
+    provider: "openai",
+    modelId: "gpt-5.4-nano",
+    promptVariant: "legacy",
+    retryPromptVariant: "legacy",
+    temperature: 0.15,
+    maxOutputTokens: 80,
+  },
+  {
     id: "structured-gpt-4.1-mini",
     provider: "openai",
     modelId: "gpt-4.1-mini",
@@ -58,14 +92,23 @@ export const DEFAULT_EVAL_PROFILES: EvalProfile[] = [
     temperature: 0.15,
     maxOutputTokens: 80,
   },
-  // Example: Anthropic model (uncomment after `bun add @ai-sdk/anthropic`)
-  // {
-  //   id: "structured-claude-sonnet-4",
-  //   provider: "anthropic",
-  //   modelId: "claude-sonnet-4-20250514",
-  //   promptVariant: "structured",
-  //   retryPromptVariant: "structured",
-  //   temperature: 0.15,
-  //   maxOutputTokens: 80,
-  // },
+  // Gateway-routed candidates (no per-provider SDK needed; uses AI_GATEWAY_API_KEY).
+  {
+    id: "legacy-claude-haiku-4-5",
+    provider: "gateway",
+    modelId: "anthropic/claude-haiku-4-5",
+    promptVariant: "legacy",
+    retryPromptVariant: "legacy",
+    temperature: 0.15,
+    maxOutputTokens: 80,
+  },
+  {
+    id: "legacy-gemini-2.5-flash-lite",
+    provider: "gateway",
+    modelId: "google/gemini-2.5-flash-lite",
+    promptVariant: "legacy",
+    retryPromptVariant: "legacy",
+    temperature: 0.15,
+    maxOutputTokens: 80,
+  },
 ];
