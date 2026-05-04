@@ -17,6 +17,7 @@
     "rewrite": "bun --env-file=.env.local scripts/rewrite.ts",
     "rewrite:eval": "bun --env-file=.env.local scripts/rewrite-bakeoff.ts",
     "rewrite:eval:report": "bun --env-file=.env.local scripts/rewrite-bakeoff.ts --mode report",
+    "websearch:eval": "bun --env-file=.env.local scripts/web-search-eval.ts",
     "categorize": "bun --env-file=.env.local scripts/categorize.ts",
     "prefetch": "bun --env-file=.env.local scripts/prefetch-content.ts",
     "cleanup": "bun --env-file=.env.local scripts/cleanup.ts",

@@ -31,6 +31,8 @@ bun run migrate-weights:apply # Apply weight rescale (idempotent: skipped if max
 bun run rewrite:eval # Run model comparison eval (profiles in config/evalProfiles.ts)
 bun run rewrite:eval -- --sample-size 10 --profiles structured-gpt-4.1-mini
 bun run rewrite:eval:report -- --out-dir tmp/rewrite-evals/<dir>  # Generate final report
+bun run websearch:eval # Compare web-search prompt variants (profiles in config/webSearchProfiles.ts)
+bun run websearch:eval -- --profiles gpt-4.1-mini-v1,gpt-4.1-mini-v4 --repeat 3 --skip-reachability
 ```
 
 ## Tech Stack
@@ -87,6 +89,7 @@ All cron/admin endpoints require either:
 - **Engagement events**: `article_events` table records clicks (via `app/api/click/route.ts`) and is the substrate for future CTR-based ranking signals
 - **Rewrite telemetry**: `rewrite_attempts` table captures every model attempt — accepted or rejected — with latency, token counts, and a structured `validation_failures.reason` for failure-mode breakdowns
 - **Model eval framework**: config-driven rewrite comparison (`config/evalProfiles.ts` for profiles/pricing, `lib/evalProviders.ts` for AI SDK provider resolution)
+- **Web-search model eval**: separate framework for comparing OpenAI models on the discover-web fallback prompt (`config/webSearchProfiles.ts`, `scripts/web-search-eval.ts`). Reuses production prompts and parsers; scores parse rate, domain/freshness compliance, fabrication rate, URL reachability, tool-call efficiency, and cost per valid result.
 
 ## Conventions
 

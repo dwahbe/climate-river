@@ -5,17 +5,27 @@ import { openai } from "@ai-sdk/openai";
 import { tavily } from "@tavily/core";
 import { categorizeAndStoreArticle } from "@/lib/categorizer";
 import { isClimateRelevant } from "@/lib/tagger";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { Buffer } from "node:buffer";
+import { randomUUID } from "node:crypto";
 import {
   CURATED_CLIMATE_OUTLETS,
   type ClimateOutlet,
 } from "@/config/climateOutlets";
+import {
+  buildSystemPrompt,
+  buildUserPrompt,
+  type PromptInputs,
+} from "@/config/webSearchProfiles";
 import { generateEmbedding, assignArticleToCluster } from "@/lib/clustering";
 import {
   canonical,
   cleanGoogleNewsTitle,
   isValidArticleDate,
   extractPublisherFromRssItem,
+  parseEnvFloat,
+  parseEnvInt,
+  type ArticleDateValidation,
 } from "@/lib/utils";
 
 // Tavily client for cost-effective site-specific search
@@ -27,7 +37,53 @@ const tavilyClient = TAVILY_ENABLED
 const TAVILY_SEARCH_DEPTH = (process.env.TAVILY_SEARCH_DEPTH || "basic") as
   | "basic"
   | "advanced";
-const TAVILY_COST_PER_SEARCH = TAVILY_SEARCH_DEPTH === "basic" ? 0.002 : 0.004;
+const TAVILY_COST_PER_SEARCH = parseEnvFloat(
+  "TAVILY_COST_PER_SEARCH_USD",
+  TAVILY_SEARCH_DEPTH === "basic"
+    ? parseEnvFloat("TAVILY_BASIC_SEARCH_COST_USD", 0.008)
+    : parseEnvFloat("TAVILY_ADVANCED_SEARCH_COST_USD", 0.016),
+);
+
+type DiscoveryProvider =
+  | "tavily"
+  | "openai_web_search"
+  | "openai_google_suggestions"
+  | "google_news_rss";
+
+type DiscoverySegment = "broad" | "outlet" | "google_news";
+
+type DiscoveryOutcomeReason =
+  | "inserted"
+  | "invalid_title"
+  | "non_climate"
+  | "duplicate_url"
+  | "duplicate_title"
+  | "duplicate_candidate"
+  | "missing_date"
+  | "stale"
+  | "invalid_date"
+  | "fabricated_url"
+  | "aggregator_url"
+  | "out_of_domain"
+  | "unreachable"
+  | "insert_failed"
+  | "article_cap_reached";
+
+type DiscoveryOutcome = {
+  accepted: boolean;
+  reason: DiscoveryOutcomeReason;
+  articleId?: number;
+  duplicateArticleId?: number;
+};
+
+export type WebSearchDiscoveryMeta = {
+  provider?: DiscoveryProvider;
+  query?: string;
+  rank?: number;
+  searchId?: number;
+  candidateId?: number;
+  raw?: unknown;
+};
 
 export type WebSearchResult = {
   title: string;
@@ -36,6 +92,7 @@ export type WebSearchResult = {
   publishedDate?: string;
   source?: string;
   publisherHomepage?: string;
+  discovery?: WebSearchDiscoveryMeta;
 };
 
 type WebBrowseStats = {
@@ -55,11 +112,7 @@ type WebSearchOverrides = {
   userPrompt?: string;
   resultLimit?: number;
   allowedDomains?: string[];
-};
-
-type EnhancedSearchResult = {
-  results: WebSearchResult[];
-  browseStats: WebBrowseStats | null;
+  segment?: DiscoverySegment;
 };
 
 const GOOGLE_SUGGESTION_MODEL =
@@ -70,7 +123,7 @@ const GOOGLE_SUGGESTION_MAX_OUTPUT_TOKENS = parseEnvInt(
 );
 
 const WEB_SEARCH_ENABLED = process.env.WEB_SEARCH_ENABLED !== "0";
-const WEB_SEARCH_MODEL = process.env.WEB_SEARCH_MODEL || "gpt-4o-mini"; // Use mini for cost savings
+const WEB_SEARCH_MODEL = process.env.WEB_SEARCH_MODEL || "gpt-4.1-mini";
 const WEB_SEARCH_MAX_OUTPUT_TOKENS = parseEnvInt(
   "WEB_SEARCH_MAX_OUTPUT_TOKENS",
   800, // Increased to allow full JSON responses
@@ -85,6 +138,7 @@ const WEB_SEARCH_ALLOWED_DOMAINS = process.env.WEB_SEARCH_ALLOWED_DOMAINS
       .map((domain) => domain.trim())
       .filter(Boolean)
   : undefined;
+const WEB_SEARCH_FORCE_TOOL = process.env.WEB_SEARCH_FORCE_TOOL !== "0";
 const WEB_SEARCH_DEBUG = process.env.WEB_SEARCH_DEBUG === "1";
 const DISCOVERY_PAUSE_MS = 1000; // Reduced from 2000ms for faster processing
 const DEFAULT_OUTLET_FRESHNESS_HOURS = 72; // Reduced from 96 for fresher content
@@ -227,16 +281,18 @@ const GOOGLE_SUGGESTION_OUTLET_EXAMPLES = (
   .map((outlet) => outlet.name)
   .join(", ");
 
-const OPENAI_WEB_SEARCH_INPUT_PER_M = 2.5;
-const OPENAI_WEB_SEARCH_OUTPUT_PER_M = 10;
-const OPENAI_WEB_SEARCH_TOOL_CALL_COST = 0.015;
-
-function parseEnvInt(name: string, defaultValue: number): number {
-  const raw = process.env[name];
-  if (!raw) return defaultValue;
-  const parsed = Number.parseInt(raw, 10);
-  return Number.isFinite(parsed) ? parsed : defaultValue;
-}
+const OPENAI_WEB_SEARCH_INPUT_PER_M = parseEnvFloat(
+  "OPENAI_WEB_SEARCH_INPUT_PER_M",
+  2.5,
+);
+const OPENAI_WEB_SEARCH_OUTPUT_PER_M = parseEnvFloat(
+  "OPENAI_WEB_SEARCH_OUTPUT_PER_M",
+  10,
+);
+const OPENAI_WEB_SEARCH_TOOL_CALL_COST = parseEnvFloat(
+  "OPENAI_WEB_SEARCH_TOOL_CALL_COST_USD",
+  0.01,
+);
 
 function estimateWebSearchCost(
   usage: WebBrowseStats["usage"] | null | undefined,
@@ -274,6 +330,410 @@ function estimateWebSearchCost(
   return Number.isFinite(totalCost) ? totalCost : 0;
 }
 
+type ProviderRunStats = {
+  searches: number;
+  candidates: number;
+  inserted: number;
+  rejected: number;
+  estimatedCost: number;
+  toolCalls: number;
+  latencyMs: number;
+};
+
+type DiscoverySearchLog = {
+  provider: DiscoveryProvider;
+  segment: DiscoverySegment;
+  searchQuery: string;
+  requestedDomains?: string[];
+  model?: string;
+  searchDepth?: string;
+  toolCalls?: number;
+  resultCount: number;
+  costUsd?: number;
+  latencyMs?: number;
+  status: "success" | "error";
+  errorMsg?: string;
+};
+
+class DiscoveryTelemetry {
+  readonly runId = randomUUID();
+  telemetryReady = false;
+  telemetryUnavailable = false;
+  providerRunStats = new Map<DiscoveryProvider, ProviderRunStats>();
+}
+
+const fallbackDiscoveryTelemetry = new DiscoveryTelemetry();
+const discoveryTelemetryScope = new AsyncLocalStorage<DiscoveryTelemetry>();
+
+function currentDiscoveryTelemetry(): DiscoveryTelemetry {
+  return discoveryTelemetryScope.getStore() ?? fallbackDiscoveryTelemetry;
+}
+
+function getProviderStats(provider: DiscoveryProvider): ProviderRunStats {
+  const statsByProvider = currentDiscoveryTelemetry().providerRunStats;
+  const existing = statsByProvider.get(provider);
+  if (existing) return existing;
+
+  const initialized: ProviderRunStats = {
+    searches: 0,
+    candidates: 0,
+    inserted: 0,
+    rejected: 0,
+    estimatedCost: 0,
+    toolCalls: 0,
+    latencyMs: 0,
+  };
+  statsByProvider.set(provider, initialized);
+  return initialized;
+}
+
+function recordSearchStats(log: DiscoverySearchLog) {
+  const stats = getProviderStats(log.provider);
+  stats.searches += 1;
+  stats.candidates += log.resultCount;
+  stats.estimatedCost += log.costUsd ?? 0;
+  stats.toolCalls += log.toolCalls ?? 0;
+  stats.latencyMs += log.latencyMs ?? 0;
+}
+
+function recordOutcomeStats(
+  result: WebSearchResult,
+  outcome: DiscoveryOutcome,
+) {
+  if (!result.discovery?.provider) return;
+  const stats = getProviderStats(result.discovery.provider);
+  if (outcome.accepted) {
+    stats.inserted += 1;
+  } else {
+    stats.rejected += 1;
+  }
+}
+
+function summarizeProviderStats() {
+  const statsByProvider = currentDiscoveryTelemetry().providerRunStats;
+  return Object.fromEntries(
+    [...statsByProvider.entries()].map(([provider, stats]) => [
+      provider,
+      {
+        searches: stats.searches,
+        candidates: stats.candidates,
+        inserted: stats.inserted,
+        rejected: stats.rejected,
+        estimatedCost: Number(stats.estimatedCost.toFixed(6)),
+        toolCalls: stats.toolCalls,
+        latencyMs: stats.latencyMs,
+      },
+    ]),
+  );
+}
+
+async function ensureDiscoveryTelemetryTables(): Promise<boolean> {
+  const telemetry = currentDiscoveryTelemetry();
+  if (telemetry.telemetryReady) return true;
+  if (telemetry.telemetryUnavailable) return false;
+
+  try {
+    const { rows } = await query<{
+      searches: string | null;
+      candidates: string | null;
+    }>(`
+      SELECT
+        to_regclass('public.discovery_searches')::text AS searches,
+        to_regclass('public.discovery_candidates')::text AS candidates
+    `);
+    const ready = Boolean(rows[0]?.searches && rows[0]?.candidates);
+    telemetry.telemetryReady = ready;
+    telemetry.telemetryUnavailable = !ready;
+    if (!ready) {
+      console.warn(
+        "Discovery telemetry tables are missing; run `bun run schema` to enable logging.",
+      );
+    }
+    return ready;
+  } catch (error) {
+    telemetry.telemetryUnavailable = true;
+    console.error("Failed to check discovery telemetry tables:", error);
+    return false;
+  }
+}
+
+function safeJsonValue(value: unknown): unknown {
+  if (value == null) return null;
+  try {
+    return JSON.parse(JSON.stringify(value));
+  } catch {
+    return { serializationError: true };
+  }
+}
+
+type SearchTelemetryMeta = Pick<
+  DiscoverySearchLog,
+  | "provider"
+  | "segment"
+  | "searchQuery"
+  | "requestedDomains"
+  | "model"
+  | "searchDepth"
+>;
+
+type SearchOutcome =
+  | {
+      status: "success";
+      resultCount: number;
+      toolCalls?: number;
+      costUsd?: number;
+    }
+  | { status: "error"; error: unknown };
+
+/**
+ * Single entry point for the success/error dance every provider call repeats:
+ * stamps latency, normalizes the error message, and forwards to logDiscoverySearch.
+ */
+async function logSearchOutcome(
+  meta: SearchTelemetryMeta,
+  startedAt: number,
+  outcome: SearchOutcome,
+): Promise<number | null> {
+  const latencyMs = Date.now() - startedAt;
+  if (outcome.status === "success") {
+    return logDiscoverySearch({
+      ...meta,
+      status: "success",
+      resultCount: outcome.resultCount,
+      toolCalls: outcome.toolCalls,
+      costUsd: outcome.costUsd,
+      latencyMs,
+    });
+  }
+  return logDiscoverySearch({
+    ...meta,
+    status: "error",
+    resultCount: 0,
+    costUsd: 0,
+    latencyMs,
+    errorMsg:
+      outcome.error instanceof Error
+        ? outcome.error.message
+        : String(outcome.error),
+  });
+}
+
+async function logDiscoverySearch(
+  log: DiscoverySearchLog,
+): Promise<number | null> {
+  recordSearchStats(log);
+
+  if (!(await ensureDiscoveryTelemetryTables())) {
+    return null;
+  }
+
+  try {
+    const { rows } = await query<{ id: number }>(
+      `
+      INSERT INTO discovery_searches (
+        run_id,
+        provider,
+        segment,
+        query,
+        requested_domains,
+        model,
+        search_depth,
+        tool_calls,
+        result_count,
+        cost_usd,
+        latency_ms,
+        status,
+        error_msg
+      )
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+      RETURNING id
+    `,
+      [
+        currentDiscoveryTelemetry().runId,
+        log.provider,
+        log.segment,
+        log.searchQuery,
+        log.requestedDomains ?? null,
+        log.model ?? null,
+        log.searchDepth ?? null,
+        log.toolCalls ?? 0,
+        log.resultCount,
+        log.costUsd ?? null,
+        log.latencyMs ?? null,
+        log.status,
+        log.errorMsg ?? null,
+      ],
+    );
+    return rows[0]?.id ?? null;
+  } catch (error) {
+    console.error("Failed to log discovery search:", error);
+    return null;
+  }
+}
+
+async function attachDiscoveryCandidates(
+  results: WebSearchResult[],
+  params: {
+    provider: DiscoveryProvider;
+    searchId: number | null;
+    searchQuery: string;
+  },
+): Promise<WebSearchResult[]> {
+  const annotated = results.map(
+    (result, index): WebSearchResult => ({
+      ...result,
+      discovery: {
+        ...(result.discovery ?? {}),
+        provider: params.provider,
+        searchId: params.searchId ?? undefined,
+        query: params.searchQuery,
+        rank: index + 1,
+      },
+    }),
+  );
+
+  if (!params.searchId || !(await ensureDiscoveryTelemetryTables())) {
+    return annotated;
+  }
+
+  try {
+    const payload = annotated.map((result) => {
+      const canonicalUrl = canonical(extractRealUrl(result.url));
+      return {
+        rank: result.discovery?.rank ?? null,
+        title: result.title,
+        url: result.url,
+        canonical_url: canonicalUrl,
+        host: hostFromUrl(canonicalUrl),
+        published_at: normalizePublishedDate(result.publishedDate),
+        raw_published_at: result.publishedDate ?? null,
+        source_name: result.source ?? null,
+        snippet: result.snippet ?? null,
+        raw: safeJsonValue(result.discovery?.raw),
+      };
+    });
+
+    const { rows } = await query<{ id: number; rank: number }>(
+      `
+      WITH payload AS (
+        SELECT *
+        FROM jsonb_to_recordset($1::jsonb) AS x(
+          rank int,
+          title text,
+          url text,
+          canonical_url text,
+          host text,
+          published_at timestamptz,
+          raw_published_at text,
+          source_name text,
+          snippet text,
+          raw jsonb
+        )
+      )
+        INSERT INTO discovery_candidates (
+          discovery_search_id,
+          provider,
+          rank,
+          title,
+          url,
+          canonical_url,
+          host,
+          published_at,
+          raw_published_at,
+          source_name,
+          snippet,
+          raw
+        )
+        SELECT
+          $2,
+          $3,
+          rank,
+          title,
+          url,
+          canonical_url,
+          host,
+          published_at,
+          raw_published_at,
+          source_name,
+          snippet,
+          raw
+        FROM payload
+        RETURNING id, rank
+      `,
+      [JSON.stringify(payload), params.searchId, params.provider],
+    );
+
+    const idsByRank = new Map(rows.map((row) => [row.rank, row.id]));
+    return annotated.map((result): WebSearchResult => {
+      const rank = result.discovery?.rank;
+      return {
+        ...result,
+        discovery: {
+          ...(result.discovery ?? {}),
+          candidateId: rank == null ? undefined : idsByRank.get(rank),
+        },
+      };
+    });
+  } catch (error) {
+    console.error("Failed to log discovery candidates:", error);
+    return annotated;
+  }
+}
+
+type CandidateOutcomeRecord = {
+  result: WebSearchResult;
+  outcome: DiscoveryOutcome;
+};
+
+async function recordDiscoveryCandidateOutcomes(
+  records: CandidateOutcomeRecord[],
+) {
+  for (const { result, outcome } of records) {
+    recordOutcomeStats(result, outcome);
+  }
+
+  const updates = records
+    .filter(({ result }) => result.discovery?.candidateId)
+    .map(({ result, outcome }) => ({
+      id: result.discovery!.candidateId!,
+      accepted: outcome.accepted,
+      rejection_reason: outcome.accepted ? null : outcome.reason,
+      article_id: outcome.articleId ?? null,
+      duplicate_article_id: outcome.duplicateArticleId ?? null,
+    }));
+
+  if (updates.length === 0 || !(await ensureDiscoveryTelemetryTables())) {
+    return;
+  }
+
+  try {
+    await query(
+      `
+      WITH payload AS (
+        SELECT *
+        FROM jsonb_to_recordset($1::jsonb) AS x(
+          id bigint,
+          accepted boolean,
+          rejection_reason text,
+          article_id bigint,
+          duplicate_article_id bigint
+        )
+      )
+      UPDATE discovery_candidates c
+      SET accepted = payload.accepted,
+          rejection_reason = payload.rejection_reason,
+          article_id = payload.article_id,
+          duplicate_article_id = payload.duplicate_article_id
+      FROM payload
+      WHERE c.id = payload.id
+    `,
+      [JSON.stringify(updates)],
+    );
+  } catch (error) {
+    console.error("Failed to update discovery candidate outcomes:", error);
+  }
+}
+
 function dedupeWebResults(results: WebSearchResult[]): WebSearchResult[] {
   const seen = new Set<string>();
   return results.filter((result) => {
@@ -285,6 +745,54 @@ function dedupeWebResults(results: WebSearchResult[]): WebSearchResult[] {
     seen.add(key);
     return true;
   });
+}
+
+async function dedupeWebResultsForProcessing(
+  results: WebSearchResult[],
+): Promise<WebSearchResult[]> {
+  const seen = new Set<string>();
+  const deduped: WebSearchResult[] = [];
+  const duplicateOutcomes: CandidateOutcomeRecord[] = [];
+
+  for (const result of results) {
+    const urlKey = result.url ? canonical(result.url).toLowerCase() : "";
+    const titleKey = result.title ? result.title.trim().toLowerCase() : "";
+    const key = urlKey || titleKey;
+    if (!key) continue;
+
+    if (seen.has(key)) {
+      duplicateOutcomes.push({
+        result,
+        outcome: {
+          accepted: false,
+          reason: "duplicate_candidate",
+        },
+      });
+      continue;
+    }
+
+    seen.add(key);
+    deduped.push(result);
+  }
+
+  await recordDiscoveryCandidateOutcomes(duplicateOutcomes);
+
+  return deduped;
+}
+
+async function markUnprocessedCandidates(
+  results: WebSearchResult[],
+  reason: DiscoveryOutcomeReason,
+) {
+  await recordDiscoveryCandidateOutcomes(
+    results.map((result) => ({
+      result,
+      outcome: {
+        accepted: false,
+        reason,
+      },
+    })),
+  );
 }
 
 function slugifyHost(host: string): string {
@@ -684,10 +1192,17 @@ async function callOpenAIWebSearch(
     return { results: [], stats: null };
   }
 
+  const startedAt = Date.now();
+  const segment = overrides?.segment ?? "outlet";
+  const requestedLimit = overrides?.resultLimit ?? WEB_SEARCH_RESULT_LIMIT;
+  const allowedDomains =
+    overrides?.allowedDomains && overrides.allowedDomains.length > 0
+      ? overrides.allowedDomains
+      : WEB_SEARCH_ALLOWED_DOMAINS;
+
   try {
     console.log(`🔎 OpenAI web search: ${query}`);
 
-    const requestedLimit = overrides?.resultLimit ?? WEB_SEARCH_RESULT_LIMIT;
     const systemMessage =
       overrides?.systemPrompt ??
       `You are ClimateRiver's climate desk scout. Use the web search tool to find recent climate articles.
@@ -707,13 +1222,7 @@ Rules:
     const userMessage =
       overrides?.userPrompt ??
       `Find up to ${requestedLimit} vetted climate or environment-related articles for: "${query}". Require publish dates within the past 72 hours, prioritize investigative/policy/science/finance impact, and ensure each entry includes a trustworthy ISO timestamp. If fewer than ${requestedLimit} items qualify, only return the smaller set. Sort newest to oldest before responding.`;
-    const allowedDomains =
-      overrides?.allowedDomains && overrides.allowedDomains.length > 0
-        ? overrides.allowedDomains
-        : WEB_SEARCH_ALLOWED_DOMAINS;
 
-    // Note: filters.allowedDomains is NOT supported with gpt-4o-mini
-    // We rely on the prompt to guide domain-specific searches and post-filter results
     const response = await generateText({
       model: openai(WEB_SEARCH_MODEL),
       messages: [
@@ -729,9 +1238,14 @@ Rules:
       tools: {
         webSearch: openai.tools.webSearch({
           searchContextSize: WEB_SEARCH_CONTEXT_SIZE,
+          ...(allowedDomains && allowedDomains.length > 0
+            ? { filters: { allowedDomains } }
+            : {}),
         }),
       },
-      toolChoice: "auto",
+      toolChoice: WEB_SEARCH_FORCE_TOOL
+        ? { type: "tool", toolName: "webSearch" }
+        : "auto",
       maxOutputTokens: WEB_SEARCH_MAX_OUTPUT_TOKENS,
       providerOptions: {
         openai: {
@@ -867,6 +1381,25 @@ Rules:
       console.log(`OpenAI web search returned ${results.length} results`);
     }
 
+    const meta: SearchTelemetryMeta = {
+      provider: "openai_web_search",
+      segment,
+      searchQuery: query,
+      requestedDomains: allowedDomains,
+      model: WEB_SEARCH_MODEL,
+    };
+    const searchId = await logSearchOutcome(meta, startedAt, {
+      status: "success",
+      resultCount: results.length,
+      toolCalls,
+      costUsd: estimatedCost,
+    });
+    results = await attachDiscoveryCandidates(results, {
+      provider: "openai_web_search",
+      searchId,
+      searchQuery: query,
+    });
+
     return {
       results,
       stats: {
@@ -877,6 +1410,17 @@ Rules:
     };
   } catch (error) {
     console.error("Error calling OpenAI web search:", error);
+    await logSearchOutcome(
+      {
+        provider: "openai_web_search",
+        segment,
+        searchQuery: query,
+        requestedDomains: allowedDomains,
+        model: WEB_SEARCH_MODEL,
+      },
+      startedAt,
+      { status: "error", error },
+    );
     return { results: [], stats: { estimatedCost: 0, toolCalls: 0 } };
   }
 }
@@ -885,27 +1429,28 @@ Rules:
 async function searchViaTavily(
   domain: string,
   maxResults = 5,
+  segment: DiscoverySegment = "outlet",
 ): Promise<{ results: WebSearchResult[]; cost: number }> {
   if (!TAVILY_ENABLED) {
     return { results: [], cost: 0 };
   }
+
+  const searchQuery = `site:${domain} climate energy environment`;
+  const startedAt = Date.now();
 
   try {
     console.log(`🔍 Tavily search: site:${domain} climate`);
 
     // Tavily SDK: search(query: string, options?: TavilySearchOptions)
     // tavilyClient is guaranteed non-null here because TAVILY_ENABLED check above
-    const response = await tavilyClient!.search(
-      `site:${domain} climate energy environment`,
-      {
-        searchDepth: TAVILY_SEARCH_DEPTH,
-        includeAnswer: false,
-        maxResults,
-        includeDomains: [domain], // Use native domain filtering
-        topic: "news", // Focus on news articles
-        days: 7, // Last 7 days
-      },
-    );
+    const response = await tavilyClient!.search(searchQuery, {
+      searchDepth: TAVILY_SEARCH_DEPTH,
+      includeAnswer: false,
+      maxResults,
+      includeDomains: [domain], // Use native domain filtering
+      topic: "news", // Focus on news articles
+      days: 7, // Last 7 days
+    });
 
     const results: WebSearchResult[] = response.results
       .filter((r) => {
@@ -947,15 +1492,47 @@ async function searchViaTavily(
         snippet: cleanSnippet(r.content),
         publishedDate: r.publishedDate,
         source: domain,
+        discovery: { raw: r },
       }));
 
     console.log(
       `  Tavily returned ${results.length} results (~$${TAVILY_COST_PER_SEARCH.toFixed(4)})`,
     );
 
-    return { results, cost: TAVILY_COST_PER_SEARCH };
+    const meta: SearchTelemetryMeta = {
+      provider: "tavily",
+      segment,
+      searchQuery,
+      requestedDomains: [domain],
+      searchDepth: TAVILY_SEARCH_DEPTH,
+    };
+    const searchId = await logSearchOutcome(meta, startedAt, {
+      status: "success",
+      resultCount: results.length,
+      costUsd: TAVILY_COST_PER_SEARCH,
+    });
+
+    return {
+      results: await attachDiscoveryCandidates(results, {
+        provider: "tavily",
+        searchId,
+        searchQuery,
+      }),
+      cost: TAVILY_COST_PER_SEARCH,
+    };
   } catch (error) {
     console.error(`Tavily search error for ${domain}:`, error);
+    await logSearchOutcome(
+      {
+        provider: "tavily",
+        segment,
+        searchQuery,
+        requestedDomains: [domain],
+        searchDepth: TAVILY_SEARCH_DEPTH,
+      },
+      startedAt,
+      { status: "error", error },
+    );
     return { results: [], cost: 0 };
   }
 }
@@ -987,39 +1564,20 @@ async function searchViaTavilyBatch(
     }
   }
 
-  return { results: dedupeWebResults(allResults), totalCost };
-}
-
-async function callOpenAIEnhancedSearch(
-  query: string,
-  overrides?: WebSearchOverrides,
-): Promise<EnhancedSearchResult> {
-  const combined: WebSearchResult[] = [];
-  let browseStats: WebBrowseStats | null = null;
-
-  const webSearch = await callOpenAIWebSearch(query, overrides);
-  if (webSearch.results.length > 0) {
-    combined.push(...webSearch.results);
-  }
-  if (webSearch.stats) {
-    browseStats = webSearch.stats;
-  }
-
-  const googleResults = await discoverViaGoogleNews(query);
-  if (googleResults.length > 0) {
-    combined.push(...googleResults);
-  }
-
   return {
-    results: dedupeWebResults(combined),
-    browseStats,
+    results: await dedupeWebResultsForProcessing(allResults),
+    totalCost,
   };
 }
 
 async function discoverViaGoogleNews(
   query: string,
+  allowedDomains: string[] = [],
 ): Promise<WebSearchResult[]> {
-  const suggestionText = await generateGoogleNewsSuggestions(query);
+  const suggestionText = await generateGoogleNewsSuggestions(
+    query,
+    allowedDomains,
+  );
   const suggestionResults = await executeAISearchSuggestions(suggestionText);
 
   if (suggestionResults.length > 0) {
@@ -1029,13 +1587,21 @@ async function discoverViaGoogleNews(
   console.log(
     "AI suggestions empty, falling back to direct Google News search",
   );
-  return await searchGoogleNewsRSS(query);
+  return await searchGoogleNewsRSS(
+    buildGoogleNewsFallbackQuery(query, allowedDomains),
+  );
 }
 
 async function generateGoogleNewsSuggestions(
   query: string,
+  allowedDomains: string[] = [],
 ): Promise<string | null> {
   console.log(`OpenAI Google News suggestions: ${query}`);
+  const startedAt = Date.now();
+  const domainInstruction =
+    allowedDomains.length > 0
+      ? ` Every searchTerm must include a site: filter for at least one of these allowed domains: ${allowedDomains.join(", ")}.`
+      : "";
 
   try {
     const { text } = await generateText({
@@ -1043,20 +1609,64 @@ async function generateGoogleNewsSuggestions(
       messages: [
         {
           role: "system",
-          content: `You build advanced Google News RSS queries for climate reporting. Return only a JSON array. Each element must contain "searchTerm" (Google News-ready string), "reasoning" (short justification), and "expectedSources" (array). Every searchTerm must use boolean operators and/or quoted phrases, include a recency constraint such as when:1d/when:3d, and when helpful reference curated climate outlets (e.g., ${GOOGLE_SUGGESTION_OUTLET_EXAMPLES}) via site:domain or source keywords. Avoid generic requests like "climate change news". No prose outside the JSON.`,
+          content: `You build advanced Google News RSS queries for climate reporting. Return only a JSON array. Each element must contain "searchTerm" (Google News-ready string), "reasoning" (short justification), and "expectedSources" (array). Every searchTerm must use boolean operators and/or quoted phrases, include a recency constraint such as when:1d/when:3d, and when helpful reference curated climate outlets (e.g., ${GOOGLE_SUGGESTION_OUTLET_EXAMPLES}) via site:domain or source keywords.${domainInstruction} Avoid generic requests like "climate change news". No prose outside the JSON.`,
         },
         {
           role: "user",
-          content: `Provide 2-4 advanced Google News search strings to surface fresh climate or environment coverage for: "${query}". Combine climate subtopics (policy, finance, science, justice) with geography or sector cues, apply recency filters (e.g., when:1d), and bias toward reputable climate outlets. Avoid generic or repetitive phrases.`,
+          content: `Provide 2-4 advanced Google News search strings to surface fresh climate or environment coverage for: "${query}". Combine climate subtopics (policy, finance, science, justice) with geography or sector cues, apply recency filters (e.g., when:1d), and bias toward reputable climate outlets.${allowedDomains.length > 0 ? ` Only target these domains: ${allowedDomains.join(", ")}.` : ""} Avoid generic or repetitive phrases.`,
         },
       ],
       maxOutputTokens: GOOGLE_SUGGESTION_MAX_OUTPUT_TOKENS,
     });
 
+    const meta: SearchTelemetryMeta = {
+      provider: "openai_google_suggestions",
+      segment: "google_news",
+      searchQuery: query,
+      model: GOOGLE_SUGGESTION_MODEL,
+    };
+    await logSearchOutcome(meta, startedAt, {
+      status: "success",
+      resultCount: countGoogleSuggestionTerms(text),
+    });
+
     return text ?? null;
   } catch (error) {
     console.error("Error generating Google News suggestions:", error);
+    await logSearchOutcome(
+      {
+        provider: "openai_google_suggestions",
+        segment: "google_news",
+        searchQuery: query,
+        model: GOOGLE_SUGGESTION_MODEL,
+      },
+      startedAt,
+      { status: "error", error },
+    );
     return null;
+  }
+}
+
+function buildGoogleNewsFallbackQuery(
+  query: string,
+  allowedDomains: string[],
+): string {
+  if (allowedDomains.length === 0) return query;
+  const domainClause = allowedDomains
+    .map((domain) => `site:${domain}`)
+    .join(" OR ");
+  return `(${domainClause}) (climate OR energy OR environment) when:3d`;
+}
+
+function countGoogleSuggestionTerms(
+  content: string | null | undefined,
+): number {
+  if (!content) return 0;
+  try {
+    const suggestions = JSON.parse(content.match(/\[[\s\S]*\]/)?.[0] ?? "[]");
+    return Array.isArray(suggestions) ? suggestions.length : 0;
+  } catch {
+    return 0;
   }
 }
 
@@ -1099,6 +1709,7 @@ async function executeAISearchSuggestions(
 }
 
 async function searchGoogleNewsRSS(query: string): Promise<WebSearchResult[]> {
+  const startedAt = Date.now();
   // Import RSS parser
   const Parser = (await import("rss-parser")).default;
   const parser = new Parser({
@@ -1142,9 +1753,32 @@ async function searchGoogleNewsRSS(query: string): Promise<WebSearchResult[]> {
       });
     }
 
-    return results;
+    const meta: SearchTelemetryMeta = {
+      provider: "google_news_rss",
+      segment: "google_news",
+      searchQuery: query,
+    };
+    const searchId = await logSearchOutcome(meta, startedAt, {
+      status: "success",
+      resultCount: results.length,
+    });
+
+    return await attachDiscoveryCandidates(results, {
+      provider: "google_news_rss",
+      searchId,
+      searchQuery: query,
+    });
   } catch (error) {
     console.error(`Error searching Google News for "${query}":`, error);
+    await logSearchOutcome(
+      {
+        provider: "google_news_rss",
+        segment: "google_news",
+        searchQuery: query,
+      },
+      startedAt,
+      { status: "error", error },
+    );
     return [];
   }
 }
@@ -1230,16 +1864,6 @@ function normalizePublishedDate(
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
-function isResultFresh(result: WebSearchResult, cutoffMs: number): boolean {
-  const publishedAt = normalizePublishedDate(result.publishedDate);
-  if (!publishedAt) {
-    // CRITICAL: Reject articles without dates to prevent old content from appearing as new
-    // This was causing 10-month-old articles to appear as "2 days ago"
-    return false;
-  }
-  return publishedAt.getTime() >= cutoffMs;
-}
-
 function parseContentForArticles(content: string): WebSearchResult[] {
   const results: WebSearchResult[] = [];
 
@@ -1297,7 +1921,6 @@ function parseContentForArticles(content: string): WebSearchResult[] {
                 nextLines.find((l) => !l.includes("http") && l.length > 10) ||
                 "Climate news article",
               source: extractSourceFromUrl(urlMatch[0]),
-              publishedDate: new Date().toISOString(),
             });
           }
         }
@@ -1340,7 +1963,6 @@ function parseContentForArticles(content: string): WebSearchResult[] {
           url: correspondingUrl,
           snippet: `Recent coverage: ${title.substring(0, 100)}...`,
           source: source,
-          publishedDate: new Date().toISOString(),
         });
       }
     }
@@ -1491,32 +2113,52 @@ function extractSourceFromUrl(url: string): string {
   }
 }
 
-async function isDuplicate(title: string, url: string): Promise<boolean> {
+async function findDuplicate(
+  title: string,
+  url: string,
+): Promise<
+  | {
+      duplicate: false;
+    }
+  | {
+      duplicate: true;
+      reason: "duplicate_url" | "duplicate_title";
+      articleId: number;
+    }
+> {
   // Check if we already have this article by URL
-  const existingByUrl = await query(
+  const existingByUrl = await query<{ id: number }>(
     "SELECT id FROM articles WHERE canonical_url = $1",
     [url],
   );
 
   if (existingByUrl.rows.length > 0) {
-    return true;
+    return {
+      duplicate: true,
+      reason: "duplicate_url",
+      articleId: existingByUrl.rows[0].id,
+    };
   }
 
   // Check for similar title (basic duplicate detection)
   const normalizedTitle = title.trim().toLowerCase();
 
   if (normalizedTitle) {
-    const existingByTitle = await query(
+    const existingByTitle = await query<{ id: number }>(
       "SELECT id FROM articles WHERE LOWER(title) = $1 AND fetched_at > NOW() - INTERVAL '48 hours'",
       [normalizedTitle],
     );
 
     if (existingByTitle.rows.length > 0) {
-      return true;
+      return {
+        duplicate: true,
+        reason: "duplicate_title",
+        articleId: existingByTitle.rows[0].id,
+      };
     }
   }
 
-  return false;
+  return { duplicate: false };
 }
 
 /**
@@ -1709,36 +2351,11 @@ async function isUrlReachable(url: string): Promise<boolean> {
 async function insertWebDiscoveredArticle(
   result: WebSearchResult,
   sourceId: number,
+  publishedDate: Date,
   publisherName?: string | null,
   publisherHomepage?: string | null,
 ): Promise<number | null> {
   try {
-    // Validate the published date
-    const publishedDate = normalizePublishedDate(result.publishedDate);
-    const dateValidation = isValidArticleDate(publishedDate, 7);
-
-    if (!dateValidation.valid) {
-      console.log(
-        `⚠️  Skipping web-discovered article with invalid date (${dateValidation.reason}): "${result.title.substring(0, 60)}..."`,
-      );
-      return null;
-    }
-
-    // Final fabrication guard: reject placeholder URL patterns
-    if (isLikelyFabricatedUrl(result.url)) {
-      console.log(`⚠️  Skipping article with fabricated URL: ${result.url}`);
-      return null;
-    }
-
-    // Verify the URL actually resolves (catches hallucinated URLs that pass pattern checks)
-    const reachable = await isUrlReachable(result.url);
-    if (!reachable) {
-      console.log(
-        `⚠️  Skipping unreachable URL (404/410): ${result.url} ("${result.title.substring(0, 60)}...")`,
-      );
-      return null;
-    }
-
     // Generate embedding for semantic clustering
     const embedding = await generateEmbedding(
       result.title,
@@ -1820,13 +2437,31 @@ type DiscoverySegmentStats = {
   duration: number;
 };
 
+function dateValidationOutcomeReason(
+  validation: ArticleDateValidation,
+): DiscoveryOutcomeReason {
+  if (validation.valid) return "inserted";
+  if (validation.code === "missing_date") return "missing_date";
+  if (validation.code === "too_old") return "stale";
+  return "invalid_date";
+}
+
+function freshnessOutcomeReason(
+  result: WebSearchResult,
+  cutoffMs: number,
+): DiscoveryOutcomeReason | null {
+  const publishedAt = normalizePublishedDate(result.publishedDate);
+  if (!publishedAt) return "missing_date";
+  if (publishedAt.getTime() < cutoffMs) return "stale";
+  return null;
+}
+
 async function tryInsertDiscoveredArticle(
   result: WebSearchResult,
   fallbackSourceId: number,
-): Promise<boolean> {
-  // FIRST: Validate the title is a real headline, not an LLM artifact
+): Promise<DiscoveryOutcome> {
   if (!isValidHeadlineTitle(result.title)) {
-    return false;
+    return { accepted: false, reason: "invalid_title" };
   }
 
   const isClimate = isClimateRelevant({
@@ -1839,7 +2474,7 @@ async function tryInsertDiscoveredArticle(
     console.log(
       `- Skipped non-climate result from ${host}: ${result.title.substring(0, 80)}`,
     );
-    return false;
+    return { accepted: false, reason: "non_climate" };
   }
 
   // Match ingest pipeline normalization
@@ -1851,14 +2486,43 @@ async function tryInsertDiscoveredArticle(
     console.warn(
       `⚠️  Skipping unresolved aggregator URL (${normalizedHost}): ${result.title.substring(0, 60)}...`,
     );
-    return false;
+    return { accepted: false, reason: "aggregator_url" };
   }
 
-  const duplicate = await isDuplicate(result.title, result.url);
+  if (isLikelyFabricatedUrl(result.url)) {
+    console.log(`⚠️  Skipping article with fabricated URL: ${result.url}`);
+    return { accepted: false, reason: "fabricated_url" };
+  }
 
-  if (duplicate) {
+  const publishedAt = normalizePublishedDate(result.publishedDate);
+  const dateValidation = isValidArticleDate(publishedAt, 7);
+  if (!dateValidation.valid) {
+    console.log(
+      `⚠️  Skipping web-discovered article with invalid date (${dateValidation.reason}): "${result.title.substring(0, 60)}..."`,
+    );
+    return {
+      accepted: false,
+      reason: dateValidationOutcomeReason(dateValidation),
+    };
+  }
+
+  const reachable = await isUrlReachable(result.url);
+  if (!reachable) {
+    console.log(
+      `⚠️  Skipping unreachable URL (404/410): ${result.url} ("${result.title.substring(0, 60)}...")`,
+    );
+    return { accepted: false, reason: "unreachable" };
+  }
+
+  const duplicate = await findDuplicate(result.title, result.url);
+
+  if (duplicate.duplicate) {
     console.log(`- Skipped duplicate: ${result.title.substring(0, 60)}...`);
-    return false;
+    return {
+      accepted: false,
+      reason: duplicate.reason,
+      duplicateArticleId: duplicate.articleId,
+    };
   }
 
   const { sourceId, publisherName, publisherHomepage } =
@@ -1867,12 +2531,13 @@ async function tryInsertDiscoveredArticle(
   const articleId = await insertWebDiscoveredArticle(
     result,
     sourceId,
+    publishedAt!,
     publisherName,
     publisherHomepage,
   );
 
   if (!articleId) {
-    return false;
+    return { accepted: false, reason: "insert_failed" };
   }
 
   await assignArticleToCluster(articleId, result.title);
@@ -1889,7 +2554,7 @@ async function tryInsertDiscoveredArticle(
     console.log(`✓ Added (uncategorized): ${result.title.substring(0, 60)}...`);
   }
 
-  return true;
+  return { accepted: true, reason: "inserted", articleId };
 }
 
 function delay(ms: number) {
@@ -2033,19 +2698,24 @@ async function runOutletDiscoverySegment({
           : e.outlet.name,
       );
 
-      const targetedSystemPrompt = `You are ClimateRiver's climate outlet curator. For each outlet you must issue at least one precise site:domain query that reflects the outlet's specialty while keeping total tool calls as low as possible. Only keep original articles published in the past ${freshHours} hours. Reject syndicated content, opinion newsletters, or aggregator redirections. Double-check that every URL's hostname belongs to the allowed domain list and drop any entry without a confirmed ISO timestamp. Respond with a JSON array sorted newest to oldest containing title, url, snippet (why the story matters), publishedDate (ISO), and source.`;
-      const targetedUserPrompt = `Provide up to ${limitPerBatch} combined articles across these outlets: ${missingDescriptors.join("; ")}. Use site-specific queries (e.g., site:domain "topic") tailored to each prompt hint, and when possible include at least one qualifying link per outlet. Only include URLs from ${missingDomains.join(", ")} or their official climate sections, ensure every item was published within the last ${freshHours} hours, and omit any link that fails those tests. Return only the JSON array sorted newest to oldest.`;
+      const promptInputs: PromptInputs = {
+        freshHours,
+        domains: missingDomains,
+        descriptors: missingDescriptors,
+        resultLimit: limitPerBatch,
+      };
+      const targetedSystemPrompt = buildSystemPrompt("v4", promptInputs);
+      const targetedUserPrompt = buildUserPrompt("v4", promptInputs);
 
-      const { results: openAIResults, browseStats } =
-        await callOpenAIEnhancedSearch(
-          `Latest climate coverage across: ${missingDomains.join(", ")}`,
-          {
-            systemPrompt: targetedSystemPrompt,
-            userPrompt: targetedUserPrompt,
-            allowedDomains: missingDomains,
-            resultLimit: limitPerBatch,
-          },
-        );
+      const fallbackQuery = `Latest climate coverage across: ${missingDomains.join(", ")}`;
+      const { results: openAIResults, stats: browseStats } =
+        await callOpenAIWebSearch(fallbackQuery, {
+          systemPrompt: targetedSystemPrompt,
+          userPrompt: targetedUserPrompt,
+          allowedDomains: missingDomains,
+          resultLimit: limitPerBatch,
+          segment: "outlet",
+        });
 
       queriesRun++;
 
@@ -2062,6 +2732,52 @@ async function runOutletDiscoverySegment({
         openAIResults,
         missingDomainEntries.map((entry) => entry.normalized),
       );
+
+      const stillMissingAfterOpenAI = missingDomainEntries.filter(
+        (entry) => (domainHitCounts.get(entry.normalized) ?? 0) === 0,
+      );
+
+      if (stillMissingAfterOpenAI.length > 0) {
+        const googleDomains = stillMissingAfterOpenAI.map((entry) => entry.raw);
+        console.log(
+          `  → Tier 3: Google News fallback for ${googleDomains.length} domains: ${stillMissingAfterOpenAI
+            .map((entry) => entry.outlet.name)
+            .join(", ")}`,
+        );
+
+        const googleResults = await discoverViaGoogleNews(
+          `Latest climate coverage across: ${googleDomains.join(", ")}`,
+          googleDomains,
+        );
+        queriesRun++;
+        const domainFilteredGoogleResults = googleResults.filter((result) =>
+          isAllowedDomain(result.url, googleDomains),
+        );
+        const outOfDomainGoogleResults = googleResults.filter(
+          (result) => !isAllowedDomain(result.url, googleDomains),
+        );
+        if (outOfDomainGoogleResults.length > 0) {
+          console.log(
+            `  Dropped ${outOfDomainGoogleResults.length} Google News results outside fallback domains`,
+          );
+          await recordDiscoveryCandidateOutcomes(
+            outOfDomainGoogleResults.map((result) => ({
+              result,
+              outcome: {
+                accepted: false,
+                reason: "out_of_domain",
+              },
+            })),
+          );
+        }
+        batchResults.push(...domainFilteredGoogleResults);
+
+        updateDomainHitCounts(
+          domainHitCounts,
+          domainFilteredGoogleResults,
+          stillMissingAfterOpenAI.map((entry) => entry.normalized),
+        );
+      }
     }
 
     // Check for still-missing domains after both tiers
@@ -2077,23 +2793,46 @@ async function runOutletDiscoverySegment({
       );
     }
 
-    // Dedupe before processing
-    batchResults = dedupeWebResults(batchResults);
+    // Dedupe before processing while preserving provider-level duplicate telemetry.
+    batchResults = await dedupeWebResultsForProcessing(batchResults);
     scanned += batchResults.length;
 
-    for (const result of batchResults) {
-      if (inserted >= articleCap) break;
-      if (freshnessCutoffMs && !isResultFresh(result, freshnessCutoffMs)) {
+    const outcomeRecords: CandidateOutcomeRecord[] = [];
+    for (let i = 0; i < batchResults.length; i++) {
+      const result = batchResults[i];
+      if (inserted >= articleCap) {
+        await markUnprocessedCandidates(
+          batchResults.slice(i),
+          "article_cap_reached",
+        );
+        break;
+      }
+      const freshnessReason = freshnessCutoffMs
+        ? freshnessOutcomeReason(result, freshnessCutoffMs)
+        : null;
+      if (freshnessReason) {
         console.log(
           `- Skipped stale (${result.publishedDate ?? "unknown"}): ${result.title.substring(0, 80)}`,
         );
+        outcomeRecords.push({
+          result,
+          outcome: {
+            accepted: false,
+            reason: freshnessReason,
+          },
+        });
         continue;
       }
-      const added = await tryInsertDiscoveredArticle(result, fallbackSourceId);
-      if (added) {
+      const outcome = await tryInsertDiscoveredArticle(
+        result,
+        fallbackSourceId,
+      );
+      outcomeRecords.push({ result, outcome });
+      if (outcome.accepted) {
         inserted++;
       }
     }
+    await recordDiscoveryCandidateOutcomes(outcomeRecords);
 
     if (inserted >= articleCap) break;
     await delay(DISCOVERY_PAUSE_MS);
@@ -2171,6 +2910,7 @@ async function runBroadClimateDiscovery({
   for (const searchQuery of broadQueries) {
     if (inserted >= articleCap) break;
 
+    const searchStartedAt = Date.now();
     try {
       console.log(`  → Searching: "${searchQuery}"`);
 
@@ -2205,29 +2945,77 @@ async function runBroadClimateDiscovery({
           snippet: cleanSnippet(r.content),
           publishedDate: r.publishedDate,
           source: hostFromUrl(r.url) || "unknown",
+          discovery: { raw: r },
         }));
 
-      scanned += results.length;
-      console.log(`    Found ${results.length} results`);
+      const meta: SearchTelemetryMeta = {
+        provider: "tavily",
+        segment: "broad",
+        searchQuery,
+        searchDepth: TAVILY_SEARCH_DEPTH,
+      };
+      const searchId = await logSearchOutcome(meta, searchStartedAt, {
+        status: "success",
+        resultCount: results.length,
+        costUsd: TAVILY_COST_PER_SEARCH,
+      });
+      const annotatedResults = await attachDiscoveryCandidates(results, {
+        provider: "tavily",
+        searchId,
+        searchQuery,
+      });
 
-      for (const result of results) {
-        if (inserted >= articleCap) break;
-        if (freshnessCutoffMs && !isResultFresh(result, freshnessCutoffMs)) {
+      scanned += annotatedResults.length;
+      console.log(`    Found ${annotatedResults.length} results`);
+
+      const outcomeRecords: CandidateOutcomeRecord[] = [];
+      for (let i = 0; i < annotatedResults.length; i++) {
+        const result = annotatedResults[i];
+        if (inserted >= articleCap) {
+          await markUnprocessedCandidates(
+            annotatedResults.slice(i),
+            "article_cap_reached",
+          );
+          break;
+        }
+        const freshnessReason = freshnessCutoffMs
+          ? freshnessOutcomeReason(result, freshnessCutoffMs)
+          : null;
+        if (freshnessReason) {
+          outcomeRecords.push({
+            result,
+            outcome: {
+              accepted: false,
+              reason: freshnessReason,
+            },
+          });
           continue;
         }
-        const added = await tryInsertDiscoveredArticle(
+        const outcome = await tryInsertDiscoveredArticle(
           result,
           fallbackSourceId,
         );
-        if (added) {
+        outcomeRecords.push({ result, outcome });
+        if (outcome.accepted) {
           inserted++;
         }
       }
+      await recordDiscoveryCandidateOutcomes(outcomeRecords);
 
       // Small delay between queries
       await delay(300);
     } catch (error) {
       console.error(`  Error in broad search "${searchQuery}":`, error);
+      await logSearchOutcome(
+        {
+          provider: "tavily",
+          segment: "broad",
+          searchQuery,
+          searchDepth: TAVILY_SEARCH_DEPTH,
+        },
+        searchStartedAt,
+        { status: "error", error },
+      );
     }
   }
 
@@ -2255,89 +3043,93 @@ export async function run(
     outletFreshHours?: number;
   } = {},
 ) {
-  const startTime = Date.now();
-  const broadArticleCap = opts.broadArticleCap ?? 15; // Broad discovery cap
-  const outletArticleCap = opts.outletArticleCap ?? 70;
-  const outletLimitPerBatch = Math.max(4, opts.outletLimitPerBatch ?? 12);
-  const outletBatchSize = Math.max(2, opts.outletBatchSize ?? 4);
-  const outletFreshHours =
-    opts.outletFreshHours ?? DEFAULT_OUTLET_FRESHNESS_HOURS;
+  return discoveryTelemetryScope.run(new DiscoveryTelemetry(), async () => {
+    const startTime = Date.now();
+    const broadArticleCap = opts.broadArticleCap ?? 15; // Broad discovery cap
+    const outletArticleCap = opts.outletArticleCap ?? 70;
+    const outletLimitPerBatch = Math.max(4, opts.outletLimitPerBatch ?? 12);
+    const outletBatchSize = Math.max(2, opts.outletBatchSize ?? 4);
+    const outletFreshHours =
+      opts.outletFreshHours ?? DEFAULT_OUTLET_FRESHNESS_HOURS;
 
-  console.log("Starting web discovery...");
-  console.log(
-    `Search tiers: ${TAVILY_ENABLED ? "0) Broad → 1) Tavily → " : ""}2) OpenAI → 3) Google News`,
-  );
-
-  if (RSS_SKIPPED_OUTLETS.length > 0) {
+    console.log("Starting web discovery...");
     console.log(
-      `Skipping ${RSS_SKIPPED_OUTLETS.length} RSS-backed outlets for OpenAI discovery: ${RSS_SKIPPED_OUTLETS.map((outlet) => outlet.name).join(", ")}`,
+      `Search tiers: ${TAVILY_ENABLED ? "0) Broad → 1) Tavily → " : ""}2) OpenAI → 3) Google News`,
     );
-  }
 
-  if (DISCOVERY_OUTLETS.length === 0) {
+    if (RSS_SKIPPED_OUTLETS.length > 0) {
+      console.log(
+        `Skipping ${RSS_SKIPPED_OUTLETS.length} RSS-backed outlets for OpenAI discovery: ${RSS_SKIPPED_OUTLETS.map((outlet) => outlet.name).join(", ")}`,
+      );
+    }
+
+    if (DISCOVERY_OUTLETS.length === 0) {
+      console.log(
+        "No eligible outlets remain for OpenAI discovery (all covered via RSS)",
+      );
+    }
+
+    const fallbackSourceId = await getOrCreateWebDiscoverySource();
+
+    // Tier 0: Broad climate discovery (searches web generally)
+    const broadStats = await runBroadClimateDiscovery({
+      fallbackSourceId,
+      articleCap: broadArticleCap,
+      freshHours: outletFreshHours,
+    });
+
+    // Tier 1-3: Outlet-specific discovery
+    const outletStats = await runOutletDiscoverySegment({
+      fallbackSourceId,
+      limitPerBatch: outletLimitPerBatch,
+      batchSize: outletBatchSize,
+      articleCap: outletArticleCap,
+      freshHours: outletFreshHours,
+    });
+
+    if (outletStats.queriesRun > 0) {
+      console.log(
+        `Curated outlet tier complete: ${outletStats.inserted} new articles from ${outletStats.scanned} results`,
+      );
+    } else {
+      console.log(
+        "Curated outlet tier skipped (no outlets configured or article cap set to 0)",
+      );
+    }
+
+    const totalInserted = broadStats.inserted + outletStats.inserted;
+    const totalScanned = broadStats.scanned + outletStats.scanned;
+    const totalBrowseCost = broadStats.browseCost + outletStats.browseCost;
+    const totalBrowseToolCalls = outletStats.browseToolCalls;
+    const totalQueries = broadStats.queriesRun + outletStats.queriesRun;
+
+    const duration = Math.round((Date.now() - startTime) / 1000);
     console.log(
-      "No eligible outlets remain for OpenAI discovery (all covered via RSS)",
+      `Web discovery completed: ${totalInserted} new articles from ${totalScanned} results in ${duration}s`,
     );
-  }
 
-  const fallbackSourceId = await getOrCreateWebDiscoverySource();
+    if (totalBrowseCost > 0) {
+      console.log(
+        `Estimated search spend: ~$${totalBrowseCost.toFixed(4)} ` +
+          `(${TAVILY_ENABLED ? "Tavily + " : ""}OpenAI${totalBrowseToolCalls > 0 ? `, ${totalBrowseToolCalls} tool calls` : ""})`,
+      );
+    }
 
-  // Tier 0: Broad climate discovery (searches web generally)
-  const broadStats = await runBroadClimateDiscovery({
-    fallbackSourceId,
-    articleCap: broadArticleCap,
-    freshHours: outletFreshHours,
+    if (opts.closePool) {
+      await endPool();
+    }
+
+    return {
+      totalInserted,
+      totalScanned,
+      duration,
+      queriesRun: totalQueries,
+      estimatedBrowseCost: totalBrowseCost,
+      browseToolCalls: totalBrowseToolCalls,
+      discoveryRunId: currentDiscoveryTelemetry().runId,
+      providerStats: summarizeProviderStats(),
+    };
   });
-
-  // Tier 1-3: Outlet-specific discovery
-  const outletStats = await runOutletDiscoverySegment({
-    fallbackSourceId,
-    limitPerBatch: outletLimitPerBatch,
-    batchSize: outletBatchSize,
-    articleCap: outletArticleCap,
-    freshHours: outletFreshHours,
-  });
-
-  if (outletStats.queriesRun > 0) {
-    console.log(
-      `Curated outlet tier complete: ${outletStats.inserted} new articles from ${outletStats.scanned} results`,
-    );
-  } else {
-    console.log(
-      "Curated outlet tier skipped (no outlets configured or article cap set to 0)",
-    );
-  }
-
-  const totalInserted = broadStats.inserted + outletStats.inserted;
-  const totalScanned = broadStats.scanned + outletStats.scanned;
-  const totalBrowseCost = broadStats.browseCost + outletStats.browseCost;
-  const totalBrowseToolCalls = outletStats.browseToolCalls;
-  const totalQueries = broadStats.queriesRun + outletStats.queriesRun;
-
-  const duration = Math.round((Date.now() - startTime) / 1000);
-  console.log(
-    `Web discovery completed: ${totalInserted} new articles from ${totalScanned} results in ${duration}s`,
-  );
-
-  if (totalBrowseCost > 0) {
-    console.log(
-      `Estimated search spend: ~$${totalBrowseCost.toFixed(4)} ` +
-        `(${TAVILY_ENABLED ? "Tavily + " : ""}OpenAI${totalBrowseToolCalls > 0 ? `, ${totalBrowseToolCalls} tool calls` : ""})`,
-    );
-  }
-
-  if (opts.closePool) {
-    await endPool();
-  }
-
-  return {
-    totalInserted,
-    totalScanned,
-    duration,
-    queriesRun: totalQueries,
-    estimatedBrowseCost: totalBrowseCost,
-    browseToolCalls: totalBrowseToolCalls,
-  };
 }
 
 // CLI support

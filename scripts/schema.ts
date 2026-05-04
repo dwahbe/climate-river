@@ -222,6 +222,84 @@ export async function run() {
   // RLS: pipeline_runs is internal-only, block all PostgREST access
   await query(`alter table pipeline_runs enable row level security;`);
 
+  // --- discovery telemetry --------------------------------------------------
+  // Per-search and per-candidate records let us compare Tavily, OpenAI web
+  // search, and Google News by yield, rejection mode, cost, and latency.
+  await query(`
+    create table if not exists discovery_searches (
+      id                bigserial primary key,
+      run_id            text not null,
+      pipeline_run_id   bigint references pipeline_runs(id) on delete set null,
+      provider          text not null,
+      segment           text not null,
+      query             text not null,
+      requested_domains text[],
+      model             text,
+      search_depth      text,
+      tool_calls        int not null default 0,
+      result_count      int not null default 0,
+      cost_usd          numeric(12,6),
+      latency_ms        int,
+      status            text not null default 'success',
+      error_msg         text,
+      created_at        timestamptz not null default now()
+    );
+  `);
+  await query(`
+    create index if not exists idx_discovery_searches_run
+      on discovery_searches(run_id, created_at desc);
+  `);
+  await query(`
+    create index if not exists idx_discovery_searches_provider
+      on discovery_searches(provider, created_at desc);
+  `);
+  await query(`alter table discovery_searches enable row level security;`);
+
+  await query(`
+    create table if not exists discovery_candidates (
+      id                  bigserial primary key,
+      discovery_search_id bigint references discovery_searches(id) on delete cascade,
+      provider            text not null,
+      rank                int,
+      title               text not null,
+      url                 text not null,
+      canonical_url       text,
+      host                text,
+      published_at        timestamptz,
+      raw_published_at    text,
+      source_name         text,
+      snippet             text,
+      accepted            boolean,
+      rejection_reason    text,
+      article_id          bigint references articles(id) on delete set null,
+      duplicate_article_id bigint references articles(id) on delete set null,
+      raw                 jsonb,
+      created_at          timestamptz not null default now()
+    );
+  `);
+  await query(`
+    create index if not exists idx_discovery_candidates_search
+      on discovery_candidates(discovery_search_id);
+  `);
+  await query(`
+    create index if not exists idx_discovery_candidates_canonical
+      on discovery_candidates(canonical_url);
+  `);
+  await query(`
+    create index if not exists idx_discovery_candidates_provider
+      on discovery_candidates(provider, created_at desc);
+  `);
+  await query(`
+    create index if not exists idx_discovery_candidates_accepted
+      on discovery_candidates(accepted, created_at desc);
+  `);
+  await query(`
+    create index if not exists idx_discovery_candidates_host_accepted
+      on discovery_candidates(host)
+      where accepted = true;
+  `);
+  await query(`alter table discovery_candidates enable row level security;`);
+
   // --- article_events (engagement tracking) ---------------------------------
   // Click handler at app/api/click/route.ts inserts here; the table is also
   // the substrate for future engagement→ranking feedback (CTR boosts).

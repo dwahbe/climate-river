@@ -487,18 +487,23 @@ export async function getArticleContent(
 export async function prefetchArticles(
   articleIds: number[],
   concurrency = 2,
-): Promise<void> {
+  opts: { deadlineAt?: number } = {},
+): Promise<{ scheduled: number; skipped: number }> {
   console.log(
     `🔄 Prefetching ${articleIds.length} articles with concurrency ${concurrency}`,
   );
 
   const queue = [...articleIds];
   const active: Array<Promise<void>> = [];
+  let scheduled = 0;
+
+  const hasBudget = () => !opts.deadlineAt || Date.now() < opts.deadlineAt;
 
   while (queue.length > 0 || active.length > 0) {
     // Fill up to concurrency limit
-    while (active.length < concurrency && queue.length > 0) {
+    while (active.length < concurrency && queue.length > 0 && hasBudget()) {
       const id = queue.shift()!;
+      scheduled++;
       const promise = getArticleContent(id)
         .then(() => {
           const idx = active.indexOf(promise);
@@ -512,11 +517,26 @@ export async function prefetchArticles(
       active.push(promise);
     }
 
+    if (queue.length > 0 && !hasBudget()) {
+      console.warn(
+        `⏱️  Prefetch deadline reached; skipped ${queue.length} unscheduled articles`,
+      );
+      break;
+    }
+
     // Wait for at least one to complete
     if (active.length > 0) {
       await Promise.race(active);
     }
   }
 
-  console.log(`✅ Prefetch complete`);
+  if (active.length > 0) {
+    await Promise.allSettled(active);
+  }
+
+  const skipped = articleIds.length - scheduled;
+  console.log(
+    `✅ Prefetch complete (${scheduled} scheduled, ${skipped} skipped)`,
+  );
+  return { scheduled, skipped };
 }

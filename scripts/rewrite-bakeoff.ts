@@ -3,6 +3,12 @@ import path from "node:path";
 
 import { MODEL_PRICING } from "@/config/evalProfiles";
 import { endPool } from "@/lib/db";
+import {
+  defaultEvalOutDir,
+  median,
+  parseCliArg,
+  percentile,
+} from "@/lib/evalCli";
 import { mapLimit } from "@/lib/utils";
 
 import {
@@ -125,12 +131,8 @@ const REVIEW_COLUMNS = [
   "notes",
 ] as const;
 
-function timestampLabel() {
-  return new Date().toISOString().replace(/[:.]/g, "-");
-}
-
 function defaultOutDir() {
-  return path.join(process.cwd(), "tmp", "rewrite-evals", timestampLabel());
+  return defaultEvalOutDir("rewrite-evals");
 }
 
 function toJsonl(items: unknown[]) {
@@ -216,20 +218,6 @@ export function parseCsv(raw: string): Array<Record<string, string>> {
       header.map((column, idx) => [column, values[idx] ?? ""]),
     ),
   );
-}
-
-function percentile(values: number[], pct: number) {
-  if (values.length === 0) return null;
-  const sorted = [...values].sort((a, b) => a - b);
-  const index = Math.min(
-    sorted.length - 1,
-    Math.max(0, Math.ceil((pct / 100) * sorted.length) - 1),
-  );
-  return sorted[index];
-}
-
-function median(values: number[]) {
-  return percentile(values, 50);
 }
 
 export function estimateCostUsd(
@@ -596,21 +584,6 @@ function buildFinalSummaryMarkdown(
   }
 
   return lines.join("\n") + "\n";
-}
-
-function parseCliArg(
-  argv: string[],
-  i: number,
-  flag: string,
-): { value: string; skip: number } | null {
-  const arg = argv[i];
-  if (arg === flag) {
-    return { value: argv[i + 1] ?? "", skip: 1 };
-  }
-  if (arg.startsWith(`${flag}=`)) {
-    return { value: arg.slice(flag.length + 1), skip: 0 };
-  }
-  return null;
 }
 
 function parseCliArgs(argv: string[]): CliOptions {

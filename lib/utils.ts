@@ -129,6 +129,22 @@ export async function mapLimit<T, R>(
   });
 }
 
+// ---------- env parsing ----------
+
+export function parseEnvInt(name: string, defaultValue: number): number {
+  const raw = process.env[name];
+  if (!raw) return defaultValue;
+  const parsed = Number.parseInt(raw, 10);
+  return Number.isFinite(parsed) ? parsed : defaultValue;
+}
+
+export function parseEnvFloat(name: string, defaultValue: number): number {
+  const raw = process.env[name];
+  if (!raw) return defaultValue;
+  const parsed = Number.parseFloat(raw);
+  return Number.isFinite(parsed) ? parsed : defaultValue;
+}
+
 /**
  * Remove trailing " - Source Name" or " — Source Name" from Google News titles.
  * Handles both hyphens and em-dashes.
@@ -141,30 +157,51 @@ export function cleanGoogleNewsTitle(title: string): string {
  * Validate that a date is reasonable for a news article.
  * Rejects future dates, suspiciously-close-to-now dates, and dates older than maxAgeDays.
  */
+export type ArticleDateValidationCode =
+  | "missing_date"
+  | "future_date"
+  | "suspicious_current_time"
+  | "too_old";
+
+export type ArticleDateValidation =
+  | { valid: true }
+  | { valid: false; code: ArticleDateValidationCode; reason: string };
+
 export function isValidArticleDate(
   date: Date | null,
   maxAgeDays = 30,
-): { valid: boolean; reason?: string } {
-  if (!date) return { valid: false, reason: "missing date" };
+): ArticleDateValidation {
+  if (!date) {
+    return { valid: false, code: "missing_date", reason: "missing date" };
+  }
 
   const now = new Date();
   const cutoff = new Date(now.getTime() - maxAgeDays * 24 * 60 * 60 * 1000);
   const oneMinuteFromNow = new Date(now.getTime() + 60 * 1000);
 
   if (date > oneMinuteFromNow) {
-    return { valid: false, reason: `future date: ${date.toISOString()}` };
+    return {
+      valid: false,
+      code: "future_date",
+      reason: `future date: ${date.toISOString()}`,
+    };
   }
 
   if (Math.abs(date.getTime() - now.getTime()) < 30 * 1000) {
     return {
       valid: false,
+      code: "suspicious_current_time",
       reason:
         "date suspiciously close to current time (likely parsing failure)",
     };
   }
 
   if (date < cutoff) {
-    return { valid: false, reason: `too old: ${date.toISOString()}` };
+    return {
+      valid: false,
+      code: "too_old",
+      reason: `too old: ${date.toISOString()}`,
+    };
   }
 
   return { valid: true };

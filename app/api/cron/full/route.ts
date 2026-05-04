@@ -59,10 +59,14 @@ export async function GET(req: Request) {
     });
     console.log(`✅ Categorize completed (${elapsed()}s):`, categorizeResult);
 
-    // 4) Prefetch content - fast
+    // 4) Prefetch content - fast. Includes a catchup pass for NULL-status
+    // articles up to 7 days old that missed prior windows (especially common
+    // for web-discovered articles inserted late in a refresh cycle).
     console.log("📖 Prefetching article content...");
     const prefetchResult = await safeRun(import("@/scripts/prefetch-content"), {
-      limit: 25,
+      limit: 40,
+      catchupDays: 7,
+      deadlineMs: 70_000,
       closePool: false,
     });
     console.log(`✅ Prefetch completed (${elapsed()}s):`, prefetchResult);
@@ -128,6 +132,7 @@ export async function GET(req: Request) {
             {
               limit: 15,
               hoursAgo: 6,
+              deadlineMs: 35_000,
               closePool: false,
             },
           );

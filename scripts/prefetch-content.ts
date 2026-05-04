@@ -5,60 +5,117 @@ import { prefetchArticles } from "@/lib/services/readerService";
 type PrefetchOptions = {
   limit?: number;
   closePool?: boolean;
-  // Optionally prefetch only articles from last N hours
+  // Recent window: only consider articles fetched within the last N hours
   hoursAgo?: number;
+  // Catchup window: after the recent batch, also retry NULL-status articles
+  // up to this many days old that fell out of prior `hoursAgo` windows.
+  // Default 0 means catchup disabled (no regression vs prior behavior).
+  catchupDays?: number;
+  // Stop scheduling new fetches after this many milliseconds.
+  deadlineMs?: number;
+  // Absolute wall-clock deadline. Takes precedence over deadlineMs.
+  deadlineAt?: number;
 };
 
+const PAYWALL_FILTER = `
+  canonical_url NOT LIKE '%nytimes.com%'
+  AND canonical_url NOT LIKE '%wsj.com%'
+  AND canonical_url NOT LIKE '%ft.com%'
+  AND canonical_url NOT LIKE '%economist.com%'
+  AND canonical_url NOT LIKE '%bloomberg.com%'
+`;
+
 /**
- * Prefetch article content for recently ingested articles
- * This ensures content is cached before users try to read it
+ * Prefetch article content for recently ingested articles.
+ *
+ * Two-phase selection (when catchupDays > 0):
+ *   1. Recent: articles fetched within `hoursAgo` with content_status NULL/error
+ *   2. Catchup: NULL-status articles older than the recent window but within
+ *      catchupDays — picks up articles that fell out of prior prefetch windows
+ *      before any retry ran.
  */
 export async function run(opts: PrefetchOptions = {}) {
   const startTime = Date.now();
   const limit = opts.limit ?? 50;
-  const hoursAgo = opts.hoursAgo ?? 24; // Default: last 24 hours
+  const hoursAgo = opts.hoursAgo ?? 24;
+  const catchupDays = Math.max(0, opts.catchupDays ?? 0);
+  const deadlineAt =
+    opts.deadlineAt ??
+    (opts.deadlineMs ? Date.now() + opts.deadlineMs : undefined);
 
+  const windowDesc =
+    catchupDays > 0
+      ? `last ${hoursAgo}h + catchup to ${catchupDays}d for never-attempted`
+      : `last ${hoursAgo}h`;
   console.log(
-    `🔄 Prefetching content for up to ${limit} articles from last ${hoursAgo}h...`,
+    `🔄 Prefetching content for up to ${limit} articles (${windowDesc})...`,
   );
 
   try {
-    // Find articles that:
-    // 1. Were fetched recently (within hoursAgo)
-    // 2. Don't have content yet (content_status is null)
-    // 3. Haven't failed multiple times
-    const { rows } = await query<{ id: number; title: string }>(
+    // Phase 1: recent window — picks up NULL or error status
+    const { rows: recentRows } = await query<{ id: number; title: string }>(
       `
       SELECT id, title
       FROM articles
       WHERE fetched_at >= NOW() - INTERVAL '1 hour' * $1
         AND (content_status IS NULL OR content_status = 'error')
-        AND canonical_url NOT LIKE '%nytimes.com%'  -- Skip known paywalls
-        AND canonical_url NOT LIKE '%wsj.com%'
-        AND canonical_url NOT LIKE '%ft.com%'
-        AND canonical_url NOT LIKE '%economist.com%'
-        AND canonical_url NOT LIKE '%bloomberg.com%'  -- Often has extraction issues
+        AND ${PAYWALL_FILTER}
       ORDER BY published_at DESC NULLS LAST, fetched_at DESC
       LIMIT $2
     `,
       [hoursAgo, limit],
     );
 
+    // Phase 2: catchup — only NULL-status articles older than the recent
+    // window but within the catchup window. Errors past 24h are not retried
+    // (likely permanent extraction failures).
+    let catchupRows: Array<{ id: number; title: string }> = [];
+    const remaining = limit - recentRows.length;
+    if (catchupDays > 0 && remaining > 0) {
+      const result = await query<{ id: number; title: string }>(
+        `
+        SELECT id, title
+        FROM articles
+        WHERE fetched_at < NOW() - INTERVAL '1 hour' * $1
+          AND fetched_at >= NOW() - INTERVAL '1 day' * $2
+          AND content_status IS NULL
+          AND ${PAYWALL_FILTER}
+        ORDER BY fetched_at DESC
+        LIMIT $3
+      `,
+        [hoursAgo, catchupDays, remaining],
+      );
+      catchupRows = result.rows;
+    }
+
+    const rows = [...recentRows, ...catchupRows];
+
     if (rows.length === 0) {
       console.log("✨ No articles need prefetching");
       if (opts.closePool) await endPool();
       return {
         total: 0,
+        recent: 0,
+        catchup: 0,
+        scheduled: 0,
+        skipped: 0,
         duration: Math.round((Date.now() - startTime) / 1000),
       };
     }
 
-    console.log(`📖 Found ${rows.length} articles to prefetch`);
+    if (catchupRows.length > 0) {
+      console.log(
+        `📖 Found ${rows.length} articles to prefetch (${recentRows.length} recent + ${catchupRows.length} catchup)`,
+      );
+    } else {
+      console.log(`📖 Found ${rows.length} articles to prefetch`);
+    }
 
     // Prefetch with concurrency of 3 (balance between speed and politeness)
-    await prefetchArticles(
+    const prefetchStats = await prefetchArticles(
       rows.map((r) => r.id),
       3,
+      { deadlineAt },
     );
 
     // Check results
@@ -67,7 +124,7 @@ export async function run(opts: PrefetchOptions = {}) {
       count: number;
     }>(
       `
-      SELECT 
+      SELECT
         COALESCE(content_status, 'pending') as content_status,
         COUNT(*) as count
       FROM articles
@@ -89,6 +146,10 @@ export async function run(opts: PrefetchOptions = {}) {
 
     return {
       total: rows.length,
+      recent: recentRows.length,
+      catchup: catchupRows.length,
+      scheduled: prefetchStats.scheduled,
+      skipped: prefetchStats.skipped,
       stats,
       duration,
     };
