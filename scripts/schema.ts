@@ -635,19 +635,59 @@ export async function run() {
       WITH (m = 16, ef_construction = 64);
   `);
 
-  // Backfill search_vector for all articles (includes source name + author)
-  console.log("Backfilling search vectors...");
-  const { rowCount: backfilled } = await query(`
-    UPDATE articles a SET search_vector =
-      setweight(to_tsvector('english', coalesce(a.title, '')), 'A') ||
-      setweight(to_tsvector('english', coalesce(a.rewritten_title, '')), 'A') ||
-      setweight(to_tsvector('english', coalesce(a.dek, '')), 'B') ||
-      setweight(to_tsvector('english', coalesce(a.publisher_name, s.name, '')), 'B') ||
-      setweight(to_tsvector('english', coalesce(a.author, '')), 'B') ||
-      setweight(to_tsvector('english', coalesce(a.content_text, '')), 'C')
-    FROM sources s
-    WHERE s.id = a.source_id;
-  `);
+  // Backfill only missing search_vector values in batches. Rewriting every row
+  // in one UPDATE can exceed Supabase's statement timeout on larger tables.
+  const searchVectorBackfillBatchSize = Number.parseInt(
+    process.env.SEARCH_VECTOR_BACKFILL_BATCH_SIZE ?? "250",
+    10,
+  );
+  const backfillBatchSize =
+    Number.isFinite(searchVectorBackfillBatchSize) &&
+    searchVectorBackfillBatchSize > 0
+      ? searchVectorBackfillBatchSize
+      : 250;
+  const backfillAllSearchVectors =
+    process.env.SEARCH_VECTOR_BACKFILL_ALL === "1";
+
+  console.log(
+    `Backfilling ${backfillAllSearchVectors ? "all" : "missing"} search vectors...`,
+  );
+  let backfilled = 0;
+  let lastBackfilledArticleId = 0;
+  for (;;) {
+    const { rows, rowCount } = await query<{ id: string }>(
+      `
+      WITH batch AS (
+        SELECT a.id, s.name AS source_name
+        FROM articles a
+        LEFT JOIN sources s ON s.id = a.source_id
+        WHERE ($2::boolean OR a.search_vector IS NULL)
+          AND a.id > $3
+        ORDER BY a.id
+        LIMIT $1
+      )
+      UPDATE articles a SET search_vector =
+        setweight(to_tsvector('english', coalesce(a.title, '')), 'A') ||
+        setweight(to_tsvector('english', coalesce(a.rewritten_title, '')), 'A') ||
+        setweight(to_tsvector('english', coalesce(a.dek, '')), 'B') ||
+        setweight(to_tsvector('english', coalesce(a.publisher_name, batch.source_name, '')), 'B') ||
+        setweight(to_tsvector('english', coalesce(a.author, '')), 'B') ||
+        setweight(to_tsvector('english', coalesce(a.content_text, '')), 'C')
+      FROM batch
+      WHERE a.id = batch.id
+      RETURNING a.id;
+    `,
+      [backfillBatchSize, backfillAllSearchVectors, lastBackfilledArticleId],
+    );
+
+    if (rowCount === 0) break;
+    backfilled += rowCount;
+    lastBackfilledArticleId = rows.reduce(
+      (maxId, row) => Math.max(maxId, Number(row.id)),
+      lastBackfilledArticleId,
+    );
+    console.log(`Backfilled ${backfilled} article search vectors...`);
+  }
   console.log(`Backfilled ${backfilled} article search vectors`);
 
   // --- Cluster health diagnostic view ------------------------------------------

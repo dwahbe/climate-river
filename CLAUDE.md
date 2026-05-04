@@ -101,7 +101,7 @@ All cron/admin endpoints require either:
 - Path alias: `@/*` maps to project root
 - Scripts run with `bun scripts/<name>.ts`
 - No pre-commit hooks; lint/build manually before pushing
-- After making changes, check if `CLAUDE.md` or `README.md` need updating (e.g. new scripts, changed models, architectural shifts). Only update if actually needed.
+- After making changes, check if `AGENTS.md`, `CLAUDE.md`, or `README.md` need updating (e.g. new scripts, changed models, architectural shifts). Only update if actually needed.
 
 ## Environment Variables
 
@@ -109,4 +109,4 @@ See `.env.example` for the full list with descriptions.
 
 **Required**: `DATABASE_URL`, `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `OPENAI_API_KEY`, `ADMIN_TOKEN`
 
-**Optional**: `TAVILY_API_KEY`, `WEB_SEARCH_ENABLED`, Google News localization (`DISCOVER_*`), web search tuning (`WEB_SEARCH_*`, `GOOGLE_SUGGESTION_MODEL`)
+**Optional**: `TAVILY_API_KEY`, `WEB_SEARCH_ENABLED`, Google News localization (`DISCOVER_*`), web search tuning (`WEB_SEARCH_*`, `GOOGLE_SUGGESTION_MODEL`), schema maintenance (`SEARCH_VECTOR_BACKFILL_*`)
