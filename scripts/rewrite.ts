@@ -22,8 +22,7 @@ import {
 } from "@/lib/rewriteShared";
 import { isClimateRelevant } from "@/lib/tagger";
 import { mapLimit } from "@/lib/utils";
-import { openai } from "@ai-sdk/openai";
-import { generateText } from "ai";
+import { gateway, generateText } from "ai";
 
 type Row = {
   id: number;
@@ -241,7 +240,10 @@ async function generateWithOpenAI(
 
   try {
     const result = await generateText({
-      model: openai(model),
+      // Routed via Vercel AI Gateway. Gateway forwards providerOptions.openai
+      // (incl. promptCacheKey) and OIDC-auths on Vercel; locally it uses
+      // AI_GATEWAY_API_KEY. No markup over OpenAI's published rate.
+      model: gateway(`openai/${model}`),
       system,
       prompt,
       temperature: 0.15,
@@ -278,14 +280,21 @@ async function generateWithOpenAI(
       | undefined;
     // AI SDK v6 exposes cached tokens at usage.inputTokenDetails.cacheReadTokens.
     // Older shapes (usage.cachedInputTokens, providerMetadata.openai.cachedPromptTokens)
-    // are kept as fallbacks for forward/back compat.
+    // are kept as fallbacks for forward/back compat. Gateway preserves the
+    // unified shape, but we also peek at providerMetadata.gateway as a fallback
+    // in case it surfaces cached counts there.
     const openaiMeta = result.providerMetadata?.openai as
       | { cachedPromptTokens?: number }
+      | undefined;
+    const gatewayMeta = result.providerMetadata?.gateway as
+      | { cachedPromptTokens?: number; cachedInputTokens?: number }
       | undefined;
     const cachedTokens =
       usage?.inputTokenDetails?.cacheReadTokens ??
       usage?.cachedInputTokens ??
       openaiMeta?.cachedPromptTokens ??
+      gatewayMeta?.cachedInputTokens ??
+      gatewayMeta?.cachedPromptTokens ??
       null;
 
     return {
@@ -793,6 +802,9 @@ async function dryRun(limit = 10) {
     console.log(`  REWRITE:  ${finalDraft || "(empty)"}`);
     console.log(
       `  CHARS:    ${finalDraft.length} | WORDS: ${finalDraft.split(/\s+/).length}`,
+    );
+    console.log(
+      `  USAGE:    model=${llm.model} | in=${llm.promptTokens ?? "?"} cached=${llm.cachedTokens ?? "?"} out=${llm.outputTokens ?? "?"} | ${llm.latencyMs}ms`,
     );
     if (!pass1 && draft) {
       console.log(`  ATTEMPT1: ${draft}`);

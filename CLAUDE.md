@@ -66,7 +66,7 @@ Four-tier cron strategy orchestrated via Vercel cron jobs (see `vercel.json`):
 
 1. **Full** (3x/day, 5min): discover + ingest + categorize + prefetch + rescore + web discovery + cluster maintenance
 2. **Refresh** (6x/day, 2min): ingest + categorize + prefetch + rescore + conditional web discovery
-3. **Rewrite** (16x/day, 1min): headline rewriting (gpt-4.1-mini, Techmeme-style, with retry)
+3. **Rewrite** (16x/day, 1min): headline rewriting (gpt-4.1-mini via Vercel AI Gateway, Techmeme-style, with retry)
 4. **Cleanup** (1x/day, 1min): remove old articles and clusters
 
 ### API Authorization
