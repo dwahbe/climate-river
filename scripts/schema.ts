@@ -172,6 +172,10 @@ export async function run() {
       category_id int references categories(id) on delete cascade,
       confidence real default 0.0,
       is_primary boolean default false,
+      rule_confidence real default 0.0,
+      semantic_confidence real default 0.0,
+      confidence_source text,
+      reasons jsonb default '[]'::jsonb,
       primary key (article_id, category_id)
     );
   `);
@@ -181,6 +185,22 @@ export async function run() {
     alter table if exists article_categories 
     add column if not exists is_primary boolean default false;
   `);
+  await query(`
+    alter table if exists article_categories
+    add column if not exists rule_confidence real default 0.0;
+  `);
+  await query(`
+    alter table if exists article_categories
+    add column if not exists semantic_confidence real default 0.0;
+  `);
+  await query(`
+    alter table if exists article_categories
+    add column if not exists confidence_source text;
+  `);
+  await query(`
+    alter table if exists article_categories
+    add column if not exists reasons jsonb default '[]'::jsonb;
+  `);
 
   await query(
     `create index if not exists idx_article_categories_category_id on article_categories(category_id);`,
@@ -188,6 +208,11 @@ export async function run() {
   await query(
     `create index if not exists idx_article_categories_article_id on article_categories(article_id);`,
   );
+  await query(`
+    create index if not exists idx_article_categories_primary_quality
+      on article_categories(category_id, confidence desc)
+      where is_primary = true;
+  `);
 
   // Insert the 6 categories from lib/tagger.ts
   await query(`
@@ -430,6 +455,29 @@ export async function run() {
           -- These are old articles where date parsing failed and NOW() was used as fallback
           and abs(extract(epoch from (a.published_at - a.fetched_at))) > 60
       ),
+      category_matches as (
+        select
+          ac.cluster_id,
+          cat.slug,
+          sum(
+            case
+              when ag.is_primary then ag.confidence
+              else ag.confidence * 0.35
+            end
+          ) as category_score,
+          count(*) filter (where ag.is_primary) as primary_matches,
+          max(ag.confidence) as max_confidence,
+          max(coalesce(ag.rule_confidence, 0)) as max_rule_confidence
+        from article_clusters ac
+        join article_categories ag on ag.article_id = ac.article_id
+        join categories cat on cat.id = ag.category_id
+        where ag.confidence >= 0.35
+          and (
+            coalesce(ag.rule_confidence, 0) > 0
+            or ag.confidence >= 0.65
+          )
+        group by ac.cluster_id, cat.slug
+      ),
       category_filtered as (
         select c.*
         from candidate_clusters c
@@ -441,6 +489,21 @@ export async function run() {
              where ag.article_id = c.lead_article_id
                and cat.slug = p_category
                and ag.is_primary = true
+               and ag.confidence >= 0.35
+               and (
+                 coalesce(ag.rule_confidence, 0) > 0
+                 or ag.confidence >= 0.65
+               )
+           )
+           or exists (
+             select 1
+             from category_matches cm
+             where cm.cluster_id = c.cluster_id
+               and cm.slug = p_category
+               and (
+                 (cm.primary_matches >= 2 and cm.category_score >= 1.2)
+                 or cm.max_confidence >= 0.75
+               )
            )
       ),
       ranked as (

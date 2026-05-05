@@ -515,6 +515,11 @@ erDiagram
         bigint article_id PK
         int category_id PK
         float confidence
+        boolean is_primary
+        float rule_confidence
+        float semantic_confidence
+        text confidence_source
+        jsonb reasons
     }
 ```
 

@@ -6,6 +6,7 @@ import {
   CATEGORIES,
   categorizeArticle,
   isClimateRelevant,
+  normalizeArticleForCategorization,
   type CategoryScore,
   type CategorySlug,
 } from "./tagger";
@@ -129,6 +130,103 @@ function cosineSimilarity(a: number[], b: number[]): number {
 // Internal type for tracking both rule and combined confidence during hybrid scoring
 interface HybridScoreInternal extends CategoryScore {
   ruleConfidence: number;
+  semanticConfidence: number;
+  confidenceSource: "rule" | "semantic" | "hybrid";
+}
+
+export type HybridScoreForRanking = CategoryScore & {
+  ruleConfidence: number;
+};
+
+export function rankHybridCategoryScores<T extends HybridScoreForRanking>(
+  scores: T[],
+): T[] {
+  return [...scores].sort((a, b) => {
+    const aStrong = a.ruleConfidence >= 0.7;
+    const bStrong = b.ruleConfidence >= 0.7;
+
+    // Strong rule signal wins over weak
+    if (aStrong && !bStrong) return -1;
+    if (bStrong && !aStrong) return 1;
+
+    // Both strong: higher rule confidence wins primary, then semantic support.
+    if (aStrong && bStrong) {
+      return b.ruleConfidence - a.ruleConfidence || b.confidence - a.confidence;
+    }
+
+    const aHasRuleSignal = a.ruleConfidence >= 0.4;
+    const bHasRuleSignal = b.ruleConfidence >= 0.4;
+
+    // A concrete rule match should outrank a semantic-only guess for primary.
+    if (aHasRuleSignal && !bHasRuleSignal) return -1;
+    if (bHasRuleSignal && !aHasRuleSignal) return 1;
+
+    // Neither strong: use combined confidence
+    return b.confidence - a.confidence || b.ruleConfidence - a.ruleConfidence;
+  });
+}
+
+const SEMANTIC_ONLY_STORAGE_CONFIDENCE = 0.65;
+const SEMANTIC_ONLY_PRIMARY_CONFIDENCE = 0.7;
+const SEMANTIC_ONLY_PRIMARY_MARGIN = 0.12;
+const RULE_PRIMARY_CONFIDENCE = 0.35;
+
+function ruleConfidenceFor(score: CategoryScore): number {
+  return score.ruleConfidence ?? 0;
+}
+
+function isSemanticOnly(score: CategoryScore): boolean {
+  return ruleConfidenceFor(score) === 0 && (score.semanticConfidence ?? 0) > 0;
+}
+
+export function filterStorableCategoryScores(
+  scores: CategoryScore[],
+  minConfidence: number = 0.25,
+): CategoryScore[] {
+  const storable = scores.filter((score) => {
+    if (score.confidence < minConfidence) {
+      return false;
+    }
+
+    if (!isSemanticOnly(score)) {
+      return true;
+    }
+
+    return score.confidence >= SEMANTIC_ONLY_STORAGE_CONFIDENCE;
+  });
+
+  const sorted = rankHybridCategoryScores(
+    storable.map((score) => ({
+      ...score,
+      ruleConfidence: ruleConfidenceFor(score),
+    })),
+  );
+
+  const primary = sorted[0];
+  if (!primary) {
+    return [];
+  }
+
+  if (isSemanticOnly(primary)) {
+    const nextConfidence = sorted[1]?.confidence ?? 0;
+    const margin = primary.confidence - nextConfidence;
+
+    if (
+      primary.confidence < SEMANTIC_ONLY_PRIMARY_CONFIDENCE ||
+      margin < SEMANTIC_ONLY_PRIMARY_MARGIN
+    ) {
+      return sorted.filter((score) => !isSemanticOnly(score));
+    }
+  }
+
+  if (
+    !isSemanticOnly(primary) &&
+    primary.confidence < RULE_PRIMARY_CONFIDENCE
+  ) {
+    return [];
+  }
+
+  return sorted;
 }
 
 /**
@@ -151,11 +249,13 @@ export async function categorizeArticleHybrid(
   summary?: string,
   articleId?: number,
 ): Promise<CategoryScore[]> {
-  if (!isClimateRelevant({ title, summary })) {
+  const normalized = normalizeArticleForCategorization({ title, summary });
+
+  if (!isClimateRelevant(normalized)) {
     return [];
   }
   // Start with rule-based categorization
-  const ruleBasedScores = categorizeArticle({ title, summary });
+  const ruleBasedScores = categorizeArticle(normalized);
 
   // Try to reuse stored embedding from DB before generating a new one
   let articleEmbedding: number[] | null = null;
@@ -181,17 +281,27 @@ export async function categorizeArticleHybrid(
   // Fall back to generating a new embedding only if none stored
   if (!articleEmbedding) {
     console.log(
-      `  ⚡ Generating new embedding for article ${articleId ?? "?"}: "${title.slice(0, 50)}..."`,
+      `  ⚡ Generating new embedding for article ${articleId ?? "?"}: "${normalized.title.slice(0, 50)}..."`,
     );
-    articleEmbedding = await generateArticleEmbedding(title, summary);
+    articleEmbedding = await generateArticleEmbedding(
+      normalized.title,
+      normalized.summary ?? undefined,
+    );
   }
 
   if (!articleEmbedding) {
     // Fallback to rule-based only if no embedding available at all
     console.warn(
-      `No embedding available for "${title}", using rule-based only`,
+      `No embedding available for "${normalized.title}", using rule-based only`,
     );
-    return ruleBasedScores;
+    return filterStorableCategoryScores(
+      ruleBasedScores.map((score) => ({
+        ...score,
+        ruleConfidence: score.confidence,
+        semanticConfidence: 0,
+        confidenceSource: "rule",
+      })),
+    );
   }
 
   const hybridScores: HybridScoreInternal[] = [];
@@ -231,6 +341,13 @@ export async function categorizeArticleHybrid(
       combinedConfidence = ruleConfidence * 0.4 + semanticConfidence * 0.6;
     }
 
+    const confidenceSource =
+      ruleConfidence > 0 && hasSemanticScore
+        ? "hybrid"
+        : ruleConfidence > 0
+          ? "rule"
+          : "semantic";
+
     const reasons = [
       ...(ruleScore?.reasons || []),
       categoryEmbedding
@@ -242,6 +359,8 @@ export async function categorizeArticleHybrid(
       slug: category.slug,
       confidence: Math.min(1.0, combinedConfidence),
       ruleConfidence,
+      semanticConfidence,
+      confidenceSource,
       reasons,
     });
   }
@@ -249,29 +368,18 @@ export async function categorizeArticleHybrid(
   // SMART PRIMARY SELECTION: Sort with rule-based priority
   // This ensures articles with strong keyword signals (like disaster headlines)
   // get the correct primary category even if semantic scores favor another category
-  const sorted = hybridScores.sort((a, b) => {
-    const aStrong = a.ruleConfidence >= 0.7;
-    const bStrong = b.ruleConfidence >= 0.7;
+  const sorted = filterStorableCategoryScores(
+    rankHybridCategoryScores(hybridScores),
+  );
 
-    // Strong rule signal wins over weak
-    if (aStrong && !bStrong) return -1;
-    if (bStrong && !aStrong) return 1;
-
-    // Both strong: higher rule confidence wins primary
-    if (aStrong && bStrong) {
-      return b.ruleConfidence - a.ruleConfidence;
-    }
-
-    // Neither strong: use combined confidence
-    return b.confidence - a.confidence;
-  });
-
-  // Strip internal ruleConfidence field before returning
   return sorted.map(
     (item): CategoryScore => ({
       slug: item.slug,
       confidence: item.confidence,
       reasons: item.reasons,
+      ruleConfidence: item.ruleConfidence,
+      semanticConfidence: item.semanticConfidence,
+      confidenceSource: item.confidenceSource,
     }),
   );
 }
@@ -286,7 +394,13 @@ export async function storeArticleCategories(
 ): Promise<void> {
   try {
     // Filter scores by minimum confidence
-    const validScores = scores.filter((s) => s.confidence >= minConfidence);
+    const validScores = filterStorableCategoryScores(scores, minConfidence);
+
+    // Clear existing categories for this article before inserting new labels.
+    // Recategorization must be able to remove stale or newly non-climate rows.
+    await query("DELETE FROM article_categories WHERE article_id = $1", [
+      articleId,
+    ]);
 
     if (validScores.length === 0) {
       console.log(
@@ -298,26 +412,12 @@ export async function storeArticleCategories(
     // Find primary category (highest confidence)
     const primaryCategory = validScores[0];
 
-    // Clear existing categories for this article
-    await query("DELETE FROM article_categories WHERE article_id = $1", [
-      articleId,
-    ]);
-
     // Insert new categories
     for (const score of validScores) {
-      await query(
-        `
-        INSERT INTO article_categories (article_id, category_id, confidence, is_primary)
-        SELECT $1, c.id, $2, $3
-        FROM categories c 
-        WHERE c.slug = $4
-      `,
-        [
-          articleId,
-          score.confidence,
-          score.slug === primaryCategory.slug,
-          score.slug,
-        ],
+      await insertArticleCategory(
+        articleId,
+        score,
+        score.slug === primaryCategory.slug,
       );
     }
 
@@ -328,6 +428,68 @@ export async function storeArticleCategories(
     console.error(`Error storing categories for article ${articleId}:`, error);
     throw error;
   }
+}
+
+let supportsCategoryMetadata = true;
+
+async function insertArticleCategory(
+  articleId: number,
+  score: CategoryScore,
+  isPrimary: boolean,
+): Promise<void> {
+  const params = [
+    articleId,
+    score.confidence,
+    isPrimary,
+    score.slug,
+    score.ruleConfidence ?? null,
+    score.semanticConfidence ?? null,
+    score.confidenceSource ?? null,
+    JSON.stringify(score.reasons),
+  ];
+
+  if (supportsCategoryMetadata) {
+    try {
+      await query(
+        `
+        INSERT INTO article_categories (
+          article_id,
+          category_id,
+          confidence,
+          is_primary,
+          rule_confidence,
+          semantic_confidence,
+          confidence_source,
+          reasons
+        )
+        SELECT $1, c.id, $2, $3, $5, $6, $7, $8::jsonb
+        FROM categories c
+        WHERE c.slug = $4
+      `,
+        params,
+      );
+      return;
+    } catch (error) {
+      if (
+        error instanceof Error &&
+        /column .* does not exist|42703/i.test(error.message)
+      ) {
+        supportsCategoryMetadata = false;
+      } else {
+        throw error;
+      }
+    }
+  }
+
+  await query(
+    `
+    INSERT INTO article_categories (article_id, category_id, confidence, is_primary)
+    SELECT $1, c.id, $2, $3
+    FROM categories c
+    WHERE c.slug = $4
+  `,
+    params.slice(0, 4),
+  );
 }
 
 /**

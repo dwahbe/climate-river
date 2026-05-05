@@ -22,10 +22,17 @@ export const CATEGORIES = [
       "sec",
       "eu",
       "parliament",
+      "countries",
+      "nations",
+      "ministers",
       "regulation",
+      "rules",
       "rule",
       "mandate",
       "standard",
+      "summit",
+      "cop",
+      "un climate",
       "court",
       "lawsuit",
       "bill",
@@ -38,6 +45,7 @@ export const CATEGORIES = [
       "biden",
       "trump",
       "climate law",
+      "paris agreement",
       "carbon tax",
       "emissions standard",
       "administration",
@@ -54,12 +62,22 @@ export const CATEGORIES = [
       "department",
       "agency",
       "commission",
+      "regulator",
+      "regulators",
+      "approval",
+      "approvals",
+      "supervisory body",
     ],
     patterns: [
-      /(epa|ferc|sec|parliament|regulation|rule|mandate|standard|court|lawsuit|bill|policy|permitting)/i,
+      /(epa|ferc|sec|parliament|regulation|rules?|mandate|standard|court|lawsuit|bill|policy|permitting)/i,
       /(government|federal|congress|senate|house|administration|regulatory|compliance)/i,
       /(carbon tax|emissions? standard|climate law|environmental law|energy secretary)/i,
       /(department of energy|subsidies|tax credit|legislation|executive order)/i,
+      /\b(trump|biden|administration|government|regulators?|commission|agency|court)\b.{0,80}\b(halts?|blocks?|cancels?|approves?|denies|deny|limits?|orders?|permits?)\b/i,
+      /\brepresentatives?\b.{0,60}\b(countries|nations|governments?|ministers?|summit|cop\d+|un|eu)\b/i,
+      /\b(conference|summit|meeting)\b.{0,120}\b(transitioning away from fossil fuels|path beyond fossil fuels|fossil fuel era|phase[- ]out)\b/i,
+      /\b(un|paris agreement|supervisory body|article 6(?:\.4)?)\b.{0,100}\b(rules?|registry|procedure|crediting mechanism|carbon credit|climate policy)\b/i,
+      /\b(countries|nations|governments?|ministers?|summit|cop\d+|un|eu)\b.{0,100}\b(climate|fossil fuels?|phase[- ]out|energy transition|emissions?|carbon)\b/i,
     ],
   },
   {
@@ -76,35 +94,25 @@ export const CATEGORIES = [
       "fridays for future",
       "sunrise movement",
       "just stop oil",
-      "greenpeace",
       "350.org",
       "climate defiance",
 
       // Direct action terms
       "protest",
       "protesters",
-      "demonstration",
       "demonstrators",
-      "march",
-      "rally",
-      "strike",
       "climate strike",
       "school strike",
       "sit-in",
-      "blockade",
       "civil disobedience",
       "direct action",
-      "arrested",
-      "disrupt",
-      "disruption",
 
       // Activist-specific terms
-      "activist",
-      "activists",
-      "activism",
-      "grassroots movement",
       "climate activist",
-      "youth activist",
+      "climate activists",
+      "climate activism",
+      "grassroots climate movement",
+      "climate justice",
 
       // Specific movement actions
       "occupy",
@@ -113,11 +121,16 @@ export const CATEGORIES = [
       "tree sit",
     ],
     patterns: [
-      /(protest|protesters?|demonstration|demonstrators?|march|rally|strike)/i,
-      /(extinction rebellion|fridays for future|sunrise movement|just stop oil|greenpeace)/i,
-      /(civil disobedience|direct action|blockade|sit-in|disrupt)/i,
-      /(activists?|activism|grassroots movement|climate activist)/i,
-      /(occupy|encampment|hunger strike|arrested.*protest)/i,
+      /\b(climate|environmental|fossil[- ]fuel|pipeline|coal|greenwashing|anti[- ]?(?:oil|gas))\s+(protests?|protesters?|demonstrations?|demonstrators?|march(?:es)?|rall(?:y|ies)|strikes?)\b/i,
+      /\b(protests?|protesters?|demonstrations?|demonstrators?|march(?:es)?|rall(?:y|ies)|strikes?)\b.{0,80}\b(climate|environmental|fossil[- ]fuel|pipeline|coal|emissions?|greenwashing|anti[- ]?(?:oil|gas))\b/i,
+      /(extinction rebellion|fridays for future|sunrise movement|just stop oil|climate defiance)/i,
+      /\bgreenpeace\b.{0,80}\b(protests?|campaigns?|activists?|blockad(?:e|ed|es|ing)|direct action)\b/i,
+      /\b(protests?|campaigns?|activists?|blockad(?:e|ed|es|ing)|direct action)\b.{0,80}\bgreenpeace\b/i,
+      /(civil disobedience|direct action|sit-in|tree sit|hunger strike)/i,
+      /\b(blockad(?:e|ed|es|ing)|disrupt(?:ed|s|ing|ion)?|arrests?|arrested)\b.{0,80}\b(protesters?|activists?|campaigners?|demonstrators?|direct action)\b/i,
+      /\b(protesters?|activists?|campaigners?|demonstrators?|direct action)\b.{0,80}\b(blockad(?:e|ed|es|ing)|disrupt(?:ed|s|ing|ion)?|arrests?|arrested)\b/i,
+      /(climate activists?|climate activism|grassroots climate movement|climate justice)/i,
+      /(occupy|encampment|arrested.*protest)/i,
     ],
   },
   {
@@ -198,14 +211,16 @@ export const CATEGORIES = [
       "extinction",
       "ecosystem",
       "biodiversity",
+      "wildlife",
+      "habitat",
+      "habitats",
+      "amphibian",
+      "amphibians",
       "agriculture",
-      "crops",
-      "water",
       "food security",
       "extreme weather",
       "climate impact",
       "environmental damage",
-      "climate crisis",
       "climate refugee",
       "climate migration",
       "climate displacement",
@@ -214,8 +229,11 @@ export const CATEGORIES = [
     patterns: [
       /(hurricane|flood|drought|wildfire|heatwave|storm|tornado|cyclone)/i,
       /(sea level|glacier|ice sheet|arctic|coral|species|extinction)/i,
-      /(ecosystem|biodiversity|agriculture|crops|water|food security)/i,
-      /(climate (crisis|refugee|migration|displacement)|displaced by climate)/i,
+      /(ecosystem|biodiversity|wildlife|habitats?|amphibians?|agriculture|food security)/i,
+      /\bcrops?\b.{0,40}\b(damage|damaged|failure|fail|failed|loss|losses|yield|yields|production|harvest)\b/i,
+      /\b(damage|damaged|failure|fail|failed|loss|losses|yield|yields|production|harvest)\b.{0,40}\bcrops?\b/i,
+      /(animal migration|species migration|warming winters|drying pools)/i,
+      /(climate (refugee|migration|displacement)|displaced by climate)/i,
       // Definitive disaster + casualty patterns (high confidence signals)
       // Note: Use \w* suffixes to match plurals (floods, storms) and -ing forms (flooding)
       /\b(death toll|kills?|killed|dead|deaths?|casualties|victims?|lives? (lost|claimed)|claiming.{0,10}lives)\b.{0,60}\b(flood\w*|storm\w*|hurricane|wildfire|cyclone|typhoon|tornado|drought)\b/i,
@@ -244,15 +262,18 @@ export const CATEGORIES = [
       "battery",
       "smart grid",
       "artificial intelligence",
-      "satellite",
-      "sensor",
-      "monitoring",
-      "app",
-      "platform",
-      "software",
-      "algorithm",
+      "ai technology",
+      "sensor network",
+      "monitoring technology",
+      "climate platform",
+      "climate software",
       "solar panel",
+      "solar cell",
+      "solar cells",
+      "solar power",
       "wind turbine",
+      "wind farm",
+      "wind farms",
       "renewable energy",
       "grid storage",
       "electricity generation",
@@ -267,8 +288,9 @@ export const CATEGORIES = [
       /(technology|innovation|startup|carbon capture|ccus|direct air capture)/i,
       // Word boundaries around ev/evs to prevent matching "severe", "evacuated", etc.
       /\b(hydrogen|electric vehicles?|evs?|tesla|battery|smart grid)\b/i,
-      /(artificial intelligence|satellite|sensor|monitoring|app|platform)/i,
-      /(solar panel|wind turbine|renewable energy|grid storage|energy storage)/i,
+      /\b(artificial intelligence|ai|machine learning)\b.{0,80}\b(climate|energy|emissions?|methane|deforestation|wildfire|grid|carbon|solar|wind)\b/i,
+      /\b(satellite|sensor|monitoring|platform|software|algorithm)\b.{0,80}\b(technology|system|network|tool|detect|track|measure|monitor|emissions?|methane|deforestation)\b/i,
+      /(solar panels?|solar cells?|solar power|wind turbines?|wind farms?|renewable energy|grid storage|energy storage)/i,
       /(nuclear power|transmission line|utility scale|clean tech|cleantech)/i,
     ],
   },
@@ -290,7 +312,6 @@ export const CATEGORIES = [
       "new research",
       "peer review",
       "journal",
-      "published",
       "paper",
       "analysis shows",
       "findings show",
@@ -313,6 +334,8 @@ export const CATEGORIES = [
       // Add broader but still research-specific terms
       "study",
       "research",
+      "researcher",
+      "researchers",
       "scientist",
       "scientists",
       "scientific",
@@ -325,7 +348,9 @@ export const CATEGORIES = [
     ],
     patterns: [
       /(study (shows|finds|reveals)|research (shows|finds)|scientists (discover|find))/i,
-      /(new research|peer.?review|journal|published|paper)/i,
+      /\b(researchers?|scientists?)\b.{0,80}\b(detect|record|identify|propose|document|find|discover|measure|observe)\b/i,
+      /(new research|peer.?review|journal|paper)/i,
+      /\b(study|paper|article)\s+on\b/i,
       /(analysis shows|findings show|evidence shows|data reveals)/i,
       /(climate model|simulation|peer.?reviewed|scientific study)/i,
       /(ipcc report|science journal|nature journal|research paper|academic)/i,
@@ -340,11 +365,56 @@ export interface CategoryScore {
   slug: CategorySlug;
   confidence: number;
   reasons: string[];
+  ruleConfidence?: number;
+  semanticConfidence?: number;
+  confidenceSource?: "rule" | "semantic" | "hybrid";
 }
 
 // Category lookup helper
 export function getCategoryBySlug(slug: string) {
   return CATEGORIES.find((c) => c.slug === slug);
+}
+
+/**
+ * Clean summaries before relevance/category scoring. Some feed deks are
+ * newsletter roundups or publisher boilerplate rather than article context.
+ */
+export function cleanCategorizationSummary(
+  summary?: string | null,
+): string | undefined {
+  if (!summary) {
+    return undefined;
+  }
+
+  const normalized = summary.replace(/\s+/g, " ").trim();
+
+  if (!normalized) {
+    return undefined;
+  }
+
+  if (/^current conditions:/i.test(normalized)) {
+    return undefined;
+  }
+
+  const withoutPublisherPrefix = normalized
+    .replace(
+      /^(?:Nature|Nature Climate),?\s*Published online:\s*\d{1,2}\s+\w+\s+\d{4};\s*doi:\S+\s*/i,
+      "",
+    )
+    .replace(/^This story is co-published with [^.]+\.\s*/i, "")
+    .replace(/^Welcome to [^.]+ briefing\.\s*/i, "")
+    .trim();
+
+  return withoutPublisherPrefix || undefined;
+}
+
+export function normalizeArticleForCategorization(
+  article: ArticleLike,
+): ArticleLike {
+  return {
+    title: article.title,
+    summary: cleanCategorizationSummary(article.summary),
+  };
 }
 
 /**
@@ -354,7 +424,8 @@ export function getCategoryBySlug(slug: string) {
  * TODO: This is prone to both false positives and false negatives. A simple way to improve this is to use LLMs to check the article + summary.
  */
 export function isClimateRelevant(article: ArticleLike): boolean {
-  const text = `${article.title} ${article.summary || ""}`.toLowerCase();
+  const normalized = normalizeArticleForCategorization(article);
+  const text = `${normalized.title} ${normalized.summary || ""}`.toLowerCase();
 
   const climateTerms = [
     // Core climate terms
@@ -365,7 +436,7 @@ export function isClimateRelevant(article: ArticleLike): boolean {
     /\b(ev|evs|electric[- ]vehicles?|electric[- ]cars?|plug-in|battery[- ]electric|tesla)\b/i,
     /\b(battery|batteries|charging station|charging network|grid storage|long-duration storage)\b/i,
     /\b(hydrogen|ammonia|electrolyzer|fuel cell)\b/i,
-    /\b(nuclear|reactor|reactors|fusion|fission|small modular reactor)\b/i,
+    /\b(nuclear (?:power|energy|plant|plants|reactor|reactors)|reactors?|fusion|fission|small modular reactor)\b/i,
 
     // Fossil fuels
     /\b(oil|gas|methane|petroleum|petrochemical|refinery|refineries|diesel|jet fuel|kerosene)\b/i,
@@ -384,16 +455,21 @@ export function isClimateRelevant(article: ArticleLike): boolean {
 
     // Ecosystems & biodiversity
     /\b(sea[- ]?level|rising seas|coastal flooding|ocean warming|ocean acidification)\b/i,
-    /\b(glacier|glaciers|ice sheet|ice sheets|arctic|antarctic|polar|permafrost|ice melt)\b/i,
+    /\b(glacier|glaciers|ice sheet|ice sheets|arctic|antarctic|polar (?:ice|region|regions|warming|climate)|permafrost|ice melt)\b/i,
     /\b(coral|coral reef|coral bleaching|marine life|ocean)\b/i,
-    /\b(deforestation|forest|forests|rainforest|amazon|logging|trees|reforestation)\b/i,
+    /\b(deforestation|rainforest|amazon rainforest|logging|reforestation)\b/i,
+    /\bforests?\b.{0,60}\b(loss|degradation|clearing|carbon|emissions?|climate|wildfires?|fire|conservation|restoration)\b/i,
+    /\b(loss|degradation|clearing|carbon|emissions?|climate|wildfires?|fire|conservation|restoration)\b.{0,60}\bforests?\b/i,
     /\b(ecosystem|ecosystems|biodiversity|species extinction|habitat loss|endangered species)\b/i,
-    /\b(agriculture|agricultural|crop|crops|farming|farmers|food security|food supply|harvest)\b/i,
+    /\b(agriculture|agricultural|farming|farmers|food security|food supply|harvest)\b/i,
+    /\bcrops?\b.{0,40}\b(damage|damaged|failure|fail|failed|loss|losses|yield|yields|production|harvest)\b/i,
+    /\b(damage|damaged|failure|fail|failed|loss|losses|yield|yields|production|harvest)\b.{0,40}\bcrops?\b/i,
     /\b(water crisis|water stress|precipitation|rainfall|snowpack)\b/i,
+    /\b(rising|increasing|record|extreme|maximum summer)\s+temperatures?\b/i,
     /\b(colorado river|colorado river basin|river compact|water (?:allocation|allocations|allotment|sharing))\b/i,
 
     // Environmental & pollution
-    /\b(environmental|environment|pollution|pollutants|air quality|water quality|soot|smog)\b/i,
+    /\b(environmental|environment|pollution|pollutants|microplastics?|air quality|water quality|soot|smog)\b/i,
 
     // Technology & innovation
     /\b(carbon capture|ccus|ccs|direct air capture|carbon removal|carbon sequestration)\b/i,
@@ -424,16 +500,18 @@ export function isClimateRelevant(article: ArticleLike): boolean {
  * Categorize an article based on title and summary using rule-based scoring
  */
 export function categorizeArticle(article: ArticleLike): CategoryScore[] {
+  const normalized = normalizeArticleForCategorization(article);
+
   // CRITICAL: First check if article is climate-relevant
   // This prevents non-climate articles from being categorized and appearing in the river
-  if (!isClimateRelevant(article)) {
+  if (!isClimateRelevant(normalized)) {
     console.log(
-      `⚠️  Article filtered out (not climate-relevant): "${article.title.substring(0, 60)}..."`,
+      `⚠️  Article filtered out (not climate-relevant): "${normalized.title.substring(0, 60)}..."`,
     );
     return [];
   }
 
-  const { title, summary } = article;
+  const { title, summary } = normalized;
   const text = `${title} ${summary || ""}`.toLowerCase();
   const scores: CategoryScore[] = [];
 

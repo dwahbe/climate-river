@@ -80,7 +80,8 @@ All cron/admin endpoints require either:
 
 - **Repository pattern** for database access (clusterRepository)
 - **Service layer** for business logic (riverService, readerService, searchService)
-- **Hybrid categorization**: keyword rules (tagger.ts) + AI embeddings (categorizer.ts)
+- **Hybrid categorization**: keyword rules (`lib/tagger.ts`) + AI embeddings (`lib/categorizer.ts`), with stored rule/semantic confidence, confidence source, and reasons in `article_categories`
+- **Category page filtering**: `get_river_clusters` uses category evidence across cluster articles, but prioritizes a matching lead primary category and only allows non-lead matches when cluster evidence is strong enough; weak semantic-only labels are filtered before storage
 - **Semantic clustering** via pgvector cosine similarity
 - **Hybrid search**: full-text + semantic search with Reciprocal Rank Fusion
 - **ISR** on homepage (5min revalidation)
