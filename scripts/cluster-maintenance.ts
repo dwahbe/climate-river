@@ -5,6 +5,7 @@
 // 3. Create singleton clusters for remaining orphans
 import { query, endPool } from "@/lib/db";
 import { CLUSTER_CONFIG, findBestCluster, clusterKey } from "@/lib/clustering";
+import { visibleLanguagePredicate } from "@/lib/languagePolicy";
 
 /**
  * Find unclustered articles with embeddings and add them to the best matching
@@ -24,6 +25,7 @@ async function retroactivelyClusterArticles() {
     LEFT JOIN article_clusters ac ON a.id = ac.article_id
     WHERE ac.article_id IS NULL
       AND a.embedding IS NOT NULL
+      AND ${visibleLanguagePredicate("a")}
       AND a.fetched_at >= now() - make_interval(days => $1)
     ORDER BY a.fetched_at DESC
     LIMIT 100
@@ -82,6 +84,7 @@ async function mergeSimilarClusters() {
       FROM article_clusters ac
       JOIN articles a ON a.id = ac.article_id
       WHERE a.embedding IS NOT NULL
+        AND ${visibleLanguagePredicate("a")}
         AND a.fetched_at >= now() - make_interval(days => $1)
       GROUP BY ac.cluster_id
       HAVING COUNT(*) >= 2
@@ -169,6 +172,7 @@ async function createSingletonClusters() {
     LEFT JOIN article_clusters ac ON a.id = ac.article_id
     WHERE ac.article_id IS NULL
       AND a.embedding IS NOT NULL
+      AND ${visibleLanguagePredicate("a")}
       AND a.fetched_at >= now() - make_interval(days => $1)
     ORDER BY a.fetched_at DESC
   `,
@@ -214,28 +218,52 @@ async function updateAllClusterMetadata() {
 
   await query(
     `
+    WITH visible_articles AS (
+      SELECT
+        ac.cluster_id,
+        a.id AS article_id,
+        a.published_at,
+        COALESCE(s.weight, 3) AS source_weight
+      FROM article_clusters ac
+      JOIN articles a ON a.id = ac.article_id
+      LEFT JOIN sources s ON s.id = a.source_id
+      WHERE a.fetched_at >= now() - make_interval(days => $1)
+        AND ${visibleLanguagePredicate("a")}
+    ),
+    ranked AS (
+      SELECT
+        cluster_id,
+        article_id,
+        COUNT(*) OVER (PARTITION BY cluster_id)::int AS size,
+        ROW_NUMBER() OVER (
+          PARTITION BY cluster_id
+          ORDER BY source_weight DESC, published_at DESC, article_id DESC
+        ) AS lead_rank
+      FROM visible_articles
+    )
     INSERT INTO cluster_scores (cluster_id, lead_article_id, size, score)
-    SELECT
-      ac.cluster_id,
-      (SELECT a.id
-       FROM articles a
-       JOIN article_clusters ac2 ON ac2.article_id = a.id
-       LEFT JOIN sources s ON s.id = a.source_id
-       WHERE ac2.cluster_id = ac.cluster_id
-       ORDER BY COALESCE(s.weight, 3) DESC, a.published_at DESC, a.id DESC
-       LIMIT 1) as lead_article_id,
-      COUNT(*) as size,
-      0 as score
-    FROM article_clusters ac
-    JOIN articles a ON a.id = ac.article_id
-    WHERE a.fetched_at >= now() - make_interval(days => $1)
-    GROUP BY ac.cluster_id
+    SELECT cluster_id, article_id, size, 0
+    FROM ranked
+    WHERE lead_rank = 1
     ON CONFLICT (cluster_id) DO UPDATE SET
       lead_article_id = EXCLUDED.lead_article_id,
       size = EXCLUDED.size,
       updated_at = NOW()
   `,
     [CLUSTER_CONFIG.LOOKBACK_DAYS],
+  );
+
+  await query(
+    `
+    DELETE FROM cluster_scores cs
+    WHERE NOT EXISTS (
+      SELECT 1
+      FROM article_clusters ac
+      JOIN articles a ON a.id = ac.article_id
+      WHERE ac.cluster_id = cs.cluster_id
+        AND ${visibleLanguagePredicate("a")}
+    )
+  `,
   );
 
   console.log("  ✓ Cluster metadata updated");

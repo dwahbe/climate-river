@@ -1,4 +1,5 @@
 import type { ModelPricing } from "@/config/evalProfiles";
+import { ENGLISH_LANGUAGE_PROMPT_CONSTRAINT } from "@/lib/languagePolicy";
 
 export type WebSearchPromptVariant = "v1" | "v2" | "v3" | "v4";
 
@@ -46,11 +47,11 @@ export type PromptInputs = {
 
 /** v1: production prompt verbatim (scripts/discover-web.ts:2036). */
 function buildSystemPromptV1(inputs: PromptInputs): string {
-  return `You are ClimateRiver's climate outlet curator. For each outlet you must issue at least one precise site:domain query that reflects the outlet's specialty while keeping total tool calls as low as possible. Only keep original articles published in the past ${inputs.freshHours} hours. Reject syndicated content, opinion newsletters, or aggregator redirections. Double-check that every URL's hostname belongs to the allowed domain list and drop any entry without a confirmed ISO timestamp. Respond with a JSON array sorted newest to oldest containing title, url, snippet (why the story matters), publishedDate (ISO), and source.`;
+  return `You are ClimateRiver's climate outlet curator. For each outlet you must issue at least one precise site:domain query that reflects the outlet's specialty while keeping total tool calls as low as possible. Only keep ${ENGLISH_LANGUAGE_PROMPT_CONSTRAINT} original articles published in the past ${inputs.freshHours} hours. Reject syndicated content, opinion newsletters, or aggregator redirections. Double-check that every URL's hostname belongs to the allowed domain list and drop any entry without a confirmed ISO timestamp. Respond with a JSON array sorted newest to oldest containing title, url, snippet (why the story matters), publishedDate (ISO), and source.`;
 }
 
 function buildUserPromptV1(inputs: PromptInputs): string {
-  return `Provide up to ${inputs.resultLimit} combined articles across these outlets: ${inputs.descriptors.join("; ")}. Use site-specific queries (e.g., site:domain "topic") tailored to each prompt hint, and when possible include at least one qualifying link per outlet. Only include URLs from ${inputs.domains.join(", ")} or their official climate sections, ensure every item was published within the last ${inputs.freshHours} hours, and omit any link that fails those tests. Return only the JSON array sorted newest to oldest.`;
+  return `Provide up to ${inputs.resultLimit} combined ${ENGLISH_LANGUAGE_PROMPT_CONSTRAINT} articles across these outlets: ${inputs.descriptors.join("; ")}. Use site-specific queries (e.g., site:domain "topic") tailored to each prompt hint, and when possible include at least one qualifying link per outlet. Only include URLs from ${inputs.domains.join(", ")} or their official climate sections, ensure every item was published within the last ${inputs.freshHours} hours, and omit any link that fails those tests. Return only the JSON array sorted newest to oldest.`;
 }
 
 /** v2: explicit reject list, "quality > coverage", empty-array-as-correct. */
@@ -180,7 +181,7 @@ function buildSystemPromptV4(inputs: PromptInputs): string {
 
 RECENCY: Today is ${now.toISOString().slice(0, 10)} (${monthName} ${yyyy}). Every search query you issue MUST include a date hint such as "${monthName} ${yyyy}", "${yyyy}", or "this week". A query like \`site:reuters.com climate\` will return evergreen content; a query like \`site:reuters.com climate ${monthName} ${yyyy}\` returns recent reporting. Date-stamp every query.
 
-Only keep original articles published in the past ${inputs.freshHours} hours. Reject syndicated content, opinion newsletters, or aggregator redirections. Double-check that every URL's hostname belongs to the allowed domain list and drop any entry without a confirmed ISO timestamp.
+Only keep ${ENGLISH_LANGUAGE_PROMPT_CONSTRAINT} original articles published in the past ${inputs.freshHours} hours. Reject syndicated content, opinion newsletters, or aggregator redirections. Double-check that every URL's hostname belongs to the allowed domain list and drop any entry without a confirmed ISO timestamp.
 
 If an outlet has no qualifying recent articles, OMIT it. An empty array \`[]\` is a correct, expected response when nothing fresh exists — do not return stale articles to fill the list.
 
@@ -194,7 +195,7 @@ function buildUserPromptV4(inputs: PromptInputs): string {
     month: "long",
     timeZone: "UTC",
   });
-  return `Provide up to ${inputs.resultLimit} combined articles across these outlets: ${inputs.descriptors.join("; ")}. Use date-stamped site-specific queries (e.g., \`site:domain "topic" ${monthName} ${yyyy}\`) tailored to each prompt hint. Only include URLs from ${inputs.domains.join(", ")} or their official climate sections, ensure every item was published within the last ${inputs.freshHours} hours, and omit any link that fails those tests. Returning fewer than ${inputs.resultLimit} items is fine — \`[]\` is correct if nothing qualifies. Return only the JSON array sorted newest to oldest.`;
+  return `Provide up to ${inputs.resultLimit} combined ${ENGLISH_LANGUAGE_PROMPT_CONSTRAINT} articles across these outlets: ${inputs.descriptors.join("; ")}. Use date-stamped site-specific queries (e.g., \`site:domain "topic" ${monthName} ${yyyy}\`) tailored to each prompt hint. Only include URLs from ${inputs.domains.join(", ")} or their official climate sections, ensure every item was published within the last ${inputs.freshHours} hours, and omit any link that fails those tests. Returning fewer than ${inputs.resultLimit} items is fine — \`[]\` is correct if nothing qualifies. Return only the JSON array sorted newest to oldest.`;
 }
 
 export function buildSystemPrompt(

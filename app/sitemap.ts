@@ -1,6 +1,7 @@
 import { MetadataRoute } from "next";
 import { CATEGORIES } from "@/lib/tagger";
 import * as DB from "@/lib/db";
+import { visibleLanguagePredicate } from "@/lib/languagePolicy";
 
 export const revalidate = 3600; // Revalidate every hour
 
@@ -10,7 +11,8 @@ async function getLatestContentUpdate(): Promise<Date> {
       `SELECT MAX(a.published_at) as max_date 
        FROM cluster_scores cs 
        JOIN articles a ON a.id = cs.lead_article_id 
-       WHERE a.published_at > NOW() - INTERVAL '7 days'`,
+       WHERE a.published_at > NOW() - INTERVAL '7 days'
+         AND ${visibleLanguagePredicate("a")}`,
     );
     if (rows[0]?.max_date) {
       return new Date(rows[0].max_date);

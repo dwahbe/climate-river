@@ -4,6 +4,10 @@ import dayjs from "dayjs";
 import { query, endPool } from "@/lib/db";
 import { isClimateRelevant } from "@/lib/tagger";
 import { generateEmbedding, assignArticleToCluster } from "@/lib/clustering";
+import {
+  classifyArticleLanguageForIngest,
+  type LanguageDetection,
+} from "@/lib/language";
 import { canonical, mapLimit } from "@/lib/utils";
 import { resolveTier } from "@/config/sourceTiers";
 
@@ -133,6 +137,7 @@ async function insertArticle(
   title: string,
   url: string,
   publishedAt?: string,
+  language?: LanguageDetection,
 ) {
   // Skip duplicates before generating embedding to avoid wasted OpenAI API calls
   const existing = await query<{ id: number }>(
@@ -144,8 +149,19 @@ async function insertArticle(
   const embedding = await generateEmbedding(title);
   const row = await query<{ id: number }>(
     `
-    INSERT INTO articles (source_id, title, canonical_url, published_at, embedding)
-    VALUES ($1, $2, $3, $4, $5)
+    INSERT INTO articles (
+      source_id,
+      title,
+      canonical_url,
+      published_at,
+      embedding,
+      language_code,
+      language_confidence,
+      language_raw_code,
+      language_source,
+      language_checked_at
+    )
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
     ON CONFLICT (canonical_url) DO NOTHING
     RETURNING id
   `,
@@ -155,6 +171,10 @@ async function insertArticle(
       url,
       publishedAt ? dayjs(publishedAt).toDate() : null,
       embedding.length > 0 ? JSON.stringify(embedding) : null,
+      language?.languageCode ?? null,
+      language?.languageConfidence ?? null,
+      language?.languageRawCode ?? null,
+      language?.languageSource ?? null,
     ],
   );
   return row.rows[0]?.id;
@@ -211,6 +231,15 @@ async function ingestQuery(q: string, limitPerQuery = 25) {
       continue;
     }
 
+    const languageGate = classifyArticleLanguageForIngest(title);
+    if (languageGate.skip) {
+      console.log(
+        `⏭️  Skipped (${languageGate.language.languageCode}): "${title.substring(0, 60)}..."`,
+      );
+      continue;
+    }
+    const { language } = languageGate;
+
     let host = "";
     try {
       host = new URL(urlCanon).hostname;
@@ -223,6 +252,7 @@ async function ingestQuery(q: string, limitPerQuery = 25) {
       title,
       urlCanon,
       it.isoDate || it.pubDate,
+      language,
     );
     if (id) {
       inserted++;

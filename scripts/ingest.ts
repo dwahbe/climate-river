@@ -6,6 +6,10 @@ import { categorizeAndStoreArticle } from "@/lib/categorizer";
 import { isClimateRelevant } from "@/lib/tagger";
 import { generateEmbedding, assignArticleToCluster } from "@/lib/clustering";
 import {
+  classifyArticleLanguageForIngest,
+  type LanguageDetection,
+} from "@/lib/language";
+import {
   canonical,
   mapLimit,
   cleanGoogleNewsTitle,
@@ -242,6 +246,7 @@ async function insertArticle(
   author?: string | null,
   // defaulted param must NOT be optional
   pub: { name?: string; homepage?: string } = {},
+  language?: LanguageDetection,
 ) {
   // Parse and validate the date
   const parsedDate = parseDateMaybe(publishedAt);
@@ -277,14 +282,19 @@ async function insertArticle(
   const row = await query<{ id: number }>(
     `
     insert into articles
-      (source_id, title, canonical_url, published_at, dek, author, publisher_name, publisher_homepage, embedding)
-    values ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+      (source_id, title, canonical_url, published_at, dek, author, publisher_name, publisher_homepage, embedding, language_code, language_confidence, language_raw_code, language_source, language_checked_at)
+    values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,NOW())
     on conflict (canonical_url) do update set
       dek                 = coalesce(articles.dek, excluded.dek),
       author              = coalesce(articles.author, excluded.author),
       publisher_name      = coalesce(articles.publisher_name, excluded.publisher_name),
       publisher_homepage  = coalesce(articles.publisher_homepage, excluded.publisher_homepage),
-      embedding           = coalesce(articles.embedding, excluded.embedding)
+      embedding           = coalesce(articles.embedding, excluded.embedding),
+      language_code       = coalesce(articles.language_code, excluded.language_code),
+      language_confidence = coalesce(articles.language_confidence, excluded.language_confidence),
+      language_raw_code   = coalesce(articles.language_raw_code, excluded.language_raw_code),
+      language_source     = coalesce(articles.language_source, excluded.language_source),
+      language_checked_at = coalesce(articles.language_checked_at, excluded.language_checked_at)
     returning id
   `,
     [
@@ -297,6 +307,10 @@ async function insertArticle(
       pub.name ?? null,
       pub.homepage ?? null,
       embeddingJson,
+      language?.languageCode ?? null,
+      language?.languageConfidence ?? null,
+      language?.languageRawCode ?? null,
+      language?.languageSource ?? null,
     ],
   );
   const id = row.rows[0]?.id;
@@ -358,6 +372,15 @@ async function ingestFromFeed(feedUrl: string, sourceId: number, limit = 20) {
       continue;
     }
 
+    const languageGate = classifyArticleLanguageForIngest(title, dek);
+    if (languageGate.skip) {
+      console.log(
+        `⏭️  Skipped (${languageGate.language.languageCode}): "${title.substring(0, 60)}..."`,
+      );
+      continue;
+    }
+    const { language } = languageGate;
+
     const rawAuthor = (it.creator || it.author || null) as string | null;
     const author = rawAuthor ? decodeHtmlEntities(rawAuthor.trim()) : null;
 
@@ -379,6 +402,7 @@ async function ingestFromFeed(feedUrl: string, sourceId: number, limit = 20) {
       dek,
       author,
       pub,
+      language,
     );
     if (result) {
       inserted++;

@@ -1,5 +1,9 @@
 // lib/services/readerService.ts
 import { query } from "@/lib/db";
+import {
+  detectArticleLanguageFromContent,
+  shouldDetectLanguageFromContent,
+} from "@/lib/language";
 import sanitize from "sanitize-html";
 
 /**
@@ -373,6 +377,10 @@ export async function getArticleContent(
     title: string;
     author: string | null;
     published_at: Date | null;
+    language_code: string | null;
+    language_confidence: number | null;
+    language_raw_code: string | null;
+    language_source: string | null;
   }>(
     `
     SELECT 
@@ -386,7 +394,11 @@ export async function getArticleContent(
       canonical_url,
       title,
       author,
-      published_at
+      published_at,
+      language_code,
+      language_confidence,
+      language_raw_code,
+      language_source
     FROM articles
     WHERE id = $1
   `,
@@ -443,26 +455,56 @@ export async function getArticleContent(
   // Store result in database
   if (result.success) {
     const textContent = htmlToText(result.content);
+    const language = shouldDetectLanguageFromContent(textContent)
+      ? detectArticleLanguageFromContent(textContent)
+      : null;
+    const shouldUpdateLanguage =
+      language !== null &&
+      (article.language_code !== language.languageCode ||
+        article.language_confidence !== language.languageConfidence ||
+        article.language_raw_code !== language.languageRawCode ||
+        article.language_source !== language.languageSource);
+
+    const setClauses = [
+      "content_html = $1",
+      "content_text = $2",
+      "content_word_count = $3",
+      "content_image = $4",
+      "content_status = 'success'",
+      "content_error = NULL",
+      "content_fetched_at = NOW()",
+    ];
+    const values: Array<string | number | null> = [
+      result.content,
+      textContent,
+      result.wordCount,
+      result.image || null,
+    ];
+
+    if (language && shouldUpdateLanguage) {
+      setClauses.push(
+        `language_code = $${values.length + 1}`,
+        `language_confidence = $${values.length + 2}`,
+        `language_raw_code = $${values.length + 3}`,
+        `language_source = $${values.length + 4}`,
+        "language_checked_at = NOW()",
+      );
+      values.push(
+        language.languageCode,
+        language.languageConfidence,
+        language.languageRawCode,
+        language.languageSource,
+      );
+    }
+
+    values.push(articleId);
     await query(
       `
       UPDATE articles
-      SET 
-        content_html = $1,
-        content_text = $2,
-        content_word_count = $3,
-        content_image = $4,
-        content_status = 'success',
-        content_error = NULL,
-        content_fetched_at = NOW()
-      WHERE id = $5
+      SET ${setClauses.join(",\n          ")}
+      WHERE id = $${values.length}
     `,
-      [
-        result.content,
-        textContent,
-        result.wordCount,
-        result.image || null,
-        articleId,
-      ],
+      values,
     );
   } else {
     await query(

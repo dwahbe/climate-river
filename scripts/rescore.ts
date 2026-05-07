@@ -1,5 +1,6 @@
 // scripts/rescore.ts
 import { query, endPool } from "@/lib/db";
+import { visibleLanguagePredicate } from "@/lib/languagePolicy";
 
 const HOUR = 3600;
 // Optimized decay for dynamic, fresh content (data-driven analysis)
@@ -36,6 +37,7 @@ export async function run(opts: { closePool?: boolean } = {}) {
         dek,
         author,
         canonical_url,
+        source_id,
         src_weight,
         is_gn,
         is_wire
@@ -47,6 +49,7 @@ export async function run(opts: { closePool?: boolean } = {}) {
           a.dek,
           a.author,
           a.canonical_url,
+          a.source_id,
           COALESCE(s.weight, 6)         AS src_weight,
           -- penalties (ints, not booleans)
           (a.canonical_url LIKE 'https://news.google.com%')::int                             AS is_gn,
@@ -58,6 +61,7 @@ export async function run(opts: { closePool?: boolean } = {}) {
         FROM article_clusters ac
         JOIN articles a ON a.id = ac.article_id
         LEFT JOIN sources s ON s.id = a.source_id
+        WHERE ${visibleLanguagePredicate("a")}
       ) ranked
       WHERE article_cluster_rank = 1
     ),
@@ -90,16 +94,13 @@ export async function run(opts: { closePool?: boolean } = {}) {
       SELECT
         a.cluster_id,
         COUNT(*)                                                         AS size,
-        COUNT(DISTINCT s2.id)                                            AS distinct_sources,
+        COUNT(DISTINCT a.source_id)                                      AS distinct_sources,
         MAX(a.published_at)                                              AS latest_pub,
         SUM(COALESCE(a.src_weight,0))                                    AS sum_w,
         AVG(COALESCE(a.src_weight,0))                                    AS avg_w,
         -- velocity = how many articles in last 4h (shorter window for more recent focus)
         SUM( ((now() - a.published_at) <= interval '4 hours')::int )     AS v4
       FROM art a
-      LEFT JOIN article_clusters ac2 ON ac2.article_id = a.article_id
-      LEFT JOIN articles a2 ON a2.id = ac2.article_id
-      LEFT JOIN sources s2 ON s2.id = a2.source_id
       GROUP BY a.cluster_id
     ),
     clust_scored AS (
@@ -172,6 +173,17 @@ export async function run(opts: { closePool?: boolean } = {}) {
     [HL_ARTICLE_H, HL_CLUSTER_H],
   );
 
+  await query(`
+    DELETE FROM cluster_scores cs
+    WHERE NOT EXISTS (
+      SELECT 1
+      FROM article_clusters ac
+      JOIN articles a ON a.id = ac.article_id
+      WHERE ac.cluster_id = cs.cluster_id
+        AND ${visibleLanguagePredicate("a")}
+    );
+  `);
+
   console.log("✅ Main rescore query completed");
 
   // Cluster health check
@@ -201,6 +213,7 @@ async function logClusterHealth(): Promise<ClusterHealth> {
       FROM article_clusters ac
       JOIN articles a ON a.id = ac.article_id
       WHERE a.fetched_at >= now() - interval '7 days'  -- wider than LOOKBACK_DAYS for broader health view
+        AND ${visibleLanguagePredicate("a")}
       GROUP BY ac.cluster_id
     ),
     embed_stats AS (
@@ -208,6 +221,7 @@ async function logClusterHealth(): Promise<ClusterHealth> {
         ROUND(100.0 * COUNT(*) FILTER (WHERE embedding IS NOT NULL) / GREATEST(COUNT(*), 1), 1) AS embedded_pct
       FROM articles
       WHERE fetched_at >= now() - interval '7 days'  -- wider than LOOKBACK_DAYS for broader health view
+        AND ${visibleLanguagePredicate()}
     )
     SELECT
       COUNT(*)::int AS total_clusters,

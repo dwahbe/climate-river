@@ -1,5 +1,6 @@
 // scripts/schema.ts
 import { query, endPool } from "@/lib/db";
+import { visibleLanguagePredicate } from "@/lib/languagePolicy";
 
 /**
  * Idempotent schema guard.
@@ -78,6 +79,22 @@ export async function run() {
     `alter table if exists articles add column if not exists content_image text;`,
   );
 
+  await query(
+    `alter table if exists articles add column if not exists language_code text;`,
+  );
+  await query(
+    `alter table if exists articles add column if not exists language_confidence real;`,
+  );
+  await query(
+    `alter table if exists articles add column if not exists language_raw_code text;`,
+  );
+  await query(
+    `alter table if exists articles add column if not exists language_source text;`,
+  );
+  await query(
+    `alter table if exists articles add column if not exists language_checked_at timestamptz;`,
+  );
+
   // Add embedding column for semantic similarity (vector dimension 1536 for text-embedding-3-small)
   await query(
     `alter table if exists articles add column if not exists embedding vector(1536);`,
@@ -104,6 +121,12 @@ export async function run() {
   await query(`
     create index if not exists idx_articles_content_status 
       on articles(content_status) where content_status is not null;
+  `);
+  await query(`drop index if exists idx_articles_language_code;`);
+  await query(`
+    create index if not exists idx_articles_non_english_language_code
+      on articles(language_code)
+      where language_code is not null and language_code <> 'en';
   `);
 
   // --- clusters -------------------------------------------------------------
@@ -448,6 +471,7 @@ export async function run() {
         join articles a on a.id = cs.lead_article_id
         left join sources s on s.id = a.source_id
         where a.published_at >= now() - make_interval(hours => coalesce(p_window_hours, 168))
+          and ${visibleLanguagePredicate("a")}
           and a.canonical_url not like 'https://news.google.com%'
           and a.canonical_url not like 'https://news.yahoo.com%'
           and a.canonical_url not like 'https://www.msn.com%'
@@ -469,9 +493,11 @@ export async function run() {
           max(ag.confidence) as max_confidence,
           max(coalesce(ag.rule_confidence, 0)) as max_rule_confidence
         from article_clusters ac
+        join articles a_lang on a_lang.id = ac.article_id
         join article_categories ag on ag.article_id = ac.article_id
         join categories cat on cat.id = ag.category_id
-        where ag.confidence >= 0.35
+        where ${visibleLanguagePredicate("a_lang")}
+          and ag.confidence >= 0.35
           and (
             coalesce(ag.rule_confidence, 0) > 0
             or ag.confidence >= 0.65
@@ -549,6 +575,7 @@ export async function run() {
         join article_clusters ac on ac.cluster_id = rc.cluster_id
         join articles a on a.id = ac.article_id
         left join sources s on s.id = a.source_id
+        where ${visibleLanguagePredicate("a")}
       ),
       subs as (
         select
@@ -631,6 +658,7 @@ export async function run() {
           join articles a2 on a2.id = ac2.article_id
           left join sources s2 on s2.id = a2.source_id
           where ac2.cluster_id = rc.cluster_id
+            and ${visibleLanguagePredicate("a2")}
         )::int as sources_count,
         rc.lead_article_id,
         rc.lead_title,

@@ -2,6 +2,7 @@ import { query } from "@/lib/db";
 import { embed } from "ai";
 import { openai } from "@ai-sdk/openai";
 import type { SearchResult } from "@/lib/models/search";
+import { visibleLanguagePredicate } from "@/lib/languagePolicy";
 
 const SEARCH_FIELDS = `
   a.id as article_id,
@@ -24,6 +25,8 @@ const EXCLUDE_AGGREGATORS = `
   AND a.canonical_url NOT LIKE 'https://www.msn.com%'
 `;
 
+const ENGLISH_OR_UNKNOWN = `AND ${visibleLanguagePredicate("a")}`;
+
 async function embedQuery(text: string): Promise<number[]> {
   const { embedding } = await embed({
     model: openai.embedding("text-embedding-3-small"),
@@ -43,6 +46,7 @@ async function keywordSearch(
      LEFT JOIN sources s ON s.id = a.source_id
      WHERE a.search_vector @@ plainto_tsquery('english', $1)
      ${EXCLUDE_AGGREGATORS}
+     ${ENGLISH_OR_UNKNOWN}
      ORDER BY ts_rank_cd(a.search_vector, plainto_tsquery('english', $1)) DESC
      LIMIT $2`,
     [q, limit],
@@ -64,6 +68,7 @@ async function semanticSearch(
      WHERE a.embedding IS NOT NULL
        AND 1 - (a.embedding <=> $1::vector) > 0.3
      ${EXCLUDE_AGGREGATORS}
+     ${ENGLISH_OR_UNKNOWN}
      ORDER BY a.embedding <=> $1::vector
      LIMIT $2`,
     [embStr, limit],

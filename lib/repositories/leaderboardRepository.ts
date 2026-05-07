@@ -1,5 +1,6 @@
 // lib/repositories/leaderboardRepository.ts
 import * as DB from "@/lib/db";
+import { visibleLanguagePredicate } from "@/lib/languagePolicy";
 
 export type LeaderboardEntry = {
   name: string;
@@ -65,6 +66,7 @@ function buildLeadsQuery(withLimit: boolean) {
       JOIN cluster_scores cs  ON ac.cluster_id = cs.cluster_id
       WHERE a.published_at >  NOW() - make_interval(hours => $1)
         AND a.published_at <= NOW() - make_interval(hours => $2)
+        AND ${visibleLanguagePredicate("a")}
         AND NOT (
           coalesce(s.slug, '') = 'web-discovery'
           AND nullif(a.publisher_name, '') IS NULL

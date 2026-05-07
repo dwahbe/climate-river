@@ -3,6 +3,7 @@ import * as DB from "@/lib/db";
 import LocalTime from "@/components/LocalTime";
 import ArticleStructuredData from "@/components/ArticleStructuredData";
 import type { Metadata } from "next";
+import { visibleLanguagePredicate } from "@/lib/languagePolicy";
 
 // Cache for 5 minutes (300 seconds)
 export const revalidate = 300;
@@ -29,6 +30,7 @@ export async function generateMetadata(props: {
     JOIN articles a ON a.id = cs.lead_article_id
     LEFT JOIN sources s ON s.id = a.source_id
     WHERE cs.cluster_id = $1::bigint
+      AND ${visibleLanguagePredicate("a")}
     LIMIT 1
     `,
     [cid],
@@ -142,6 +144,7 @@ export default async function ClusterPage(props: {
       JOIN articles a ON a.id = cs.lead_article_id
       LEFT JOIN sources s ON s.id = a.source_id
       WHERE cs.cluster_id = $1::bigint
+        AND ${visibleLanguagePredicate("a")}
         AND a.canonical_url NOT LIKE 'https://news.google.com%'
         AND a.canonical_url NOT LIKE 'https://news.yahoo.com%'
         AND a.canonical_url NOT LIKE 'https://www.msn.com%'
@@ -154,7 +157,8 @@ export default async function ClusterPage(props: {
          FROM article_clusters ac
          JOIN articles a2 ON a2.id = ac.article_id
          LEFT JOIN sources s ON s.id = a2.source_id
-        WHERE ac.cluster_id = l.cluster_id)::int AS sources_count,
+        WHERE ac.cluster_id = l.cluster_id
+          AND ${visibleLanguagePredicate("a2")})::int AS sources_count,
       l.lead_article_id,
       l.lead_title,
       l.lead_url,
@@ -210,6 +214,7 @@ export default async function ClusterPage(props: {
           LEFT JOIN sources s2 ON s2.id = a2.source_id
           WHERE ac2.cluster_id = l.cluster_id
             AND a2.id <> l.lead_article_id
+            AND ${visibleLanguagePredicate("a2")}
         )
         SELECT COALESCE(json_agg(row_to_json(y)), '[]'::json)
         FROM (

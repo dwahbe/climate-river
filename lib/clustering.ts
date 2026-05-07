@@ -4,6 +4,7 @@
 import { embed } from "ai";
 import { openai } from "@ai-sdk/openai";
 import { query } from "@/lib/db";
+import { visibleLanguagePredicate } from "@/lib/languagePolicy";
 
 export const CLUSTER_CONFIG = {
   /** Cosine similarity threshold for adding articles to clusters */
@@ -197,6 +198,7 @@ export async function findBestCluster(
       FROM article_clusters ac
       JOIN articles a ON a.id = ac.article_id
       WHERE a.embedding IS NOT NULL
+        AND ${visibleLanguagePredicate("a")}
         AND a.fetched_at >= now() - make_interval(days => $4)
       GROUP BY ac.cluster_id
       HAVING COUNT(*) < $2
@@ -230,20 +232,30 @@ export async function updateClusterMetadata(clusterId: number): Promise<void> {
   try {
     await query(
       `
+      WITH visible_articles AS (
+        SELECT
+          a.id,
+          a.published_at,
+          COALESCE(s.weight, 6) AS source_weight
+        FROM articles a
+        JOIN article_clusters ac ON ac.article_id = a.id
+        LEFT JOIN sources s ON s.id = a.source_id
+        WHERE ac.cluster_id = $1
+          AND ${visibleLanguagePredicate("a")}
+      ),
+      rollup AS (
+        SELECT
+          (SELECT id
+           FROM visible_articles
+           ORDER BY source_weight DESC, published_at DESC, id DESC
+           LIMIT 1) AS lead_article_id,
+          COUNT(*)::int AS size
+        FROM visible_articles
+        HAVING COUNT(*) > 0
+      )
       INSERT INTO cluster_scores (cluster_id, lead_article_id, size, score)
-      SELECT
-        $1 as cluster_id,
-        (SELECT a.id
-         FROM articles a
-         JOIN article_clusters ac ON ac.article_id = a.id
-         LEFT JOIN sources s ON s.id = a.source_id
-         WHERE ac.cluster_id = $1
-         ORDER BY COALESCE(s.weight, 6) DESC, a.published_at DESC, a.id DESC
-         LIMIT 1) as lead_article_id,
-        (SELECT COUNT(*)
-         FROM article_clusters
-         WHERE cluster_id = $1) as size,
-        0 as score
+      SELECT $1, lead_article_id, size, 0
+      FROM rollup
       ON CONFLICT (cluster_id) DO UPDATE SET
         lead_article_id = EXCLUDED.lead_article_id,
         size = EXCLUDED.size,

@@ -19,6 +19,11 @@ import {
 } from "@/config/webSearchProfiles";
 import { generateEmbedding, assignArticleToCluster } from "@/lib/clustering";
 import {
+  classifyArticleLanguageForIngest,
+  type LanguageDetection,
+} from "@/lib/language";
+import { ENGLISH_LANGUAGE_PROMPT_CONSTRAINT } from "@/lib/languagePolicy";
+import {
   canonical,
   cleanGoogleNewsTitle,
   isValidArticleDate,
@@ -56,6 +61,7 @@ type DiscoveryOutcomeReason =
   | "inserted"
   | "invalid_title"
   | "non_climate"
+  | "non_english"
   | "duplicate_url"
   | "duplicate_title"
   | "duplicate_candidate"
@@ -1215,13 +1221,14 @@ Required format:
 Rules:
 - Only include articles from the past 72 hours
 - Only include articles from the specified domains
+- Only include ${ENGLISH_LANGUAGE_PROMPT_CONSTRAINT} articles
 - Reject aggregator URLs (news.google.com, yahoo, msn)
 - Each item MUST have: title, url, snippet, publishedDate (ISO 8601), source
 - Sort newest to oldest
 - If no articles found, return empty array: []`;
     const userMessage =
       overrides?.userPrompt ??
-      `Find up to ${requestedLimit} vetted climate or environment-related articles for: "${query}". Require publish dates within the past 72 hours, prioritize investigative/policy/science/finance impact, and ensure each entry includes a trustworthy ISO timestamp. If fewer than ${requestedLimit} items qualify, only return the smaller set. Sort newest to oldest before responding.`;
+      `Find up to ${requestedLimit} vetted ${ENGLISH_LANGUAGE_PROMPT_CONSTRAINT} climate or environment-related articles for: "${query}". Require publish dates within the past 72 hours, prioritize investigative/policy/science/finance impact, and ensure each entry includes a trustworthy ISO timestamp. If fewer than ${requestedLimit} items qualify, only return the smaller set. Sort newest to oldest before responding.`;
 
     const response = await generateText({
       model: openai(WEB_SEARCH_MODEL),
@@ -1613,7 +1620,7 @@ async function generateGoogleNewsSuggestions(
         },
         {
           role: "user",
-          content: `Provide 2-4 advanced Google News search strings to surface fresh climate or environment coverage for: "${query}". Combine climate subtopics (policy, finance, science, justice) with geography or sector cues, apply recency filters (e.g., when:1d), and bias toward reputable climate outlets.${allowedDomains.length > 0 ? ` Only target these domains: ${allowedDomains.join(", ")}.` : ""} Avoid generic or repetitive phrases.`,
+          content: `Provide 2-4 advanced Google News search strings to surface fresh ${ENGLISH_LANGUAGE_PROMPT_CONSTRAINT} climate or environment coverage for: "${query}". Combine climate subtopics (policy, finance, science, justice) with geography or sector cues, apply recency filters (e.g., when:1d), and bias toward reputable climate outlets.${allowedDomains.length > 0 ? ` Only target these domains: ${allowedDomains.join(", ")}.` : ""} Avoid generic or repetitive phrases.`,
         },
       ],
       maxOutputTokens: GOOGLE_SUGGESTION_MAX_OUTPUT_TOKENS,
@@ -2354,6 +2361,7 @@ async function insertWebDiscoveredArticle(
   publishedDate: Date,
   publisherName?: string | null,
   publisherHomepage?: string | null,
+  language?: LanguageDetection,
 ): Promise<number | null> {
   try {
     // Generate embedding for semantic clustering
@@ -2373,9 +2381,14 @@ async function insertWebDiscoveredArticle(
         fetched_at,
         publisher_name,
         publisher_homepage,
-        embedding
+        embedding,
+        language_code,
+        language_confidence,
+        language_raw_code,
+        language_source,
+        language_checked_at
       )
-      VALUES ($1, $2, $3, $4, $5, NOW(), $6, $7, $8)
+      VALUES ($1, $2, $3, $4, $5, NOW(), $6, $7, $8, $9, $10, $11, $12, NOW())
       ON CONFLICT (canonical_url) DO NOTHING
       RETURNING id
     `,
@@ -2388,6 +2401,10 @@ async function insertWebDiscoveredArticle(
         publisherName ?? null,
         publisherHomepage ?? null,
         embedding.length > 0 ? JSON.stringify(embedding) : null,
+        language?.languageCode ?? null,
+        language?.languageConfidence ?? null,
+        language?.languageRawCode ?? null,
+        language?.languageSource ?? null,
       ],
     );
 
@@ -2506,6 +2523,19 @@ async function tryInsertDiscoveredArticle(
     };
   }
 
+  const languageGate = classifyArticleLanguageForIngest(
+    result.title,
+    result.snippet ?? null,
+  );
+  if (languageGate.skip) {
+    const host = hostFromUrl(result.url) || result.source || "unknown source";
+    console.log(
+      `- Skipped non-English result (${languageGate.language.languageCode}) from ${host}: ${result.title.substring(0, 80)}`,
+    );
+    return { accepted: false, reason: "non_english" };
+  }
+  const { language } = languageGate;
+
   const reachable = await isUrlReachable(result.url);
   if (!reachable) {
     console.log(
@@ -2534,6 +2564,7 @@ async function tryInsertDiscoveredArticle(
     publishedAt!,
     publisherName,
     publisherHomepage,
+    language,
   );
 
   if (!articleId) {

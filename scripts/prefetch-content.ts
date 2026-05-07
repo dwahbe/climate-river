@@ -1,6 +1,7 @@
 // scripts/prefetch-content.ts
 import { query, endPool } from "@/lib/db";
 import { prefetchArticles } from "@/lib/services/readerService";
+import { visibleLanguagePredicate } from "@/lib/languagePolicy";
 
 type PrefetchOptions = {
   limit?: number;
@@ -24,6 +25,8 @@ const PAYWALL_FILTER = `
   AND canonical_url NOT LIKE '%economist.com%'
   AND canonical_url NOT LIKE '%bloomberg.com%'
 `;
+
+const LANGUAGE_FILTER = visibleLanguagePredicate();
 
 /**
  * Prefetch article content for recently ingested articles.
@@ -59,6 +62,7 @@ export async function run(opts: PrefetchOptions = {}) {
       FROM articles
       WHERE fetched_at >= NOW() - INTERVAL '1 hour' * $1
         AND (content_status IS NULL OR content_status = 'error')
+        AND ${LANGUAGE_FILTER}
         AND ${PAYWALL_FILTER}
       ORDER BY published_at DESC NULLS LAST, fetched_at DESC
       LIMIT $2
@@ -79,6 +83,7 @@ export async function run(opts: PrefetchOptions = {}) {
         WHERE fetched_at < NOW() - INTERVAL '1 hour' * $1
           AND fetched_at >= NOW() - INTERVAL '1 day' * $2
           AND content_status IS NULL
+          AND ${LANGUAGE_FILTER}
           AND ${PAYWALL_FILTER}
         ORDER BY fetched_at DESC
         LIMIT $3

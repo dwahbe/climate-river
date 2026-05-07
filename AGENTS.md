@@ -24,6 +24,8 @@ bun run discover-web # Web discovery via Tavily
 bun run cleanup      # Remove old articles/clusters
 bun run cleanup:dry  # Dry-run cleanup (no DB writes)
 bun run schema       # Init/validate DB schema
+bun run language:backfill       # Preview article language metadata updates
+bun run language:backfill:apply # Apply article language metadata updates
 bun run tier-sources         # Preview source-weight changes from config/sourceTiers.ts
 bun run tier-sources:apply   # Apply source-weight changes (writes to DB)
 bun run migrate-weights      # Preview one-shot rescale (legacy 1–5 → 1–10)
@@ -84,6 +86,7 @@ All cron/admin endpoints require either:
 - **Category page filtering**: `get_river_clusters` uses category evidence across cluster articles, but prioritizes a matching lead primary category and only allows non-lead matches when cluster evidence is strong enough; weak semantic-only labels are filtered before storage
 - **Semantic clustering** via pgvector cosine similarity
 - **Hybrid search**: full-text + semantic search with Reciprocal Rank Fusion
+- **Language filtering**: `franc-min` classifies article language; confident non-English articles are skipped at ingestion or hidden via `articles.language_code`, while `NULL` remains visible during rollout
 - **ISR** on homepage (5min revalidation)
 - **Pipeline logging** to database for health monitoring (`pipeline_runs`)
 - **Source weighting**: integer 1–10 tier per outlet (`config/sourceTiers.ts` maps known domains; default 2 for unknown). Drives the editorial-quality term in cluster scoring (`scripts/rescore.ts`)
