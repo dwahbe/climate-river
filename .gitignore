@@ -52,6 +52,7 @@ supabase/.logs/
 # ── Claude Code (local-only files) ──────────────────────────
 .claude/settings.local.json
 .claude/worktrees/
+.claude/scheduled_tasks.lock
 CLAUDE.local.md
 
 # ── OS / Editor junk ─────────────────────────────────────────

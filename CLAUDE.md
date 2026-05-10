@@ -39,7 +39,7 @@ bun run websearch:eval -- --profiles gpt-4.1-mini-v1,gpt-4.1-mini-v4 --repeat 3 
 
 ## Tech Stack
 
-- **Runtime**: Node.js, **Bun** as package manager
+- **Runtime**: Node.js (pinned to `24.x` via `engines.node`; Vercel disables `require(esm)` in its Lambda runtime, see jsdom note in Key Patterns), **Bun** as package manager
 - **Framework**: Next.js 16 (App Router, ISR; dev uses Turbopack, build uses webpack)
 - **Language**: TypeScript 5.9 (strict mode)
 - **Styling**: Tailwind CSS 4
@@ -88,6 +88,7 @@ All cron/admin endpoints require either:
 - **Hybrid search**: full-text + semantic search with Reciprocal Rank Fusion
 - **Language filtering**: `franc-min` classifies article language; confident non-English articles are skipped at ingestion or hidden via `articles.language_code`, while `NULL` remains visible during rollout
 - **ISR** on homepage (5min revalidation)
+- **jsdom pinned to 22.1.0**: jsdom 23+ pulls ESM-only transitives (`@exodus/bytes` via `html-encoding-sniffer@6`; `@csstools/css-calc` via `cssstyle@4` → `@asamuzakjp/css-color`) that lack a `module-sync` exports condition. Vercel's Node Lambda runtime disables `require(esm)`, so any of these throws `ERR_REQUIRE_ESM` for every reader/prefetch call. 22.1.0 is the last fully-CJS dep tree. Don't bump without verifying production prefetch first
 - **Pipeline logging** to database for health monitoring (`pipeline_runs`)
 - **Source weighting**: integer 1–10 tier per outlet (`config/sourceTiers.ts` maps known domains; default 2 for unknown). Drives the editorial-quality term in cluster scoring (`scripts/rescore.ts`)
 - **Engagement events**: `article_events` table records clicks (via `app/api/click/route.ts`) and is the substrate for future CTR-based ranking signals
