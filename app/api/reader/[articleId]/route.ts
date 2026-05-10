@@ -51,6 +51,7 @@ export async function GET(request: Request, { params }: Params) {
           status: result.status,
           error: result.error,
           fromCache: result.fromCache,
+          runtime: { node: process.version },
         },
         { status: statusCode },
       );
@@ -81,6 +82,7 @@ export async function GET(request: Request, { params }: Params) {
         success: false,
         status: "error",
         error: message,
+        runtime: { node: process.version },
       },
       { status: 500 },
     );
