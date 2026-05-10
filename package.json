@@ -86,6 +86,7 @@
     "@supabase/realtime-js": "2.90.0",
     "@types/react": "19.2.14",
     "@types/react-dom": "19.2.3",
-    "@xmldom/xmldom": "^0.8.12"
+    "@xmldom/xmldom": "^0.8.12",
+    "html-encoding-sniffer": "^4.0.0"
   }
 }
