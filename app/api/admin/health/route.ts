@@ -127,6 +127,7 @@ export async function GET(req: Request) {
     return NextResponse.json({
       ok: true,
       healthy: overallHealthy,
+      runtime: { node: process.version },
       jobs: jobHealths,
       feeds: feedHealth[0]
         ? {
