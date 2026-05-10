@@ -46,7 +46,7 @@
     "dayjs": "^1.11.20",
     "defuddle": "^0.18.1",
     "franc-min": "^6.2.0",
-    "jsdom": "^29.0.2",
+    "jsdom": "~27.3.0",
     "lucide-react": "^1.8.0",
     "next": "^16.2.4",
     "pg": "^8.20.0",
@@ -65,7 +65,7 @@
     "@eslint/js": "^9.39.4",
     "@next/eslint-plugin-next": "^16.2.4",
     "@tailwindcss/postcss": "^4.2.4",
-    "@types/jsdom": "^28.0.1",
+    "@types/jsdom": "^27.0.0",
     "@types/node": "^20.19.39",
     "@types/pg": "^8.20.0",
     "@types/react": "19.2.14",
@@ -86,7 +86,6 @@
     "@supabase/realtime-js": "2.90.0",
     "@types/react": "19.2.14",
     "@types/react-dom": "19.2.3",
-    "@xmldom/xmldom": "^0.8.12",
-    "html-encoding-sniffer": "^4.0.0"
+    "@xmldom/xmldom": "^0.8.12"
   }
 }
