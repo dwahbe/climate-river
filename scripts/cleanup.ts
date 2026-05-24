@@ -5,7 +5,7 @@
 
 import { query, endPool } from "@/lib/db";
 
-const DEFAULT_RETENTION_DAYS = 60;
+const DEFAULT_RETENTION_DAYS = 45;
 
 interface CleanupResult {
   ok: true;

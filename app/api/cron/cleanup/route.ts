@@ -1,5 +1,5 @@
 // app/api/cron/cleanup/route.ts
-// Daily cleanup cron - deletes articles older than 60 days
+// Daily cleanup cron - deletes articles older than 45 days
 export const dynamic = "force-dynamic";
 export const maxDuration = 60;
 
