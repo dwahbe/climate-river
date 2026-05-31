@@ -429,18 +429,29 @@ export function isClimateRelevant(article: ArticleLike): boolean {
 
   const climateTerms = [
     // Core climate terms
-    /\b(climate|carbon|emission|greenhouse|warming|global warming)\b/i,
+    /\b(climate|carbon|carbon dioxide|co2|emission|greenhouse|warming|global warming)\b/i,
 
-    // Energy & renewables
-    /\b(renewable|fossil|solar|wind|energy|hydroelectric|geothermal|biomass)\b/i,
+    // Energy & renewables (bare "wind"/"energy" are handled via the
+    // ambiguous-term + climate-context gate below to avoid false positives like
+    // "wind blows away parade balloons" / "energy drink")
+    /\b(renewables?|fossil|solar|hydroelectric|geothermal|biomass)\b/i,
+    /\b(wind (?:farm|farms|turbine|turbines|power|energy)|offshore wind|onshore wind)\b/i,
+    // Unambiguous climate-tech / energy-transition terms
+    /\bheat pumps?\b/i,
+    /\b(gas|petrol|diesel|combustion)[- ](cars?|vehicles?|powered|engines?)\b/i,
+    /\binternal combustion\b/i,
+    /\b(go|going|gone)\s+electric\b/i,
+    /\belectrif(?:y|ied|ication|ying)\b/i,
     /\b(ev|evs|electric[- ]vehicles?|electric[- ]cars?|plug-in|battery[- ]electric|tesla)\b/i,
     /\b(battery|batteries|charging station|charging network|grid storage|long-duration storage)\b/i,
     /\b(hydrogen|ammonia|electrolyzer|fuel cell)\b/i,
     /\b(nuclear (?:power|energy|plant|plants|reactor|reactors)|reactors?|fusion|fission|small modular reactor)\b/i,
 
-    // Fossil fuels
-    /\b(oil|gas|methane|petroleum|petrochemical|refinery|refineries|diesel|jet fuel|kerosene)\b/i,
-    /\b(coal|mining|miners|mine|strip mine|mountaintop removal)\b/i,
+    // Fossil fuels (bare "oil"/"gas"/"mining"/"mine" handled via the
+    // ambiguous-term gate below; specific multiword forms stay strong here)
+    /\b(methane|petroleum|petrochemical|refinery|refineries|diesel|jet fuel|kerosene)\b/i,
+    /\b(crude oil|oil spill|oil rig|oil sands|natural gas|shale gas|gas flaring|offshore drilling)\b/i,
+    /\b(coal|strip mine|mountaintop removal)\b/i,
     /\b(fracking|drilling|offshore rig|rigs|pipeline|pipelines|liquefied natural gas|lng)\b/i,
 
     // Weather & climate impacts
@@ -449,7 +460,7 @@ export function isClimateRelevant(article: ArticleLike): boolean {
     /\b(storm|storms|tropical storm|storm surge|hurricane|typhoon|cyclone|tornado|tornadoes)\b/i,
     /\b(atmospheric river|heavy rain|heavy rainfall|torrential rain|deluge)\b/i,
     /\b(wildfire|wildfires|fire danger|fire weather|smoke plume|smoke plumes|bushfire)\b/i,
-    /\b(heat|heatwave|heat wave|heatwaves|heat waves|heat dome|heat domes|heat index|extreme heat|hot weather)\b/i,
+    /\b(heatwave|heat wave|heatwaves|heat waves|heat dome|heat domes|heat index|extreme heat|hot weather)\b/i,
     /\b(mudslide|mudslides|landslide|landslides|debris flow)\b/i,
     /\b(extreme weather|severe weather|climate crisis|climate emergency|climate disaster)\b/i,
 
@@ -493,7 +504,49 @@ export function isClimateRelevant(article: ArticleLike): boolean {
     /\b(divest.*fossil|stranded asset|climate disclosure)\b/i,
   ];
 
-  return climateTerms.some((pattern) => pattern.test(text));
+  if (climateTerms.some((pattern) => pattern.test(text))) {
+    return true;
+  }
+
+  // Energy-domain terms (wind/energy/electricity/grid) are climate-relevant in
+  // this aggregator by DEFAULT — the corpus is climate/energy news — EXCEPT for
+  // a few clearly non-climate uses (weather "wind gusts", "energy drink"). An
+  // empirical scan over production data showed that requiring an explicit cue
+  // here dropped genuine energy-transition coverage (wind industry, repowering,
+  // electricity schemes), so these default to relevant.
+  const energyDomain = /\b(wind|energy|electricity|grid)\b/i;
+  const energyDomainNonClimate =
+    /\bwind\s+(?:gust|gusts|chill|blow|blows|blowing|blew|knock|knocks|knocked|driven|speed|whipped|down)\b|\benergy\s+drink|\bnervous\s+energy\b/i;
+  if (energyDomain.test(text) && !energyDomainNonClimate.test(text)) {
+    return true;
+  }
+
+  // Heat / temperature as a climate signal: the word "heat" or "temperature(s)"
+  // alongside a weather/impact cue (record, wave, swelter, dome, deaths, stress,
+  // warming…). Catches "record heat", "heat records", "heat stress", "Europe
+  // swelters in record heat", "record-high temperatures" — while excluding bare
+  // sports/policy uses ("Miami Heat win in overtime", tennis "heat policy").
+  const heatImpactCue =
+    /\b(wave|waves|dome|domes|index|record|records|swelter\w*|scorch\w*|sear\w*|blister\w*|soaring|extreme|deadly|dangerous|relentless|prolonged|punishing|warming|climate|wildfire|drought|deaths?|fatalities|mortality|stress|advisory|warning|emergency|humidity|hottest|highest)\b/i;
+  if (
+    (/\bheat\b/i.test(text) || /\btemperatures?\b/i.test(text)) &&
+    heatImpactCue.test(text)
+  ) {
+    return true;
+  }
+
+  // More-ambiguous single words (oil, gas, mining, bare "heat") only count when
+  // paired with an explicit climate/energy cue, since they have common
+  // non-climate meanings (oil prices, gas station, gold mining, "Miami Heat",
+  // tennis "heat policy").
+  const ambiguousTerms = /\b(oil|gas|mine|mines|mining|miners|heat)\b/i;
+  const climateContext =
+    /\b(climate|carbon|emissions?|greenhouse|warming|renewables?|clean energy|energy transition|fossil|decarboniz\w*|net[- ]?zero|coal|power grid|electric grid|grid storage|electricity generation|pollution|environment\w*|sustainab\w*|cop\d+|ipcc|paris agreement|wildfire|drought|heatwave)\b/i;
+  if (ambiguousTerms.test(text) && climateContext.test(text)) {
+    return true;
+  }
+
+  return false;
 }
 
 /**
