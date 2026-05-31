@@ -12,6 +12,7 @@ import {
 } from "./tagger";
 import { embed } from "ai";
 import { openai } from "@ai-sdk/openai";
+import { cosineSimilarity } from "./clustering";
 
 // In-memory cache for category embeddings (survives within a warm instance)
 const categoryEmbeddingsCache = new Map<string, number[]>();
@@ -108,24 +109,9 @@ async function generateArticleEmbedding(
   }
 }
 
-/**
- * Calculate cosine similarity between two vectors
- */
-function cosineSimilarity(a: number[], b: number[]): number {
-  if (a.length !== b.length) return 0;
-
-  let dotProduct = 0;
-  let normA = 0;
-  let normB = 0;
-
-  for (let i = 0; i < a.length; i++) {
-    dotProduct += a[i] * b[i];
-    normA += a[i] * a[i];
-    normB += b[i] * b[i];
-  }
-
-  return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
-}
+// cosineSimilarity is imported from ./clustering — the shared implementation
+// guards against zero-norm vectors (returns 0 instead of NaN), unlike the
+// previous local copy here.
 
 // Internal type for tracking both rule and combined confidence during hybrid scoring
 interface HybridScoreInternal extends CategoryScore {

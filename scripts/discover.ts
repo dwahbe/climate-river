@@ -8,7 +8,12 @@ import {
   classifyArticleLanguageForIngest,
   type LanguageDetection,
 } from "@/lib/language";
-import { canonical, mapLimit } from "@/lib/utils";
+import {
+  canonical,
+  mapLimit,
+  isValidArticleDate,
+  cleanGoogleNewsTitle,
+} from "@/lib/utils";
 import { resolveTier } from "@/config/sourceTiers";
 
 type RssItem = {
@@ -146,6 +151,19 @@ async function insertArticle(
   );
   if (existing.rows.length > 0) return undefined;
 
+  // Validate the date before spending an OpenAI embedding call. Mirrors
+  // ingest.ts / discover-web.ts; discover.ts previously inserted unvalidated
+  // dates, so a null/future published_at could waste an embed and (for future
+  // dates) inflate cluster freshness in rescore.
+  const parsedDate = publishedAt ? dayjs(publishedAt).toDate() : null;
+  const dateCheck = isValidArticleDate(parsedDate);
+  if (!dateCheck.valid) {
+    console.log(
+      `⚠️  Skipping discovered article with invalid date (${dateCheck.reason}): "${title.slice(0, 60)}..."`,
+    );
+    return undefined;
+  }
+
   const embedding = await generateEmbedding(title);
   const row = await query<{ id: number }>(
     `
@@ -169,7 +187,7 @@ async function insertArticle(
       sourceId,
       title,
       url,
-      publishedAt ? dayjs(publishedAt).toDate() : null,
+      parsedDate,
       embedding.length > 0 ? JSON.stringify(embedding) : null,
       language?.languageCode ?? null,
       language?.languageConfidence ?? null,
@@ -247,16 +265,19 @@ async function ingestQuery(q: string, limitPerQuery = 25) {
       continue;
     }
     const sid = await upsertSourceForHost(host);
+    // Strip the " - Publisher" suffix Google News appends, so the stored title
+    // and its embedding match the ingest path (which already cleans these).
+    const cleanTitle = cleanGoogleNewsTitle(title);
     const id = await insertArticle(
       sid,
-      title,
+      cleanTitle,
       urlCanon,
       it.isoDate || it.pubDate,
       language,
     );
     if (id) {
       inserted++;
-      await assignArticleToCluster(id, title);
+      await assignArticleToCluster(id, cleanTitle);
     }
   }
 

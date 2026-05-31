@@ -18,6 +18,7 @@ import {
   type PromptInputs,
 } from "@/config/webSearchProfiles";
 import { generateEmbedding, assignArticleToCluster } from "@/lib/clustering";
+import { safeFetch, SsrfError } from "@/lib/urlSafety";
 import {
   classifyArticleLanguageForIngest,
   type LanguageDetection,
@@ -30,6 +31,7 @@ import {
   extractPublisherFromRssItem,
   parseEnvFloat,
   parseEnvInt,
+  webSearchBudgetExceeded,
   type ArticleDateValidation,
 } from "@/lib/utils";
 
@@ -145,6 +147,13 @@ const WEB_SEARCH_ALLOWED_DOMAINS = process.env.WEB_SEARCH_ALLOWED_DOMAINS
       .filter(Boolean)
   : undefined;
 const WEB_SEARCH_FORCE_TOOL = process.env.WEB_SEARCH_FORCE_TOOL !== "0";
+// Hard ceiling on paid OpenAI web-search calls per discovery run (each forces a
+// ~$0.01 tool call). A safety net against runaway spend; normal full runs make
+// well under this. Set WEB_SEARCH_MAX_CALLS_PER_RUN=0 to disable the cap.
+const WEB_SEARCH_MAX_CALLS_PER_RUN = parseEnvInt(
+  "WEB_SEARCH_MAX_CALLS_PER_RUN",
+  25,
+);
 const WEB_SEARCH_DEBUG = process.env.WEB_SEARCH_DEBUG === "1";
 const DISCOVERY_PAUSE_MS = 1000; // Reduced from 2000ms for faster processing
 const DEFAULT_OUTLET_FRESHNESS_HOURS = 72; // Reduced from 96 for fresher content
@@ -1198,6 +1207,16 @@ async function callOpenAIWebSearch(
     return { results: [], stats: null };
   }
 
+  // Per-run cost ceiling: skip once this run has already made the configured
+  // number of paid OpenAI web-search calls.
+  const callsSoFar = getProviderStats("openai_web_search").searches;
+  if (webSearchBudgetExceeded(callsSoFar, WEB_SEARCH_MAX_CALLS_PER_RUN)) {
+    console.warn(
+      `⚠️  Skipping OpenAI web search — per-run cap reached (${callsSoFar}/${WEB_SEARCH_MAX_CALLS_PER_RUN}): "${query}"`,
+    );
+    return { results: [], stats: null };
+  }
+
   const startedAt = Date.now();
   const segment = overrides?.segment ?? "outlet";
   const requestedLimit = overrides?.resultLimit ?? WEB_SEARCH_RESULT_LIMIT;
@@ -1253,12 +1272,10 @@ Rules:
       toolChoice: WEB_SEARCH_FORCE_TOOL
         ? { type: "tool", toolName: "webSearch" }
         : "auto",
+      // maxOutputTokens enforces the cap. (The previous
+      // providerOptions.openai.maxCompletionTokens was dead config — it is not
+      // part of the Responses API tool path and was silently dropped.)
       maxOutputTokens: WEB_SEARCH_MAX_OUTPUT_TOKENS,
-      providerOptions: {
-        openai: {
-          maxCompletionTokens: WEB_SEARCH_MAX_OUTPUT_TOKENS,
-        },
-      },
     });
 
     let results = parseWebSearchJson(response.text, query);
@@ -2333,10 +2350,9 @@ async function isUrlReachable(url: string): Promise<boolean> {
   try {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 5000);
-    const response = await fetch(url, {
+    const response = await safeFetch(url, {
       method: "HEAD",
       signal: controller.signal,
-      redirect: "follow",
       headers: {
         "User-Agent":
           "Mozilla/5.0 (compatible; ClimateRiver/1.0; +https://climateriver.org)",
@@ -2349,7 +2365,12 @@ async function isUrlReachable(url: string): Promise<boolean> {
       return false;
     }
     return true;
-  } catch {
+  } catch (error) {
+    // Reject URLs that point at private/internal address space outright.
+    if (error instanceof SsrfError) {
+      console.warn(`🚫 Blocked unsafe discovery URL ${url}: ${error.message}`);
+      return false;
+    }
     // Network error or timeout — give benefit of the doubt
     return true;
   }

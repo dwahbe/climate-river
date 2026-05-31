@@ -39,8 +39,9 @@ export async function generateEmbedding(
   }
 }
 
-/** Cosine similarity between two vectors. */
+/** Cosine similarity between two vectors. Returns 0 for length-mismatched or zero-norm inputs. */
 export function cosineSimilarity(a: number[], b: number[]): number {
+  if (a.length !== b.length) return 0;
   let dot = 0,
     normA = 0,
     normB = 0;
@@ -193,7 +194,6 @@ export async function findBestCluster(
     WITH cluster_centroids AS (
       SELECT
         ac.cluster_id,
-        COUNT(*)::int AS size,
         AVG(a.embedding) AS centroid
       FROM article_clusters ac
       JOIN articles a ON a.id = ac.article_id
@@ -201,15 +201,26 @@ export async function findBestCluster(
         AND ${visibleLanguagePredicate("a")}
         AND a.fetched_at >= now() - make_interval(days => $4)
       GROUP BY ac.cluster_id
-      HAVING COUNT(*) < $2
+    ),
+    -- TOTAL membership per candidate cluster (NOT just the rolling window).
+    -- The cap must apply to the whole cluster; counting only recent members let
+    -- clusters grow without bound as the window slid (observed up to 271 members
+    -- against a MAX_CLUSTER_SIZE of 25).
+    cluster_totals AS (
+      SELECT cluster_id, COUNT(*)::int AS total_size
+      FROM article_clusters
+      WHERE cluster_id IN (SELECT cluster_id FROM cluster_centroids)
+      GROUP BY cluster_id
     )
     SELECT
-      cluster_id,
-      1 - (centroid <=> $1::vector) AS similarity,
-      size
-    FROM cluster_centroids
-    WHERE 1 - (centroid <=> $1::vector) > $3
-    ORDER BY centroid <=> $1::vector
+      cc.cluster_id,
+      1 - (cc.centroid <=> $1::vector) AS similarity,
+      ct.total_size AS size
+    FROM cluster_centroids cc
+    JOIN cluster_totals ct ON ct.cluster_id = cc.cluster_id
+    WHERE ct.total_size < $2
+      AND 1 - (cc.centroid <=> $1::vector) > $3
+    ORDER BY cc.centroid <=> $1::vector
     LIMIT 1
   `,
     [embedding, maxSize, threshold, lookbackDays],
@@ -330,8 +341,12 @@ export async function assignArticleToCluster(
     return;
   }
 
-  // No matching cluster — create singleton
-  const key = clusterKey(title) || `semantic-${Date.now()}-${articleId}`;
+  // No matching cluster — create singleton. The key is made unique per article
+  // (suffixed with the article id) so two UNRELATED articles that happen to
+  // share the same first-8-significant-words keyword key can't be silently
+  // merged via ON CONFLICT — semantic similarity (findBestCluster) is the only
+  // intended merge path.
+  const key = `${clusterKey(title) || "semantic"}-${articleId}`;
   const cluster = await query<{ id: number }>(
     `INSERT INTO clusters (key) VALUES ($1)
      ON CONFLICT (key) DO UPDATE SET key = excluded.key RETURNING id`,

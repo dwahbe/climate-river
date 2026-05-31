@@ -146,11 +146,25 @@ export function parseEnvFloat(name: string, defaultValue: number): number {
 }
 
 /**
+ * Per-run budget guard for paid API calls (e.g. OpenAI web search, ~$0.01 each
+ * with no cap historically). Returns true once `callsSoFar` reaches `cap`,
+ * meaning the next call should be skipped. A cap <= 0 means unlimited.
+ */
+export function webSearchBudgetExceeded(
+  callsSoFar: number,
+  cap: number,
+): boolean {
+  return cap > 0 && callsSoFar >= cap;
+}
+
+/**
  * Remove trailing " - Source Name" or " — Source Name" from Google News titles.
- * Handles both hyphens and em-dashes.
+ * Handles both hyphens and em-dashes, and publisher names that themselves
+ * contain hyphens ("Al-Monitor", "E-E News") by anchoring on the LAST
+ * space-delimited separator rather than requiring a hyphen-free suffix.
  */
 export function cleanGoogleNewsTitle(title: string): string {
-  return title.replace(/\s[-—]\s[^-—]+$/, "").trim();
+  return title.replace(/\s[-—]\s(?:(?!\s[-—]\s).)+$/, "").trim();
 }
 
 /**
@@ -173,6 +187,13 @@ export function isValidArticleDate(
 ): ArticleDateValidation {
   if (!date) {
     return { valid: false, code: "missing_date", reason: "missing date" };
+  }
+
+  // An unparseable date (`new Date("garbage")`) yields NaN time; every
+  // comparison below would be false, so it would wrongly fall through as valid
+  // and then throw "Invalid time value" when the pg driver serializes it.
+  if (Number.isNaN(date.getTime())) {
+    return { valid: false, code: "missing_date", reason: "invalid date" };
   }
 
   const now = new Date();

@@ -137,6 +137,26 @@ describe("cleanGoogleNewsTitle", () => {
       "Climate Bill",
     );
   });
+
+  // Now anchored on the LAST " - " separator, so hyphenated outlet names
+  // ("Al-Monitor", "E-E News") are stripped while in-title hyphens are kept.
+  it("strips hyphenated publishers", () => {
+    assert.equal(
+      cleanGoogleNewsTitle("Heat record set in May - Al-Monitor"),
+      "Heat record set in May",
+    );
+    assert.equal(
+      cleanGoogleNewsTitle("EPA finalizes rule - E-E News"),
+      "EPA finalizes rule",
+    );
+  });
+
+  it("strips only the final separator when multiple are present", () => {
+    assert.equal(
+      cleanGoogleNewsTitle("US-China Climate Deal - Analysis - Reuters"),
+      "US-China Climate Deal - Analysis",
+    );
+  });
 });
 
 describe("isValidArticleDate", () => {
@@ -176,6 +196,14 @@ describe("isValidArticleDate", () => {
     const result = isValidArticleDate(justNow);
     assert.equal(result.valid, false);
     assert.ok(result.reason?.includes("suspiciously close"));
+  });
+
+  it("rejects an unparseable (Invalid) date instead of letting it through", () => {
+    // new Date("garbage") has NaN time; every range comparison is false, so the
+    // old code wrongly treated it as valid → pg "Invalid time value" on insert.
+    const result = isValidArticleDate(new Date("not a real date"));
+    assert.equal(result.valid, false);
+    assert.ok(!result.valid && result.reason.includes("invalid"));
   });
 });
 

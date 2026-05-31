@@ -10,14 +10,19 @@ const HL_CLUSTER_H = 9; // 9h half-life: clusters decay 25% faster for fresher h
 export async function run(opts: { closePool?: boolean } = {}) {
   console.log("🔄 Starting rescore process...");
 
-  // ensure table
+  // Ensure table. This MUST mirror the authoritative definition in
+  // scripts/schema.ts (single source of truth) — previously the two diverged on
+  // lead_article_id nullability and the updated_at column, which on a fresh DB
+  // could leave the table without updated_at (breaking the score index and the
+  // updated_at writes in clustering/cluster-maintenance).
   console.log("📋 Ensuring cluster_scores table exists...");
   await query(`
     CREATE TABLE IF NOT EXISTS cluster_scores (
-      cluster_id       bigint PRIMARY KEY REFERENCES clusters(id) ON DELETE CASCADE,
-      size             int    NOT NULL,
-      score            double precision NOT NULL,
-      lead_article_id  bigint REFERENCES articles(id)
+      cluster_id      bigint PRIMARY KEY REFERENCES clusters(id) ON DELETE CASCADE,
+      lead_article_id bigint NOT NULL REFERENCES articles(id) ON DELETE CASCADE,
+      size            int    NOT NULL DEFAULT 1,
+      score           double precision NOT NULL DEFAULT 0,
+      updated_at      timestamptz NOT NULL DEFAULT now()
     );
   `);
   console.log("✅ Table ensured");
@@ -69,8 +74,10 @@ export async function run(opts: { closePool?: boolean } = {}) {
       SELECT
         article_id,
         cluster_id,
-        -- freshness: exp( ln(0.5) * age / HL ) with bounds to prevent overflow
-        GREATEST(0.0001, EXP( LN(0.5) * LEAST(EXTRACT(EPOCH FROM (now() - COALESCE(published_at, now()))) / ($1 * ${HOUR}), 10) )) AS fresh,
+        -- freshness: exp( ln(0.5) * age / HL ), clamped to (0, 1]. The LEAST(.,1)
+        -- guards against future-dated articles (negative age → exponent >1),
+        -- which would otherwise inflate the cluster's score/velocity.
+        LEAST(1.0, GREATEST(0.0001, EXP( LN(0.5) * LEAST(EXTRACT(EPOCH FROM (now() - COALESCE(published_at, now()))) / ($1 * ${HOUR}), 10) ))) AS fresh,
         -- editorial quality (cold-start): source + author + dek - penalties
         (COALESCE(src_weight,6)) +
         CASE WHEN NULLIF(TRIM(COALESCE(author,'')), '') IS NOT NULL THEN 0.25 ELSE 0 END +
@@ -117,8 +124,8 @@ export async function run(opts: { closePool?: boolean } = {}) {
           + 0.8*LN(1 + LEAST(COALESCE(c.distinct_sources,0), 10))
           + 0.4*LN(1 + LEAST(COALESCE(c.size,0), 15))
         ) AS coverage,
-        -- cluster freshness with bounds to prevent overflow
-        GREATEST(0.0001, EXP( LN(0.5) * LEAST(EXTRACT(EPOCH FROM (now() - c.latest_pub)) / ($2 * ${HOUR}), 10) )) AS fresh,
+        -- cluster freshness, clamped to (0, 1] (LEAST guards future-dated latest_pub)
+        LEAST(1.0, GREATEST(0.0001, EXP( LN(0.5) * LEAST(EXTRACT(EPOCH FROM (now() - c.latest_pub)) / ($2 * ${HOUR}), 10) ))) AS fresh,
         -- lead article by editorial quality (source weight, author, dek)
         -- with freshness only as tiebreaker
         (SELECT af.article_id
@@ -168,7 +175,8 @@ export async function run(opts: { closePool?: boolean } = {}) {
     ON CONFLICT (cluster_id) DO UPDATE
       SET size = EXCLUDED.size,
           score = EXCLUDED.score,
-          lead_article_id = EXCLUDED.lead_article_id;
+          lead_article_id = EXCLUDED.lead_article_id,
+          updated_at = now();
     `,
     [HL_ARTICLE_H, HL_CLUSTER_H],
   );
