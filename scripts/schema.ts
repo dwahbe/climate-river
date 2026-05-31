@@ -688,7 +688,12 @@ export async function run() {
   );
 
   await query(`
-    CREATE OR REPLACE FUNCTION articles_search_vector_update() RETURNS trigger AS $$
+    CREATE OR REPLACE FUNCTION articles_search_vector_update() RETURNS trigger
+      LANGUAGE plpgsql
+      -- Pinned search_path (clears the function_search_path_mutable advisor).
+      -- Must include public because the body references public.sources unqualified.
+      SET search_path = public, pg_catalog
+    AS $$
     DECLARE
       source_name text;
     BEGIN
@@ -702,7 +707,7 @@ export async function run() {
         setweight(to_tsvector('english', coalesce(NEW.content_text, '')), 'C');
       RETURN NEW;
     END;
-    $$ LANGUAGE plpgsql;
+    $$;
   `);
 
   await query(
@@ -781,9 +786,20 @@ export async function run() {
   }
   console.log(`Backfilled ${backfilled} article search vectors`);
 
+  // --- Deprecated object cleanup -----------------------------------------------
+  // get_articles_by_category is no longer called anywhere in the app, but it was
+  // left exposed to the anon role as a SECURITY DEFINER RPC (a needless attack
+  // surface flagged by the Supabase security advisor). Drop it.
+  await query(
+    `DROP FUNCTION IF EXISTS get_articles_by_category(text, real, integer);`,
+  );
+
   // --- Cluster health diagnostic view ------------------------------------------
+  // security_invoker so the view runs with the querying role's RLS instead of
+  // the (privileged) creator's — clears the security_definer_view advisor error.
   await query(`
-    CREATE OR REPLACE VIEW cluster_health AS
+    CREATE OR REPLACE VIEW cluster_health
+    WITH (security_invoker = true) AS
     SELECT
       ac.cluster_id,
       COUNT(*) AS size,
