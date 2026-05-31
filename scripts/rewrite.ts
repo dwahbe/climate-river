@@ -14,8 +14,9 @@ import {
   buildUserPrompt,
   containsQuantifier,
   extractContentSnippet,
-  extractNumericTokens,
   hasAttribution,
+  measurementsMatch,
+  parseMeasurements,
   sanitizeHeadline,
   type PromptInput,
   type ValidationContext,
@@ -114,24 +115,28 @@ export function validateHeadline(
     }
   }
 
-  const draftNumbers = extractNumericTokens(t);
-  if (draftNumbers.length > 0) {
-    if (sourceQuant.numbers.size === 0) {
+  const draftMeasurements = parseMeasurements(t);
+  if (draftMeasurements.length > 0) {
+    const sourceMeasurements = sourceQuant.measurements;
+    if (sourceMeasurements.length === 0) {
       console.warn(
-        `⚠️  Numeric detail missing in source but present in rewrite: ${draftNumbers.join(
-          ", ",
-        )}`,
+        `⚠️  Numeric detail missing in source but present in rewrite: ${draftMeasurements
+          .map((m) => `${m.value}${m.unit}`)
+          .join(", ")}`,
       );
       return { ok: false, reason: "numeric_missing_in_source" };
     }
-    const missingNumbers = draftNumbers.filter(
-      (num) => !sourceQuant.numbers.has(num),
+    // Unit/magnitude-aware match with rounding tolerance: rejects scale/unit
+    // swaps ("$5M"→"$5B", "593 GW"→"593 million tons") while accepting faithful
+    // rounding ("28.7%"→"29%").
+    const unmatched = draftMeasurements.filter(
+      (dm) => !sourceMeasurements.some((sm) => measurementsMatch(dm, sm)),
     );
-    if (missingNumbers.length > 0) {
+    if (unmatched.length > 0) {
       console.warn(
-        `⚠️  Numeric mismatch: ${missingNumbers.join(
-          ", ",
-        )} not found in source material`,
+        `⚠️  Numeric mismatch: ${unmatched
+          .map((m) => `${m.value}${m.unit}`)
+          .join(", ")} not supported by source material`,
       );
       return { ok: false, reason: "numeric_mismatch" };
     }
@@ -160,7 +165,12 @@ export function validateHeadline(
     return { ok: false, reason: "weak_hedging" };
   }
 
-  if (VAGUE_PATTERNS.some((p) => p.test(t))) {
+  // Vague/meta-reporting filler is only a problem when the line is ALSO
+  // unquantified; a concrete number rescues headlines like
+  // "EPA rule covers 40% of US power plants". (hasAttribution is intentionally
+  // NOT used here: its /\bprojects?\b/ pattern matches the common noun
+  // "project", which would wrongly exempt vague headlines.)
+  if (VAGUE_PATTERNS.some((p) => p.test(t)) && !containsQuantifier(t)) {
     console.warn(
       `⚠️  Rejected vague/meta-reporting pattern: "${t.slice(0, 50)}..."`,
     );

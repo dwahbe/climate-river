@@ -15,9 +15,14 @@ export type PromptInput = {
   publishedAt?: string | null;
 };
 
+/** A number with its (normalized) unit, value already scaled by any magnitude word. */
+export type Measurement = { value: number; unit: string };
+
 export type QuantContext = {
   hasQuantEvidence: boolean;
   numbers: Set<string>;
+  /** Unit/magnitude-aware figures, used to catch scale/unit hallucinations. */
+  measurements: Measurement[];
 };
 
 export type ValidationContext = {
@@ -177,6 +182,127 @@ function extractSpelledNumberTokens(text: string | null | undefined): string[] {
 }
 
 /* ------------------------------------------------------------------ */
+/*  Unit/magnitude-aware measurements (hallucination + rounding guard) */
+/* ------------------------------------------------------------------ */
+
+const MAGNITUDE_WORDS: Record<string, number> = {
+  hundred: 1e2,
+  thousand: 1e3,
+  million: 1e6,
+  billion: 1e9,
+  trillion: 1e12,
+};
+
+// Short magnitude abbreviations — only honored when a currency symbol is
+// present (e.g. "$5B"), to avoid mis-scaling unit letters like the "M" in "MW".
+const MAGNITUDE_ABBR: Record<string, number> = {
+  k: 1e3,
+  m: 1e6,
+  bn: 1e9,
+  b: 1e9,
+  tn: 1e12,
+};
+
+// Recognized units, normalized to a canonical token. Distinct from magnitudes.
+// Both abbreviated and spelled-out forms map to the same canonical token so a
+// rewrite that spells the unit differently from the source still validates
+// ("2.6 GW" ↔ "2.6 gigawatts").
+const UNIT_ALIASES: Record<string, string> = {
+  "%": "%",
+  percent: "%",
+  gw: "gw",
+  gigawatt: "gw",
+  gigawatts: "gw",
+  mw: "mw",
+  megawatt: "mw",
+  megawatts: "mw",
+  kw: "kw",
+  kilowatt: "kw",
+  kilowatts: "kw",
+  tw: "tw",
+  terawatt: "tw",
+  terawatts: "tw",
+  gwh: "gwh",
+  mwh: "mwh",
+  kwh: "kwh",
+  twh: "twh",
+  ton: "ton",
+  tons: "ton",
+  tonne: "ton",
+  tonnes: "ton",
+  kt: "kt",
+  kilotonne: "kt",
+  kilotonnes: "kt",
+  mt: "mt",
+  megatonne: "mt",
+  megatonnes: "mt",
+  gt: "gt",
+  gigatonne: "gt",
+  gigatonnes: "gt",
+};
+
+const MEASUREMENT_REGEX = /([$€£])?\s?(\d[\d,]*(?:\.\d+)?)\s*([a-z%]+)?/gi;
+
+/**
+ * Parse figures into {value, unit} pairs, scaling by magnitude words and
+ * normalizing units. Lets the validator distinguish "$5 million" from
+ * "$5 billion" and "593 GW" from "593 million tons" — swaps the old
+ * digits-only normalizer silently accepted.
+ */
+export function parseMeasurements(
+  text: string | null | undefined,
+): Measurement[] {
+  if (!text) return [];
+  const out: Measurement[] = [];
+  MEASUREMENT_REGEX.lastIndex = 0;
+  let m: RegExpExecArray | null;
+  while ((m = MEASUREMENT_REGEX.exec(text)) !== null) {
+    const currency = m[1] ? "$" : null; // normalize any currency symbol to "$"
+    const value0 = Number.parseFloat(m[2].replace(/,/g, ""));
+    if (!Number.isFinite(value0)) continue;
+    const suffix = (m[3] || "").toLowerCase();
+
+    let value = value0;
+    let unit = currency ?? "";
+    if (suffix in MAGNITUDE_WORDS) {
+      value *= MAGNITUDE_WORDS[suffix];
+    } else if (currency && suffix in MAGNITUDE_ABBR) {
+      value *= MAGNITUDE_ABBR[suffix];
+    } else if (suffix in UNIT_ALIASES) {
+      unit = UNIT_ALIASES[suffix];
+    }
+    // Unknown suffix (a stray word) → bare/currency value only.
+    out.push({ value, unit });
+  }
+  return out;
+}
+
+/** True if two numbers are equal or within ~3% — i.e. faithful rounding, not a swap. */
+export function numbersClose(a: number, b: number): boolean {
+  if (a === b) return true;
+  const hi = Math.max(Math.abs(a), Math.abs(b));
+  if (hi === 0) return true;
+  return Math.abs(a - b) / hi <= 0.03;
+}
+
+/**
+ * Whether a draft measurement is supported by a source measurement.
+ * - Two distinct REAL units never match (gw ≠ ton, % ≠ $).
+ * - Two BARE unitless figures (years, plain counts) must match EXACTLY —
+ *   rounding tolerance must NOT apply, or "by 2050" would validate "by 2030"
+ *   and "40 plants" would validate "41 plants".
+ * - Otherwise (a measured unit is involved: %, $, GW, tons, …) rounding
+ *   tolerance applies (28.7% ≈ 29%, $1.17B ≈ $1.2B). A bare figure is treated
+ *   as compatible with a unit-qualified one of the same magnitude so faithful
+ *   rewrites like "5 billion" ↔ "$5 billion" still validate.
+ */
+export function measurementsMatch(a: Measurement, b: Measurement): boolean {
+  if (a.unit && b.unit && a.unit !== b.unit) return false;
+  if (!a.unit && !b.unit) return a.value === b.value;
+  return numbersClose(a.value, b.value);
+}
+
+/* ------------------------------------------------------------------ */
 /*  Content extraction & sanitization                                  */
 /* ------------------------------------------------------------------ */
 
@@ -267,7 +393,7 @@ export function buildSourceQuantContext(
     (p): p is string => typeof p === "string" && p.trim().length > 0,
   );
   if (filtered.length === 0) {
-    return { hasQuantEvidence: false, numbers: new Set() };
+    return { hasQuantEvidence: false, numbers: new Set(), measurements: [] };
   }
   const MAX_SEGMENT_LENGTH = 12000;
   const combined = filtered
@@ -277,13 +403,18 @@ export function buildSourceQuantContext(
         : segment,
     )
     .join(" ");
-  const numbers = new Set([
-    ...extractNumericTokens(combined),
-    ...extractSpelledNumberTokens(combined),
-  ]);
+  const spelled = extractSpelledNumberTokens(combined);
+  const numbers = new Set([...extractNumericTokens(combined), ...spelled]);
+  const measurements: Measurement[] = [
+    ...parseMeasurements(combined),
+    ...spelled.map(
+      (token): Measurement => ({ value: Number(token), unit: "" }),
+    ),
+  ];
   return {
     hasQuantEvidence: containsQuantifier(combined),
     numbers,
+    measurements,
   };
 }
 
@@ -291,7 +422,14 @@ export function buildSourceQuantContext(
 /*  Validation patterns                                                */
 /* ------------------------------------------------------------------ */
 
+// Named figures cross-checked against the source: if one appears in the draft
+// headline but NOT in the source material, the rewrite is rejected as a
+// hallucinated attribution. Purely additive — adding names only catches more
+// fabrications (it never fires when the model faithfully uses a name from the
+// source), so it carries no false-positive risk. Kept to distinctive surnames /
+// full names to avoid matching common words used non-referentially.
 export const POLITICAL_FIGURES = [
+  // US
   "biden",
   "trump",
   "obama",
@@ -301,6 +439,34 @@ export const POLITICAL_FIGURES = [
   "desantis",
   "newsom",
   "vance",
+  "zeldin", // EPA administrator
+  "granholm", // former energy secretary
+  "john kerry", // former climate envoy
+  "al gore",
+  // World leaders / officials frequently in climate coverage
+  "modi",
+  "xi jinping",
+  "putin",
+  "macron",
+  "scholz",
+  "merz",
+  "starmer",
+  "sunak",
+  "meloni",
+  "von der leyen",
+  "lula",
+  "milei",
+  "sheinbaum",
+  "trudeau",
+  "carney",
+  "albanese",
+  "erdogan",
+  "netanyahu",
+  "zelensky",
+  "zelenskyy",
+  "guterres", // UN Secretary-General
+  // Climate movement
+  "thunberg",
 ];
 
 export const CLICKBAIT_PATTERNS = [
@@ -310,7 +476,7 @@ export const CLICKBAIT_PATTERNS = [
   /\bunprecedented\b/i,
   /\bslam/i,
   /\bblast/i,
-  /\brip/i,
+  /\brips?\b/i,
   /\bwhat to know\b/i,
   /\beverything you need to know\b/i,
   /\bhere'?s\b/i,
@@ -415,6 +581,7 @@ RULES:
 - Prefer named entities, policies, products from the source over vague references like "regulators", "a company", "a bank"
 - The headline IS the news, not a description of an article about the news
 - Match the certainty of the source: facts as facts, projections with "may"/"could"
+- Never phrase the headline as a question; state the finding directly
 
 NEVER USE these vague filler patterns (they will be rejected):
 - "aiming to", "impacting", "reflecting", "amid concerns/issues/challenges"
