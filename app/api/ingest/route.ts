@@ -3,6 +3,7 @@ export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
 import { headers } from "next/headers";
+import { authorized } from "@/lib/cron";
 
 /** --- Types for dynamic imports (keeps TS happy without ts-expect-error) --- */
 type ScriptResult = Record<string, unknown>;
@@ -18,21 +19,6 @@ type DiscoverMod = {
     closePool?: boolean;
   }) => Promise<ScriptResult>;
 };
-
-/** --- Auth helper --- */
-async function authorized(req: Request) {
-  const h = await headers();
-  const isCron = h.get("x-vercel-cron") === "1";
-
-  const url = new URL(req.url);
-  const qToken = url.searchParams.get("token")?.trim();
-
-  const auth = h.get("authorization") || "";
-  const bearer = auth.replace(/^Bearer\s+/i, "").trim();
-
-  const expected = (process.env.ADMIN_TOKEN || "").trim();
-  return isCron || (!!expected && (qToken === expected || bearer === expected));
-}
 
 /** --- Small helpers --- */
 function getIntParam(

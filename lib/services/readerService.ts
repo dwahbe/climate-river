@@ -4,6 +4,7 @@ import {
   detectArticleLanguageFromContent,
   shouldDetectLanguageFromContent,
 } from "@/lib/language";
+import { safeFetch, SsrfError } from "@/lib/urlSafety";
 import sanitize from "sanitize-html";
 
 /**
@@ -237,20 +238,33 @@ async function fetchArticleContent(url: string): Promise<ReaderResult> {
 
     // Race between fetch and timeout
     const fetchPromise = (async () => {
-      // Fetch with proper headers
-      const response = await fetch(url, {
-        headers: {
-          "User-Agent":
-            "Mozilla/5.0 (compatible; ClimateRiverBot/1.0; +https://climateriver.org)",
-          Accept:
-            "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-          "Accept-Language": "en-US,en;q=0.9",
-          "Cache-Control": "no-cache",
-          "Accept-Encoding": "gzip, deflate, br",
-        },
-        redirect: "follow",
-        signal: AbortSignal.timeout(TIMEOUT),
-      });
+      // Fetch with proper headers, via the SSRF-guarded fetcher (validates the
+      // scheme/host and re-checks every redirect hop against private/metadata IPs).
+      let response: Response;
+      try {
+        response = await safeFetch(url, {
+          headers: {
+            "User-Agent":
+              "Mozilla/5.0 (compatible; ClimateRiverBot/1.0; +https://climateriver.org)",
+            Accept:
+              "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.9",
+            "Cache-Control": "no-cache",
+            "Accept-Encoding": "gzip, deflate, br",
+          },
+          signal: AbortSignal.timeout(TIMEOUT),
+        });
+      } catch (err) {
+        if (err instanceof SsrfError) {
+          console.warn(`🚫 Blocked unsafe reader URL ${url}: ${err.message}`);
+          return {
+            success: false,
+            status: "blocked",
+            error: "Blocked potentially unsafe URL",
+          } as ReaderError;
+        }
+        throw err;
+      }
 
       if (!response.ok) {
         if (response.status === 404) {

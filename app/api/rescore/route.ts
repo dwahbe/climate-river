@@ -2,26 +2,7 @@
 export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
-import { headers } from "next/headers";
-
-/** Same auth policy as /api/ingest */
-async function authorized(req: Request) {
-  const h = await headers();
-  const url = new URL(req.url);
-
-  const isCron =
-    h.get("x-vercel-cron") === "1" ||
-    /vercel-cron/i.test(h.get("user-agent") || "") ||
-    url.searchParams.get("cron") === "1";
-
-  const qToken = url.searchParams.get("token")?.trim();
-  const bearer = (h.get("authorization") || "")
-    .replace(/^Bearer\s+/i, "")
-    .trim();
-  const expected = (process.env.ADMIN_TOKEN || "").trim();
-
-  return isCron || (!!expected && (qToken === expected || bearer === expected));
-}
+import { authorized } from "@/lib/cron";
 
 type ScriptRunner = (
   options?: Record<string, unknown>,

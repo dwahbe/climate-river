@@ -73,10 +73,10 @@ Four-tier cron strategy orchestrated via Vercel cron jobs (see `vercel.json`):
 
 ### API Authorization
 
-All cron/admin endpoints require either:
+All cron/admin endpoints are gated by `lib/cron.ts` `authorized()` (pure core: `evaluateCronAuth`):
 
-- Vercel cron header (`x-vercel-cron: 1`)
-- Bearer token or `?token=ADMIN_TOKEN` query param
+- A token matching `CRON_SECRET` or `ADMIN_TOKEN`, via `Authorization: Bearer <token>` or `?token=...` (constant-time compare)
+- Vercel's `x-vercel-cron: 1` header — trusted ONLY when `CRON_SECRET` is unset (legacy fallback). Set `CRON_SECRET` in Vercel so scheduled crons authenticate by secret and the spoofable header is no longer trusted on its own. (The old `?cron=1` bypass has been removed.)
 
 ### Key Patterns
 
@@ -114,4 +114,4 @@ See `.env.example` for the full list with descriptions.
 
 **Required**: `DATABASE_URL`, `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `OPENAI_API_KEY`, `ADMIN_TOKEN`
 
-**Optional**: `TAVILY_API_KEY`, `WEB_SEARCH_ENABLED`, Google News localization (`DISCOVER_*`), web search tuning (`WEB_SEARCH_*`, `GOOGLE_SUGGESTION_MODEL`), schema maintenance (`SEARCH_VECTOR_BACKFILL_*`)
+**Optional**: `CRON_SECRET` (recommended — see API Authorization), `TAVILY_API_KEY`, `WEB_SEARCH_ENABLED`, Google News localization (`DISCOVER_*`), web search tuning (`WEB_SEARCH_*` incl. `WEB_SEARCH_MAX_CALLS_PER_RUN`, `GOOGLE_SUGGESTION_MODEL`), schema maintenance (`SEARCH_VECTOR_BACKFILL_*`)
