@@ -1,28 +1,33 @@
 // scripts/rewrite.ts
 import { query, endPool } from "@/lib/db";
 import {
-  ATTRIBUTION_REQUIRED_SOURCE_PATTERNS,
-  ATTRIBUTION_TRIGGER_PATTERNS,
-  CLICKBAIT_PATTERNS,
-  POLITICAL_FIGURES,
-  VAGUE_PATTERNS,
-  WEAK_PATTERNS,
-  WEAK_PRIORITIZATION_PATTERNS,
   buildRetrySystemPrompt,
   buildSourceQuantContext,
   buildSystemPrompt,
   buildUserPrompt,
-  containsQuantifier,
   extractContentSnippet,
-  hasAttribution,
-  measurementsMatch,
-  parseMeasurements,
+  formatPublishedDate,
   sanitizeHeadline,
+  validateHeadline,
+  passesChecks,
+  type HeadlineCheck,
+  type HeadlineFailureReason,
   type PromptInput,
   type ValidationContext,
 } from "@/lib/rewriteShared";
+
+// Re-export the validator (now living in lib/rewriteShared.ts as the single
+// source of truth) so existing imports from "../rewrite" and the test suite
+// keep working.
+export {
+  validateHeadline,
+  passesChecks,
+  type HeadlineCheck,
+  type HeadlineFailureReason,
+};
 import { isClimateRelevant } from "@/lib/tagger";
 import { mapLimit } from "@/lib/utils";
+import { openai } from "@ai-sdk/openai";
 import { gateway, generateText } from "ai";
 
 type Row = {
@@ -37,181 +42,6 @@ type Row = {
 };
 
 const MAX_SOURCE_SEGMENT = 12_000;
-
-/* ------------------------- Enhanced Validation ------------------------- */
-
-export type HeadlineFailureReason =
-  | "empty"
-  | "length"
-  | "unchanged"
-  | "too_short_social"
-  | "too_compressed"
-  | "too_short_no_content"
-  | "numeric_missing_in_source"
-  | "numeric_mismatch"
-  | "hallucinated_political_figure"
-  | "clickbait"
-  | "weak_hedging"
-  | "vague_meta_reporting"
-  | "missing_attribution"
-  | "weak_prioritization"
-  | "llm_error";
-
-export type HeadlineCheck =
-  | { ok: true; reason: null }
-  | { ok: false; reason: HeadlineFailureReason };
-
-/**
- * Structured validator for rewritten headlines. Returns a stable failure
- * `reason` identifier so per-attempt telemetry (rewrite_attempts) can break
- * down rejections by failure mode.
- */
-export function validateHeadline(
-  original: string,
-  draft: string,
-  context: ValidationContext,
-): HeadlineCheck {
-  if (!draft) return { ok: false, reason: "empty" };
-  const t = sanitizeHeadline(draft);
-  const { hasContent, sourceQuant } = context;
-
-  const minLength = hasContent ? 60 : 50;
-  if (t.length < minLength || t.length > 220) {
-    console.warn(
-      `⚠️  Length check failed (${t.length} chars): "${t.slice(0, 50)}..."`,
-    );
-    return { ok: false, reason: "length" };
-  }
-
-  const norm = (s: string) =>
-    s
-      .toLowerCase()
-      .replace(/[\W_]+/g, " ")
-      .trim();
-
-  if (!norm(t) || norm(t) === norm(original)) {
-    console.warn(`⚠️  Headline unchanged from original`);
-    return { ok: false, reason: "unchanged" };
-  }
-
-  const draftWords = t.split(/\s+/).length;
-  const originalWords = original.split(/\s+/).length;
-  const isLikelySocialPost = originalWords > 30;
-
-  if (isLikelySocialPost) {
-    if (draftWords < 8) {
-      console.warn(`⚠️  Headline too short for social post condensation`);
-      return { ok: false, reason: "too_short_social" };
-    }
-  } else if (hasContent) {
-    if (draftWords < originalWords * 0.5) {
-      console.warn(`⚠️  Headline too compressed despite having content`);
-      return { ok: false, reason: "too_compressed" };
-    }
-  } else {
-    if (draftWords < 6) {
-      console.warn(`⚠️  Headline too short (${draftWords} words)`);
-      return { ok: false, reason: "too_short_no_content" };
-    }
-  }
-
-  const draftMeasurements = parseMeasurements(t);
-  if (draftMeasurements.length > 0) {
-    const sourceMeasurements = sourceQuant.measurements;
-    if (sourceMeasurements.length === 0) {
-      console.warn(
-        `⚠️  Numeric detail missing in source but present in rewrite: ${draftMeasurements
-          .map((m) => `${m.value}${m.unit}`)
-          .join(", ")}`,
-      );
-      return { ok: false, reason: "numeric_missing_in_source" };
-    }
-    // Unit/magnitude-aware match with rounding tolerance: rejects scale/unit
-    // swaps ("$5M"→"$5B", "593 GW"→"593 million tons") while accepting faithful
-    // rounding ("28.7%"→"29%").
-    const unmatched = draftMeasurements.filter(
-      (dm) => !sourceMeasurements.some((sm) => measurementsMatch(dm, sm)),
-    );
-    if (unmatched.length > 0) {
-      console.warn(
-        `⚠️  Numeric mismatch: ${unmatched
-          .map((m) => `${m.value}${m.unit}`)
-          .join(", ")} not supported by source material`,
-      );
-      return { ok: false, reason: "numeric_mismatch" };
-    }
-  }
-
-  const srcLower = context.sourceText.toLowerCase();
-  const draftLower = t.toLowerCase();
-  for (const name of POLITICAL_FIGURES) {
-    if (new RegExp(`\\b${name}\\b`).test(draftLower)) {
-      if (!new RegExp(`\\b${name}\\b`).test(srcLower)) {
-        console.warn(
-          `⚠️  Hallucinated political figure "${name}" not found in source material: "${t.slice(0, 60)}..."`,
-        );
-        return { ok: false, reason: "hallucinated_political_figure" };
-      }
-    }
-  }
-
-  if (CLICKBAIT_PATTERNS.some((p) => p.test(t))) {
-    console.warn(`⚠️  Rejected vague/hype language: "${t.slice(0, 50)}..."`);
-    return { ok: false, reason: "clickbait" };
-  }
-
-  if (WEAK_PATTERNS.some((p) => p.test(t))) {
-    console.warn(`⚠️  Rejected weak hedging language: "${t.slice(0, 50)}..."`);
-    return { ok: false, reason: "weak_hedging" };
-  }
-
-  // Vague/meta-reporting filler is only a problem when the line is ALSO
-  // unquantified; a concrete number rescues headlines like
-  // "EPA rule covers 40% of US power plants". (hasAttribution is intentionally
-  // NOT used here: its /\bprojects?\b/ pattern matches the common noun
-  // "project", which would wrongly exempt vague headlines.)
-  if (VAGUE_PATTERNS.some((p) => p.test(t)) && !containsQuantifier(t)) {
-    console.warn(
-      `⚠️  Rejected vague/meta-reporting pattern: "${t.slice(0, 50)}..."`,
-    );
-    return { ok: false, reason: "vague_meta_reporting" };
-  }
-
-  const sourceNeedsAttribution = ATTRIBUTION_REQUIRED_SOURCE_PATTERNS.some(
-    (p) => p.test(context.sourceText),
-  );
-  const draftNeedsAttribution = ATTRIBUTION_TRIGGER_PATTERNS.some((p) =>
-    p.test(t),
-  );
-  if (sourceNeedsAttribution && draftNeedsAttribution && !hasAttribution(t)) {
-    console.warn(`⚠️  Rejected missing attribution: "${t.slice(0, 50)}..."`);
-    return { ok: false, reason: "missing_attribution" };
-  }
-
-  if (
-    hasContent &&
-    WEAK_PRIORITIZATION_PATTERNS.some((p) => p.test(t)) &&
-    !containsQuantifier(t) &&
-    !hasAttribution(t)
-  ) {
-    console.warn(`⚠️  Rejected weak prioritization: "${t.slice(0, 50)}..."`);
-    return { ok: false, reason: "weak_prioritization" };
-  }
-
-  return { ok: true, reason: null };
-}
-
-/**
- * Backwards-compatible boolean wrapper around {@link validateHeadline}.
- * Existing tests assert against this signature.
- */
-export function passesChecks(
-  original: string,
-  draft: string,
-  context: ValidationContext,
-): boolean {
-  return validateHeadline(original, draft, context).ok;
-}
 
 /* ------------------------- LLM Generation ------------------------- */
 
@@ -229,7 +59,44 @@ type GenerateResult = {
   promptTokens: number | null;
   outputTokens: number | null;
   cachedTokens: number | null;
+  truncated: boolean;
 };
+
+/**
+ * Batch-level circuit breaker: after `threshold` consecutive LLM transport
+ * failures (gateway AND direct fallback both down), stop sending the rest of
+ * the batch into a dead provider. Any successful call resets the counter.
+ */
+export class LlmCircuitBreaker {
+  private consecutive = 0;
+  constructor(private readonly threshold = 5) {}
+  recordError(): void {
+    this.consecutive += 1;
+  }
+  recordSuccess(): void {
+    this.consecutive = 0;
+  }
+  get tripped(): boolean {
+    return this.consecutive >= this.threshold;
+  }
+}
+
+/**
+ * rewrite_notes for articles whose attempts all failed. Previously the first
+ * attempt's generation notes were written verbatim, which begin "success:"
+ * whenever the LLM call itself succeeded — poisoning notes-based monitoring.
+ */
+export function buildFailedNotes(
+  reason: HeadlineFailureReason,
+  llmNotes: string,
+  contentNote: string,
+): string {
+  if (reason === "llm_error") {
+    // llmNotes is already "failed:<provider message>" — keep it, bounded.
+    return `${llmNotes.slice(0, 160)}${contentNote}`;
+  }
+  return `failed_validation:${reason}${contentNote}`;
+}
 
 async function generateWithOpenAI(
   input: PromptInput,
@@ -248,22 +115,39 @@ async function generateWithOpenAI(
   const model = "gpt-4.1-mini";
   const startedAt = Date.now();
 
-  try {
-    const result = await generateText({
-      // Routed via Vercel AI Gateway. Gateway forwards providerOptions.openai
-      // (incl. promptCacheKey) and OIDC-auths on Vercel; locally it uses
-      // AI_GATEWAY_API_KEY. No markup over OpenAI's published rate.
-      model: gateway(`openai/${model}`),
+  const attempt = (direct: boolean) =>
+    generateText({
+      // Primary route is the Vercel AI Gateway (forwards providerOptions.openai
+      // incl. promptCacheKey; OIDC-auths on Vercel, AI_GATEWAY_API_KEY locally).
+      // On gateway failure (free-tier 429s killed ~90% of attempts for a month)
+      // we fall back to direct OpenAI when OPENAI_API_KEY is configured.
+      model: direct ? openai(model) : gateway(`openai/${model}`),
       system,
       prompt,
       temperature: 0.15,
       maxOutputTokens: 80,
-      maxRetries: retries,
+      maxRetries: direct ? 1 : retries,
       abortSignal: AbortSignal.timeout(abortMs),
       providerOptions: {
         openai: { promptCacheKey: cacheKey },
       },
     });
+
+  try {
+    let result: Awaited<ReturnType<typeof attempt>>;
+    let viaDirect = false;
+    try {
+      result = await attempt(false);
+    } catch (gatewayError: unknown) {
+      if (!process.env.OPENAI_API_KEY) throw gatewayError;
+      const msg =
+        gatewayError instanceof Error ? gatewayError.message : "unknown_error";
+      console.warn(
+        `⚠️  Gateway generation failed (${msg.slice(0, 120)}); retrying via direct OpenAI`,
+      );
+      result = await attempt(true);
+      viaDirect = true;
+    }
 
     const sanitized = sanitizeHeadline(result.text);
     const notesParts = [
@@ -271,6 +155,7 @@ async function generateWithOpenAI(
         ? `with_content:${input.contentSnippet.length}chars`
         : "title_only",
     ];
+    if (viaDirect) notesParts.push("via_direct");
 
     if (input.previewExcerpt) {
       notesParts.push(`with_preview:${input.previewExcerpt.length}chars`);
@@ -315,6 +200,10 @@ async function generateWithOpenAI(
       promptTokens: usage?.inputTokens ?? usage?.promptTokens ?? null,
       outputTokens: usage?.outputTokens ?? usage?.completionTokens ?? null,
       cachedTokens: typeof cachedTokens === "number" ? cachedTokens : null,
+      // A "length" finish means the model was cut off at maxOutputTokens —
+      // the headline is very likely mid-sentence even if it happens to fit
+      // the char limit. Treat as a validation failure (retry may fit).
+      truncated: result.finishReason === "length",
     };
   } catch (error: unknown) {
     console.error("❌ Error generating text with AI SDK:", error);
@@ -327,6 +216,7 @@ async function generateWithOpenAI(
       promptTokens: null,
       outputTokens: null,
       cachedTokens: null,
+      truncated: false,
     };
   }
 }
@@ -404,7 +294,21 @@ async function fetchBatch(limit = 40) {
           a.rewrite_notes is null
           or a.rewrite_notes not like 'skipped:not_climate%'
         )
-      order by 
+        -- Permafail cap: stop re-selecting articles that already failed
+        -- validation 4+ times (llm transport errors don't count — they're the
+        -- provider's fault, and the in-run circuit breaker bounds those).
+        -- Second chance: if content was (re)fetched after the latest failed
+        -- attempt, the article becomes eligible again.
+        and not exists (
+          select 1
+          from rewrite_attempts ra
+          where ra.article_id = a.id
+            and ra.accepted = false
+            and (ra.validation_failures->>'reason') is distinct from 'llm_error'
+          having count(*) >= 4
+             and max(ra.created_at) >= coalesce(a.content_fetched_at, timestamptz '-infinity')
+        )
+      order by
         score_map.score desc nulls last,
         a.fetched_at desc
       limit $1
@@ -414,19 +318,36 @@ async function fetchBatch(limit = 40) {
   return rows;
 }
 
-async function processOne(r: Row) {
+type ProcessOutcome = { ok: number; failed: number; skipped: number };
+
+async function processOne(
+  r: Row,
+  breaker: LlmCircuitBreaker,
+): Promise<ProcessOutcome> {
+  if (breaker.tripped) {
+    return { ok: 0, failed: 0, skipped: 1 };
+  }
+
   // SAFETY LAYER 1: Only use content if status is explicitly 'success'
   const contentSnippet =
     r.content_status === "success"
       ? extractContentSnippet(r.content_text, r.content_html, 1200, r.id)
       : null;
 
-  const previewExcerpt =
+  const previewExcerptRaw =
     r.content_status === "success" &&
     typeof r.content_html === "string" &&
     r.content_html.trim().length > 0
       ? extractContentSnippet(null, r.content_html, 2500, r.id)
       : null;
+  // Snippet and preview are both extracted from the start of the same content;
+  // when they're the same text the preview adds tokens without information.
+  const previewExcerpt =
+    previewExcerptRaw &&
+    contentSnippet &&
+    previewExcerptRaw.slice(0, 200) === contentSnippet.slice(0, 200)
+      ? null
+      : previewExcerptRaw;
 
   // Track what happened with content
   let contentNote = "";
@@ -438,22 +359,35 @@ async function processOne(r: Row) {
     contentNote = ":content_rejected"; // Had content but failed quality checks
   }
 
+  // Raw content_text/content_html are only trustworthy as "source" when the
+  // prefetch succeeded — otherwise they may hold nav/boilerplate from a blocked
+  // or error page, which would wrongly "support" a hallucinated number/entity.
+  const trustedContentText =
+    r.content_status === "success" ? r.content_text : null;
+  const trustedContentHtml =
+    r.content_status === "success" ? r.content_html : null;
+
+  // Include the formatted publish date so a legitimate "in 2026" isn't rejected
+  // as a number missing from source.
+  const publishedDateText = formatPublishedDate(r.published_at);
+
   // For validating numbers exist: check only this article's own content
   const sourceQuant = buildSourceQuantContext([
     r.title,
     r.dek,
+    publishedDateText,
     contentSnippet,
     previewExcerpt,
-    r.content_text,
-    r.content_html,
+    trustedContentText,
+    trustedContentHtml,
   ]);
 
   const climateSummaryParts = [
     r.dek,
     contentSnippet,
     previewExcerpt,
-    r.content_text,
-    r.content_html,
+    trustedContentText,
+    trustedContentHtml,
   ].filter(
     (part): part is string =>
       typeof part === "string" && part.trim().length > 0,
@@ -482,7 +416,7 @@ async function processOne(r: Row) {
         80,
       )}..."`,
     );
-    return { ok: 0, failed: 1 };
+    return { ok: 0, failed: 1, skipped: 0 };
   }
 
   const promptInput: PromptInput = {
@@ -496,10 +430,11 @@ async function processOne(r: Row) {
   const sourceText = [
     r.title,
     r.dek,
+    publishedDateText,
     contentSnippet,
     previewExcerpt,
-    r.content_text,
-    r.content_html,
+    trustedContentText,
+    trustedContentHtml,
   ]
     .filter((p): p is string => typeof p === "string" && p.trim().length > 0)
     .map((s) =>
@@ -515,10 +450,14 @@ async function processOne(r: Row) {
 
   // First attempt
   const llm = await generateWithOpenAI(promptInput);
+  if (llm.text === null) breaker.recordError();
+  else breaker.recordSuccess();
   const draft = llm.text || "";
-  const firstCheck: HeadlineCheck = llm.text
-    ? validateHeadline(r.title, draft, validationContext)
-    : { ok: false, reason: "llm_error" };
+  const firstCheck: HeadlineCheck = !llm.text
+    ? { ok: false, reason: "llm_error" }
+    : llm.truncated
+      ? { ok: false, reason: "truncated" }
+      : validateHeadline(r.title, draft, validationContext);
 
   await logAttempt({
     articleId: r.id,
@@ -548,7 +487,26 @@ async function processOne(r: Row) {
     console.log(
       `✅ [${r.id}] "${r.title.slice(0, 40)}..." → "${draft.slice(0, 60)}..."`,
     );
-    return { ok: 1, failed: 0 };
+    return { ok: 1, failed: 0, skipped: 0 };
+  }
+
+  // A transport failure is not a validation failure: the "previous attempt was
+  // too vague" retry prompt makes no sense and just doubles load on a
+  // rate-limited provider. Record the failure and move on.
+  if (firstCheck.reason === "llm_error") {
+    await query(
+      `update articles
+         set rewrite_model = $1,
+             rewrite_notes = $2
+       where id = $3`,
+      [
+        llm.model || "none",
+        buildFailedNotes("llm_error", llm.notes, contentNote),
+        r.id,
+      ],
+    );
+    console.log(`⚠️  [${r.id}] LLM transport error; skipping retry prompt`);
+    return { ok: 0, failed: 1, skipped: 0 };
   }
 
   // Retry once with a more direct prompt — different system prompt means a
@@ -557,10 +515,14 @@ async function processOne(r: Row) {
     systemPrompt: buildRetrySystemPrompt("legacy"),
     cacheKey: CACHE_KEY_RETRY,
   });
+  if (retryLlm.text === null) breaker.recordError();
+  else breaker.recordSuccess();
   const retryDraft = retryLlm.text || "";
-  const retryCheck: HeadlineCheck = retryLlm.text
-    ? validateHeadline(r.title, retryDraft, validationContext)
-    : { ok: false, reason: "llm_error" };
+  const retryCheck: HeadlineCheck = !retryLlm.text
+    ? { ok: false, reason: "llm_error" }
+    : retryLlm.truncated
+      ? { ok: false, reason: "truncated" }
+      : validateHeadline(r.title, retryDraft, validationContext);
 
   await logAttempt({
     articleId: r.id,
@@ -591,48 +553,77 @@ async function processOne(r: Row) {
     console.log(
       `✅ [${r.id}] (retry) "${r.title.slice(0, 40)}..." → "${retryDraft.slice(0, 60)}..."`,
     );
-    return { ok: 1, failed: 0 };
+    return { ok: 1, failed: 0, skipped: 0 };
   }
 
-  // Both attempts failed — record why
+  // Both attempts failed — record the final validation reason honestly
+  const failReason = retryCheck.reason ?? "empty";
   await query(
     `update articles
        set rewrite_model = $1,
            rewrite_notes = $2
      where id = $3`,
-    [llm.model || "none", llm.notes + contentNote || "no_valid_rewrite", r.id],
+    [
+      retryLlm.model || llm.model || "none",
+      buildFailedNotes(failReason, retryLlm.notes, contentNote),
+      r.id,
+    ],
   );
   console.log(
     `⚠️  [${r.id}] Failed validation (incl. retry): "${r.title.slice(0, 50)}..."`,
   );
-  return { ok: 0, failed: 1 };
+  return { ok: 0, failed: 1, skipped: 0 };
 }
 
-async function batch(limit = 40, concurrency = 4) {
+async function batch(limit = 40, concurrency = 4, deadlineAt = Infinity) {
   const rows = await fetchBatch(limit);
   console.log(`📝 Processing ${rows.length} articles...`);
 
+  const breaker = new LlmCircuitBreaker();
   let ok = 0;
   let failed = 0;
+  let skipped = 0;
 
   await mapLimit(rows, concurrency, async (r) => {
-    const res = await processOne(r);
+    // Budget guard: don't start new articles past the deadline — Vercel kills
+    // the function at maxDuration with no pipeline_runs record otherwise.
+    if (Date.now() > deadlineAt) {
+      skipped += 1;
+      return;
+    }
+    const res = await processOne(r, breaker);
     ok += res.ok;
     failed += res.failed;
+    skipped += res.skipped;
   });
 
-  return { count: rows.length, ok, failed };
+  if (breaker.tripped) {
+    console.warn(
+      `🛑 Circuit breaker tripped after consecutive LLM transport errors; skipped ${skipped} articles`,
+    );
+  }
+
+  return {
+    count: rows.length,
+    ok,
+    failed,
+    skipped,
+    breakerTripped: breaker.tripped,
+  };
 }
 
-export async function run(opts: { limit?: number; closePool?: boolean } = {}) {
+export async function run(
+  opts: { limit?: number; closePool?: boolean; deadlineMs?: number } = {},
+) {
   console.log("🔄 Starting headline rewrite job...");
   const start = Date.now();
+  const deadlineAt = opts.deadlineMs ? start + opts.deadlineMs : Infinity;
 
-  const res = await batch(opts.limit ?? 40, 4);
+  const res = await batch(opts.limit ?? 40, 4, deadlineAt);
 
   const elapsed = ((Date.now() - start) / 1000).toFixed(1);
   console.log(
-    `✅ Rewrite complete: ${res.ok} succeeded, ${res.failed} failed (${elapsed}s)`,
+    `✅ Rewrite complete: ${res.ok} succeeded, ${res.failed} failed, ${res.skipped} skipped (${elapsed}s)`,
   );
 
   if (opts.closePool) await endPool();
@@ -775,13 +766,18 @@ async function dryRun(limit = 10) {
 
     const llm = await generateWithOpenAI(promptInput);
     const draft = llm.text || "";
-    const pass1 = passesChecks(r.title, draft, validationContext);
+    // Mirror production retry semantics exactly: retry only on validation
+    // failure, never on transport error.
+    const check: HeadlineCheck = llm.text
+      ? validateHeadline(r.title, draft, validationContext)
+      : { ok: false, reason: "llm_error" };
+    const pass1 = check.ok;
 
     let finalDraft = draft;
     let finalPass = pass1;
     let wasRetry = false;
 
-    if (!pass1 && draft) {
+    if (!pass1 && check.reason !== "llm_error") {
       const retryLlm = await generateWithOpenAI(promptInput, {
         systemPrompt: buildRetrySystemPrompt("legacy"),
       });

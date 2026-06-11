@@ -24,6 +24,10 @@ const PAYWALL_FILTER = `
   AND canonical_url NOT LIKE '%ft.com%'
   AND canonical_url NOT LIKE '%economist.com%'
   AND canonical_url NOT LIKE '%bloomberg.com%'
+  -- Aggregator interstitials extract as "0 words"; never burn a fetch on them.
+  AND canonical_url NOT LIKE 'https://news.google.com%'
+  AND canonical_url NOT LIKE '%news.yahoo.com%'
+  AND canonical_url NOT LIKE '%://www.msn.com%'
 `;
 
 const LANGUAGE_FILTER = visibleLanguagePredicate();

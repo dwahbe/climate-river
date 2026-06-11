@@ -562,6 +562,309 @@ export const WEAK_PRIORITIZATION_PATTERNS = [
   /\btransition plans\b/i,
 ];
 
+// "challenge" is weak filler ("faces challenges") but core news vocabulary in
+// legal/political contexts ("files legal challenge to EPA rule"). When these
+// concrete uses are present, the weak-prioritization check should not fire.
+export const PRIORITIZATION_EXCEPTIONS = [
+  /\b(legal|court|constitutional|supreme court|judicial) challenge\b/i,
+  /\bchalleng(es|ed|ing)\b.*\b(rule|ruling|law|permit|order|ban|decision|policy|in court)\b/i,
+];
+
+// The model sometimes emits a refusal/meta sentence AS the headline (e.g. "No
+// climate or energy entity action found in source; headline not applicable for
+// rewriting"). These must never be published.
+export const META_REFUSAL_PATTERNS = [
+  /\bnot applicable\b/i,
+  /\bno (climate|energy|relevant)\b.*\b(found|detected|action)\b/i,
+  /\b(cannot|can'?t|unable to) (rewrite|generate|produce)\b/i,
+  /\bheadline (not|cannot)\b/i,
+  /\bno (valid )?headline\b/i,
+  /\binsufficient (information|content|context)\b/i,
+  /\bas an ai\b/i,
+];
+
+const ENTITY_STOPWORDS = new Set([
+  "The",
+  "A",
+  "An",
+  "In",
+  "On",
+  "At",
+  "For",
+  "To",
+  "Of",
+  "And",
+  "But",
+  "Or",
+  "As",
+  "By",
+  "With",
+  "After",
+  "Before",
+  "Amid",
+  "Over",
+  "New",
+  "US",
+  "U.S.",
+  "UK",
+  "EU",
+  "UN",
+  "Monday",
+  "Tuesday",
+  "Wednesday",
+  "Thursday",
+  "Friday",
+  "Saturday",
+  "Sunday",
+  "January",
+  "February",
+  "March",
+  "April",
+  "May",
+  "June",
+  "July",
+  "August",
+  "September",
+  "October",
+  "November",
+  "December",
+]);
+
+/**
+ * Find multi-word proper-noun entities in the draft (2+ consecutive capitalized
+ * words, e.g. "Mountain Valley Pipeline", "European Investment Bank") whose
+ * words are ENTIRELY absent from the source text — a strong hallucination
+ * signal. Conservative by design: single-word names, acronyms, and any entity
+ * sharing even one token with the source are allowed, so faithful abbreviation
+ * (source "EU" → draft "European Union") and partial reuse are not flagged.
+ */
+export function findUnsupportedEntities(
+  draft: string,
+  sourceText: string,
+): string[] {
+  const srcLower = sourceText.toLowerCase();
+  const unsupported: string[] = [];
+  // Sequences of 2+ capitalized words (allowing internal lowercase connectors
+  // like "of"/"and" is intentionally NOT done — keep it simple and strict).
+  const phraseRe = /\b([A-Z][a-zA-Z.&'-]+(?:\s+[A-Z][a-zA-Z.&'-]+)+)\b/g;
+  let m: RegExpExecArray | null;
+  while ((m = phraseRe.exec(draft)) !== null) {
+    const phrase = m[1];
+    const words = phrase
+      .split(/\s+/)
+      .filter((w) => !ENTITY_STOPWORDS.has(w) && w.length > 2);
+    if (words.length < 2) continue;
+    // Supported if ANY significant word appears in the source.
+    const anyInSource = words.some((w) =>
+      srcLower.includes(w.toLowerCase().replace(/[.,;:'"-]+$/, "")),
+    );
+    if (!anyInSource) unsupported.push(phrase);
+  }
+  return unsupported;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Headline validator (single source of truth — imported by both the  */
+/*  production rewrite script and the eval harness so they measure the  */
+/*  same gate)                                                          */
+/* ------------------------------------------------------------------ */
+
+export type HeadlineFailureReason =
+  | "empty"
+  | "length"
+  | "truncated"
+  | "meta_refusal"
+  | "unchanged"
+  | "too_short_social"
+  | "too_compressed"
+  | "too_short_no_content"
+  | "numeric_missing_in_source"
+  | "numeric_mismatch"
+  | "hallucinated_political_figure"
+  | "hallucinated_entity"
+  | "clickbait"
+  | "weak_hedging"
+  | "vague_meta_reporting"
+  | "missing_attribution"
+  | "weak_prioritization"
+  | "llm_error";
+
+export type HeadlineCheck =
+  | { ok: true; reason: null }
+  | { ok: false; reason: HeadlineFailureReason };
+
+/**
+ * Structured validator for rewritten headlines. Returns a stable failure
+ * `reason` identifier so per-attempt telemetry (rewrite_attempts) can break
+ * down rejections by failure mode.
+ */
+export function validateHeadline(
+  original: string,
+  draft: string,
+  context: ValidationContext,
+): HeadlineCheck {
+  if (!draft) return { ok: false, reason: "empty" };
+  const t = sanitizeHeadline(draft);
+  const { hasContent, sourceQuant } = context;
+
+  const minLength = hasContent ? 60 : 50;
+  if (t.length < minLength || t.length > 220) {
+    console.warn(
+      `⚠️  Length check failed (${t.length} chars): "${t.slice(0, 50)}..."`,
+    );
+    return { ok: false, reason: "length" };
+  }
+
+  const norm = (s: string) =>
+    s
+      .toLowerCase()
+      .replace(/[\W_]+/g, " ")
+      .trim();
+
+  if (!norm(t) || norm(t) === norm(original)) {
+    console.warn(`⚠️  Headline unchanged from original`);
+    return { ok: false, reason: "unchanged" };
+  }
+
+  // Reject refusal/meta sentences emitted as the headline (e.g. "No climate
+  // entity action found in source; headline not applicable for rewriting").
+  if (META_REFUSAL_PATTERNS.some((p) => p.test(t))) {
+    console.warn(`⚠️  Rejected meta/refusal output: "${t.slice(0, 60)}..."`);
+    return { ok: false, reason: "meta_refusal" };
+  }
+
+  const draftWords = t.split(/\s+/).length;
+  const originalWords = original.split(/\s+/).length;
+  const isLikelySocialPost = originalWords > 30;
+
+  if (isLikelySocialPost) {
+    if (draftWords < 8) {
+      console.warn(`⚠️  Headline too short for social post condensation`);
+      return { ok: false, reason: "too_short_social" };
+    }
+  } else if (hasContent) {
+    if (draftWords < originalWords * 0.5) {
+      console.warn(`⚠️  Headline too compressed despite having content`);
+      return { ok: false, reason: "too_compressed" };
+    }
+  } else {
+    if (draftWords < 6) {
+      console.warn(`⚠️  Headline too short (${draftWords} words)`);
+      return { ok: false, reason: "too_short_no_content" };
+    }
+  }
+
+  const draftMeasurements = parseMeasurements(t);
+  if (draftMeasurements.length > 0) {
+    const sourceMeasurements = sourceQuant.measurements;
+    if (sourceMeasurements.length === 0) {
+      console.warn(
+        `⚠️  Numeric detail missing in source but present in rewrite: ${draftMeasurements
+          .map((m) => `${m.value}${m.unit}`)
+          .join(", ")}`,
+      );
+      return { ok: false, reason: "numeric_missing_in_source" };
+    }
+    // Unit/magnitude-aware match with rounding tolerance: rejects scale/unit
+    // swaps ("$5M"→"$5B", "593 GW"→"593 million tons") while accepting faithful
+    // rounding ("28.7%"→"29%").
+    const unmatched = draftMeasurements.filter(
+      (dm) => !sourceMeasurements.some((sm) => measurementsMatch(dm, sm)),
+    );
+    if (unmatched.length > 0) {
+      console.warn(
+        `⚠️  Numeric mismatch: ${unmatched
+          .map((m) => `${m.value}${m.unit}`)
+          .join(", ")} not supported by source material`,
+      );
+      return { ok: false, reason: "numeric_mismatch" };
+    }
+  }
+
+  const srcLower = context.sourceText.toLowerCase();
+  const draftLower = t.toLowerCase();
+  for (const name of POLITICAL_FIGURES) {
+    if (new RegExp(`\\b${name}\\b`).test(draftLower)) {
+      if (!new RegExp(`\\b${name}\\b`).test(srcLower)) {
+        console.warn(
+          `⚠️  Hallucinated political figure "${name}" not found in source material: "${t.slice(0, 60)}..."`,
+        );
+        return { ok: false, reason: "hallucinated_political_figure" };
+      }
+    }
+  }
+
+  // Multi-word proper-noun entities wholly absent from the source are a strong
+  // hallucination signal. Only enforced when we have real content to check
+  // against — with title+dek only, legitimate entities often aren't repeated.
+  if (hasContent) {
+    const unsupported = findUnsupportedEntities(t, context.sourceText);
+    if (unsupported.length > 0) {
+      console.warn(
+        `⚠️  Unsupported entity ${JSON.stringify(unsupported[0])} not in source: "${t.slice(0, 60)}..."`,
+      );
+      return { ok: false, reason: "hallucinated_entity" };
+    }
+  }
+
+  if (CLICKBAIT_PATTERNS.some((p) => p.test(t))) {
+    console.warn(`⚠️  Rejected vague/hype language: "${t.slice(0, 50)}..."`);
+    return { ok: false, reason: "clickbait" };
+  }
+
+  if (WEAK_PATTERNS.some((p) => p.test(t))) {
+    console.warn(`⚠️  Rejected weak hedging language: "${t.slice(0, 50)}..."`);
+    return { ok: false, reason: "weak_hedging" };
+  }
+
+  // Vague/meta-reporting filler is only a problem when the line is ALSO
+  // unquantified; a concrete number rescues headlines like
+  // "EPA rule covers 40% of US power plants". (hasAttribution is intentionally
+  // NOT used here: its /\bprojects?\b/ pattern matches the common noun
+  // "project", which would wrongly exempt vague headlines.)
+  if (VAGUE_PATTERNS.some((p) => p.test(t)) && !containsQuantifier(t)) {
+    console.warn(
+      `⚠️  Rejected vague/meta-reporting pattern: "${t.slice(0, 50)}..."`,
+    );
+    return { ok: false, reason: "vague_meta_reporting" };
+  }
+
+  const sourceNeedsAttribution = ATTRIBUTION_REQUIRED_SOURCE_PATTERNS.some(
+    (p) => p.test(context.sourceText),
+  );
+  const draftNeedsAttribution = ATTRIBUTION_TRIGGER_PATTERNS.some((p) =>
+    p.test(t),
+  );
+  if (sourceNeedsAttribution && draftNeedsAttribution && !hasAttribution(t)) {
+    console.warn(`⚠️  Rejected missing attribution: "${t.slice(0, 50)}..."`);
+    return { ok: false, reason: "missing_attribution" };
+  }
+
+  if (
+    hasContent &&
+    WEAK_PRIORITIZATION_PATTERNS.some((p) => p.test(t)) &&
+    !PRIORITIZATION_EXCEPTIONS.some((p) => p.test(t)) &&
+    !containsQuantifier(t) &&
+    !hasAttribution(t)
+  ) {
+    console.warn(`⚠️  Rejected weak prioritization: "${t.slice(0, 50)}..."`);
+    return { ok: false, reason: "weak_prioritization" };
+  }
+
+  return { ok: true, reason: null };
+}
+
+/**
+ * Backwards-compatible boolean wrapper around {@link validateHeadline}.
+ */
+export function passesChecks(
+  original: string,
+  draft: string,
+  context: ValidationContext,
+): boolean {
+  return validateHeadline(original, draft, context).ok;
+}
+
 /* ------------------------------------------------------------------ */
 /*  Prompt builders                                                    */
 /* ------------------------------------------------------------------ */

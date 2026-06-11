@@ -4,6 +4,12 @@
 // Scale: integer 1–10. Default for new RSS-discovered sources is 2;
 // web-discovery seeds at 4 (default) or 8 (curated).
 
+// Weight assumed when a source row is missing or has no weight. This is the
+// single source of truth — rescore, clustering, and cluster-maintenance all
+// import it (they previously hardcoded an inconsistent 6/6/3, scoring unknown
+// sources as if they were tier-6 outlets).
+export const UNKNOWN_SOURCE_WEIGHT = 2;
+
 export const SOURCE_TIERS: Record<string, number> = {
   // Tier 10 — top-of-the-tree wires/papers
   "reuters.com": 10,

@@ -6,22 +6,14 @@ import {
 import { query } from "@/lib/db";
 import { resolveModel } from "@/lib/evalProviders";
 import {
-  ATTRIBUTION_REQUIRED_SOURCE_PATTERNS,
-  ATTRIBUTION_TRIGGER_PATTERNS,
-  CLICKBAIT_PATTERNS,
-  POLITICAL_FIGURES,
-  VAGUE_PATTERNS,
-  WEAK_PATTERNS,
-  WEAK_PRIORITIZATION_PATTERNS,
   buildSourceQuantContext,
   buildSystemPrompt,
   buildRetrySystemPrompt,
   buildUserPrompt,
-  containsQuantifier,
   extractContentSnippet,
-  extractNumericTokens,
-  hasAttribution,
   sanitizeHeadline,
+  validateHeadline,
+  type HeadlineFailureReason,
   type PromptInput,
   type ValidationContext,
 } from "@/lib/rewriteShared";
@@ -143,152 +135,41 @@ function failValidation(
   return { ok: false, code, message };
 }
 
+// Map the production validator's failure reasons onto the eval harness's
+// reporting codes so eval failure buckets stay stable while the actual gate is
+// IDENTICAL to production (lib/rewriteShared.validateHeadline). Previously this
+// file carried a drifted copy with a digits-only numeric check and different
+// codes, so the bakeoff silently stopped measuring the real gate.
+const REASON_TO_CODE: Record<HeadlineFailureReason, RewriteFailureCode> = {
+  empty: "empty_output",
+  length: "length",
+  truncated: "length",
+  meta_refusal: "vague_topic_summary",
+  unchanged: "unchanged",
+  too_short_social: "too_short",
+  too_short_no_content: "too_short",
+  too_compressed: "too_compressed",
+  numeric_missing_in_source: "invented_number",
+  numeric_mismatch: "invented_number",
+  hallucinated_political_figure: "hallucinated_entity",
+  hallucinated_entity: "hallucinated_entity",
+  clickbait: "teaser_clickbait",
+  weak_hedging: "unsupported_hedging",
+  vague_meta_reporting: "vague_topic_summary",
+  missing_attribution: "missing_attribution",
+  weak_prioritization: "weak_prioritization",
+  llm_error: "empty_output",
+};
+
 export function validateDraft(
   original: string,
   draft: string,
   context: ValidationContext,
 ): RewriteValidationResult {
-  if (!draft) {
-    return failValidation("empty_output", "Empty rewrite output");
-  }
-
-  const t = sanitizeHeadline(draft);
-  const { hasContent, sourceQuant } = context;
-
-  const minLength = hasContent ? 60 : 50;
-  if (t.length < minLength || t.length > 220) {
-    return failValidation(
-      "length",
-      `Length check failed (${t.length} chars)`,
-      t,
-    );
-  }
-
-  const norm = (s: string) =>
-    s
-      .toLowerCase()
-      .replace(/[\W_]+/g, " ")
-      .trim();
-
-  if (!norm(t) || norm(t) === norm(original)) {
-    return failValidation("unchanged", "Rewrite unchanged from original", t);
-  }
-
-  const draftWords = t.split(/\s+/).length;
-  const originalWords = original.split(/\s+/).length;
-  const isLikelySocialPost = originalWords > 30;
-
-  if (isLikelySocialPost) {
-    if (draftWords < 8) {
-      return failValidation(
-        "too_short",
-        "Rewrite too short for social post condensation",
-        t,
-      );
-    }
-  } else if (hasContent) {
-    if (draftWords < originalWords * 0.5) {
-      return failValidation(
-        "too_compressed",
-        "Rewrite too compressed despite having content",
-        t,
-      );
-    }
-  } else if (draftWords < 6) {
-    return failValidation(
-      "too_short",
-      `Rewrite too short (${draftWords} words)`,
-      t,
-    );
-  }
-
-  const draftNumbers = extractNumericTokens(t);
-  if (draftNumbers.length > 0) {
-    if (sourceQuant.numbers.size === 0) {
-      return failValidation(
-        "invented_number",
-        `Numeric detail missing in source but present in rewrite: ${draftNumbers.join(", ")}`,
-        t,
-      );
-    }
-    const missingNumbers = draftNumbers.filter(
-      (num) => !sourceQuant.numbers.has(num),
-    );
-    if (missingNumbers.length > 0) {
-      return failValidation(
-        "invented_number",
-        `Numeric mismatch: ${missingNumbers.join(", ")} not found in source material`,
-        t,
-      );
-    }
-  }
-
-  const srcLower = context.sourceText.toLowerCase();
-  const draftLower = t.toLowerCase();
-  for (const name of POLITICAL_FIGURES) {
-    if (new RegExp(`\\b${name}\\b`).test(draftLower)) {
-      if (!new RegExp(`\\b${name}\\b`).test(srcLower)) {
-        return failValidation(
-          "hallucinated_entity",
-          `Hallucinated political figure "${name}" not found in source material`,
-          t,
-        );
-      }
-    }
-  }
-
-  if (CLICKBAIT_PATTERNS.some((pattern) => pattern.test(t))) {
-    return failValidation(
-      "teaser_clickbait",
-      "Rejected teaser/clickbait language",
-      t,
-    );
-  }
-
-  if (WEAK_PATTERNS.some((pattern) => pattern.test(t))) {
-    return failValidation(
-      "unsupported_hedging",
-      "Rejected weak hedging language",
-      t,
-    );
-  }
-
-  if (VAGUE_PATTERNS.some((pattern) => pattern.test(t))) {
-    return failValidation(
-      "vague_topic_summary",
-      "Rejected vague topic summary",
-      t,
-    );
-  }
-
-  const sourceNeedsAttribution = ATTRIBUTION_REQUIRED_SOURCE_PATTERNS.some(
-    (pattern) => pattern.test(context.sourceText),
-  );
-  const draftNeedsAttribution = ATTRIBUTION_TRIGGER_PATTERNS.some((pattern) =>
-    pattern.test(t),
-  );
-  if (sourceNeedsAttribution && draftNeedsAttribution && !hasAttribution(t)) {
-    return failValidation(
-      "missing_attribution",
-      "Rewrite is missing attribution for a claim, study, or forecast",
-      t,
-    );
-  }
-
-  if (
-    hasContent &&
-    WEAK_PRIORITIZATION_PATTERNS.some((pattern) => pattern.test(t)) &&
-    !containsQuantifier(t) &&
-    !hasAttribution(t)
-  ) {
-    return failValidation(
-      "weak_prioritization",
-      "Rewrite foregrounds a weak secondary angle instead of the main finding",
-      t,
-    );
-  }
-
-  return { ok: true, code: null, message: null };
+  const result = validateHeadline(original, draft, context);
+  if (result.ok) return { ok: true, code: null, message: null };
+  const code = REASON_TO_CODE[result.reason];
+  return failValidation(code, `Rejected (${result.reason})`, draft);
 }
 
 function buildSourceText(

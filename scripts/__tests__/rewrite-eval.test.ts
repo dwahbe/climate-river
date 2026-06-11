@@ -85,9 +85,9 @@ describe("rewrite-eval prompt contract", () => {
 describe("rewrite-eval validation", () => {
   it("flags missing attribution for executive statements", () => {
     const source =
-      "CEO Andy Jassy says Amazon will produce 100 million units next year under the new climate product plan";
+      "CEO Andy Jassy says Amazon will expand its renewable energy purchases next year under the new climate product plan";
     const draft =
-      "Amazon will produce 100M units next year under new climate product plan";
+      "Amazon will expand renewable energy purchases next year under its new climate product plan nationwide";
     const result = validateDraft(
       "Amazon climate product plan",
       draft,

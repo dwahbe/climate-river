@@ -9,6 +9,7 @@ import {
   classifyArticleLanguageForIngest,
   type LanguageDetection,
 } from "@/lib/language";
+import { findRecentDuplicate } from "@/lib/articleDedupe";
 import {
   canonical,
   mapLimit,
@@ -216,9 +217,9 @@ async function fetchSourcesFromDB(): Promise<SourceDef[]> {
     weight: number;
     slug: string;
   }>(`
-    SELECT id, name, homepage_url, feed_url, weight, slug 
-    FROM sources 
-    WHERE feed_url IS NOT NULL 
+    SELECT id, name, homepage_url, feed_url, weight, slug
+    FROM sources
+    WHERE feed_url LIKE 'http%'
     ORDER BY weight DESC, name
   `);
 
@@ -259,27 +260,23 @@ async function insertArticle(
     return null;
   }
 
-  // ENHANCED DEDUPLICATION: Check for existing articles with same/similar title
-  const titleCheck = await query<{ id: number; canonical_url: string }>(
-    `SELECT id, canonical_url FROM articles 
-     WHERE title = $1 
-       AND fetched_at >= now() - interval '7 days'
-     LIMIT 1`,
-    [title],
-  );
-
-  if (titleCheck.rows.length > 0) {
-    console.log(
-      `⚠️  Duplicate title detected: "${title.substring(0, 50)}..." - skipping (existing ID: ${titleCheck.rows[0].id})`,
-    );
-    return { id: titleCheck.rows[0].id, embedding: null }; // Existing article, no new embedding
+  // DEDUPLICATION (before embedding, to avoid wasted OpenAI calls): shared
+  // rule in lib/articleDedupe.ts — same URL, or same title within 7 days.
+  // Either way the article already exists — return an isExisting marker so the
+  // caller skips re-clustering and re-categorizing it. Feeds keep items in the
+  // window for days, so without this the full feed window was re-processed on
+  // every one of the ~9 ingest runs/day (inflating `inserted`, breaking feed
+  // health, and re-running hybrid categorization for unchanged articles).
+  const existingId = await findRecentDuplicate({ title, url });
+  if (existingId !== null) {
+    return { id: existingId, embedding: null, isExisting: true };
   }
 
   // Generate embedding for the article
   const embedding = await generateEmbedding(title, dek ?? undefined);
   const embeddingJson = embedding.length > 0 ? JSON.stringify(embedding) : null;
 
-  const row = await query<{ id: number }>(
+  const row = await query<{ id: number; is_new: boolean }>(
     `
     insert into articles
       (source_id, title, canonical_url, published_at, dek, author, publisher_name, publisher_homepage, embedding, language_code, language_confidence, language_raw_code, language_source, language_checked_at)
@@ -295,7 +292,7 @@ async function insertArticle(
       language_raw_code   = coalesce(articles.language_raw_code, excluded.language_raw_code),
       language_source     = coalesce(articles.language_source, excluded.language_source),
       language_checked_at = coalesce(articles.language_checked_at, excluded.language_checked_at)
-    returning id
+    returning id, (xmax = 0) as is_new
   `,
     [
       sourceId,
@@ -314,7 +311,11 @@ async function insertArticle(
     ],
   );
   const id = row.rows[0]?.id;
-  return id ? { id, embedding: embeddingJson } : null;
+  if (!id) return null;
+  // A conflicting URL that already existed (xmax<>0) is an update, not a new
+  // article — flag it so the caller doesn't re-cluster/re-categorize it.
+  const isExisting = row.rows[0]?.is_new === false;
+  return { id, embedding: embeddingJson, isExisting };
 }
 
 // Update cluster metadata (lead article, size) when new articles are added
@@ -404,7 +405,11 @@ async function ingestFromFeed(feedUrl: string, sourceId: number, limit = 20) {
       pub,
       language,
     );
-    if (result) {
+    // Only treat genuinely new articles as inserts. Already-seen articles
+    // (duplicate URL/title) skip clustering + categorization — they were done
+    // when the article first arrived, and re-running them every cron is wasted
+    // work that also corrupts the `inserted` count feeding source health.
+    if (result && !result.isExisting) {
       inserted++;
       // Use semantic clustering instead of keyword-based clustering
       try {
@@ -439,7 +444,10 @@ async function ingestFromFeed(feedUrl: string, sourceId: number, limit = 20) {
 // ---------- Main (export) ----------
 export async function run(opts: { limit?: number; closePool?: boolean } = {}) {
   const start = Date.now();
-  await ensureSchema();
+  // schema.ts (`bun run schema`) is the single source of truth for DDL. Running
+  // the full ensureSchema on every cron showed up in prod query stats; gate it
+  // behind an opt-in flag so normal runs skip ~10 redundant DDL statements.
+  if (process.env.SCHEMA_ENSURE === "1") await ensureSchema();
 
   // Fetch sources from database instead of JSON file
   const defs = await fetchSourcesFromDB();

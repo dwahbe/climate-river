@@ -9,6 +9,10 @@ import {
   extractRealUrl,
   resolveGoogleNewsCandidate,
   maybeDecodeBase64Url,
+  buildGoogleNewsSiteQuery,
+  buildGoogleNewsSiteFeedUrl,
+  defaultWebSearchPricing,
+  modelSupportsWebSearchFilters,
 } from "../discover-web";
 
 describe("rootDomain", () => {
@@ -537,5 +541,121 @@ describe("extractRealUrl", () => {
     const googleUrl =
       "https://news.google.com/rss/articles/somepath?url=https%3A%2F%2Fexample.com%2Fprimary";
     assert.equal(extractRealUrl(googleUrl), "https://example.com/primary");
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/*  buildGoogleNewsSiteQuery / buildGoogleNewsSiteFeedUrl              */
+/* ------------------------------------------------------------------ */
+
+describe("buildGoogleNewsSiteQuery", () => {
+  it("builds a site: query with a 2-day recency window", () => {
+    assert.equal(
+      buildGoogleNewsSiteQuery("heatmap.news"),
+      "site:heatmap.news when:2d",
+    );
+  });
+
+  it("normalizes the domain (strips www, lowercases, trims)", () => {
+    assert.equal(
+      buildGoogleNewsSiteQuery("www.Canarymedia.com "),
+      "site:canarymedia.com when:2d",
+    );
+  });
+
+  it("handles compound TLDs", () => {
+    assert.equal(
+      buildGoogleNewsSiteQuery("downtoearth.org.in"),
+      "site:downtoearth.org.in when:2d",
+    );
+  });
+});
+
+describe("buildGoogleNewsSiteFeedUrl", () => {
+  it("builds a Google News RSS search URL with US English localization", () => {
+    assert.equal(
+      buildGoogleNewsSiteFeedUrl("heatmap.news"),
+      "https://news.google.com/rss/search?q=site%3Aheatmap.news%20when%3A2d&hl=en-US&gl=US&ceid=US:en",
+    );
+  });
+
+  it("URL-encodes the query so it round-trips through URL parsing", () => {
+    const url = new URL(buildGoogleNewsSiteFeedUrl("rmi.org"));
+    assert.equal(url.hostname, "news.google.com");
+    assert.equal(url.pathname, "/rss/search");
+    assert.equal(url.searchParams.get("q"), "site:rmi.org when:2d");
+    assert.equal(url.searchParams.get("hl"), "en-US");
+    assert.equal(url.searchParams.get("gl"), "US");
+    assert.equal(url.searchParams.get("ceid"), "US:en");
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/*  defaultWebSearchPricing                                            */
+/* ------------------------------------------------------------------ */
+
+describe("defaultWebSearchPricing", () => {
+  it("returns gpt-4.1-mini rates for the default web search model", () => {
+    assert.deepEqual(defaultWebSearchPricing("gpt-4.1-mini"), {
+      inputPerM: 0.4,
+      outputPerM: 1.6,
+    });
+  });
+
+  it("returns gpt-4o-mini rates", () => {
+    assert.deepEqual(defaultWebSearchPricing("gpt-4o-mini"), {
+      inputPerM: 0.15,
+      outputPerM: 0.6,
+    });
+  });
+
+  it("returns gpt-4o rates", () => {
+    assert.deepEqual(defaultWebSearchPricing("gpt-4o"), {
+      inputPerM: 2.5,
+      outputPerM: 10,
+    });
+  });
+
+  it("matches dated model variants by longest prefix", () => {
+    assert.deepEqual(defaultWebSearchPricing("gpt-4o-mini-2024-07-18"), {
+      inputPerM: 0.15,
+      outputPerM: 0.6,
+    });
+    assert.deepEqual(defaultWebSearchPricing("gpt-4o-2024-11-20"), {
+      inputPerM: 2.5,
+      outputPerM: 10,
+    });
+  });
+
+  it("falls back to conservative gpt-4o rates for unknown models", () => {
+    assert.deepEqual(defaultWebSearchPricing("gpt-99-experimental"), {
+      inputPerM: 2.5,
+      outputPerM: 10,
+    });
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/*  modelSupportsWebSearchFilters                                      */
+/* ------------------------------------------------------------------ */
+
+describe("modelSupportsWebSearchFilters", () => {
+  it("rejects mini models (the production failure mode)", () => {
+    assert.equal(modelSupportsWebSearchFilters("gpt-4.1-mini"), false);
+    assert.equal(modelSupportsWebSearchFilters("gpt-4o-mini"), false);
+    assert.equal(
+      modelSupportsWebSearchFilters("gpt-4o-mini-2024-07-18"),
+      false,
+    );
+  });
+
+  it("rejects nano models", () => {
+    assert.equal(modelSupportsWebSearchFilters("gpt-4.1-nano"), false);
+  });
+
+  it("allows full-size models", () => {
+    assert.equal(modelSupportsWebSearchFilters("gpt-4o"), true);
+    assert.equal(modelSupportsWebSearchFilters("gpt-4.1"), true);
+    assert.equal(modelSupportsWebSearchFilters("gpt-4o-2024-11-20"), true);
   });
 });

@@ -25,16 +25,25 @@ export async function GET(req: Request) {
   try {
     console.log("✏️  Rewrite cron job starting...");
 
+    // Leave ~15s headroom under maxDuration for in-flight articles + logging.
     const rewriteResult = await safeRun(import("@/scripts/rewrite"), {
       limit,
+      deadlineMs: 45_000,
       closePool: false,
     });
     console.log("✅ Rewrite completed:", rewriteResult);
 
+    const partial =
+      typeof rewriteResult === "object" &&
+      rewriteResult !== null &&
+      (("skipped" in rewriteResult && Number(rewriteResult.skipped ?? 0) > 0) ||
+        ("breakerTripped" in rewriteResult &&
+          rewriteResult.breakerTripped === true));
+
     await logPipelineRun({
       job: "rewrite",
       durationMs: Date.now() - t0,
-      status: "success",
+      status: partial ? "partial" : "success",
       stats: rewriteResult,
     });
 

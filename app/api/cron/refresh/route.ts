@@ -17,6 +17,13 @@ export async function GET(req: Request) {
   const t0 = Date.now();
   const url = new URL(req.url);
 
+  // Time budgeting: maxDuration is 120s. Leave a 15s buffer so logging + the
+  // final rescore complete before Vercel hard-kills the function (which would
+  // otherwise skip logPipelineRun and leave the run invisible to monitoring).
+  const timeoutMs = 105_000;
+  const hasTime = () => Date.now() - t0 < timeoutMs;
+  const deadlineAt = t0 + timeoutMs;
+
   // Light processing limits
   const limit = Math.max(
     1,
@@ -46,6 +53,7 @@ export async function GET(req: Request) {
     console.log("📖 Prefetching article content...");
     const prefetchResult = await safeRun(import("@/scripts/prefetch-content"), {
       limit: 20,
+      deadlineMs: 40_000,
       closePool: false,
     });
     console.log("✅ Prefetch completed:", prefetchResult);
@@ -60,14 +68,7 @@ export async function GET(req: Request) {
     });
     console.log("✅ Re-categorize completed:", recategorizeResult);
 
-    // 4) Quick rescore after new articles
-    console.log("🔢 Running rescore...");
-    const rescoreResult = await safeRun(import("@/scripts/rescore"), {
-      closePool: false,
-    });
-    console.log("✅ Rescore completed:", rescoreResult);
-
-    // 5) Light web discovery - only during business hours to control costs
+    // 4) Light web discovery - only during business hours to control costs
     let webDiscoverResult: unknown = { skipped: "off_hours" };
     const currentHour = new Date().getUTCHours();
     const isBusinessHours = currentHour >= 12 && currentHour <= 22; // 12-22 UTC = 8am-6pm ET
@@ -75,7 +76,7 @@ export async function GET(req: Request) {
     // 6) Prefetch for web-discovered articles
     let prefetchDiscoveredResult: unknown = { skipped: "not_run" };
 
-    if (isBusinessHours) {
+    if (isBusinessHours && hasTime()) {
       try {
         console.log("🔎 Running light web discovery...");
         webDiscoverResult = await safeRun(import("@/scripts/discover-web"), {
@@ -84,21 +85,26 @@ export async function GET(req: Request) {
           outletLimitPerBatch: 5,
           outletBatchSize: 3,
           outletFreshHours: 48,
+          // Leave ≥30s for discovered-prefetch + rescore + inline rewrite.
+          deadlineAt: deadlineAt - 30_000,
           closePool: false,
         });
         console.log("✅ Light web discovery completed");
 
         // Prefetch content for discovered articles
-        console.log("📖 Prefetching discovered article content...");
-        prefetchDiscoveredResult = await safeRun(
-          import("@/scripts/prefetch-content"),
-          {
-            limit: 15,
-            hoursAgo: 4,
-            closePool: false,
-          },
-        );
-        console.log("✅ Discovered prefetch completed");
+        if (hasTime()) {
+          console.log("📖 Prefetching discovered article content...");
+          prefetchDiscoveredResult = await safeRun(
+            import("@/scripts/prefetch-content"),
+            {
+              limit: 15,
+              hoursAgo: 4,
+              deadlineMs: 20_000,
+              closePool: false,
+            },
+          );
+          console.log("✅ Discovered prefetch completed");
+        }
       } catch (webError: unknown) {
         console.error("❌ Web discovery failed:", webError);
         const message =
@@ -115,6 +121,30 @@ export async function GET(req: Request) {
       );
     }
 
+    // 7) Rescore LAST so newly discovered/merged clusters get a real score this
+    // run instead of sitting at their interim score-0 metadata row.
+    console.log("🔢 Running rescore...");
+    const rescoreResult = await safeRun(import("@/scripts/rescore"), {
+      closePool: false,
+    });
+    console.log("✅ Rescore completed:", rescoreResult);
+
+    // 8) Rewrite-at-ingest: give fresh leads a rewritten headline within this
+    // run when budget allows; the rewrite cron sweeps whatever's left.
+    let inlineRewriteResult: unknown = { skipped: "timeout" };
+    {
+      const remainingMs = deadlineAt - Date.now();
+      if (remainingMs > 15_000) {
+        console.log("✏️  Inline rewrite of fresh leads...");
+        inlineRewriteResult = await safeRun(import("@/scripts/rewrite"), {
+          limit: 15,
+          deadlineMs: remainingMs - 8_000,
+          closePool: false,
+        });
+        console.log("✅ Inline rewrite completed:", inlineRewriteResult);
+      }
+    }
+
     console.log("🔄 Refresh cron job completed!");
 
     const result = {
@@ -122,9 +152,10 @@ export async function GET(req: Request) {
       categorize: categorizeResult,
       prefetch: prefetchResult,
       recategorize: recategorizeResult,
-      rescore: rescoreResult,
       webDiscover: webDiscoverResult,
       prefetchDiscovered: prefetchDiscoveredResult,
+      rescore: rescoreResult,
+      inlineRewrite: inlineRewriteResult,
     };
 
     await logPipelineRun({

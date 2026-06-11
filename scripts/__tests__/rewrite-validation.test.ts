@@ -293,4 +293,54 @@ describe("validateHeadline — entity hallucination guard", () => {
       "Macron pledges France will accelerate nuclear-power buildout to cut emissions, he says";
     assert.equal(validateHeadline(source, draft, ctx(false, source)).ok, true);
   });
+
+  // Multi-word entity guard (only active when hasContent=true).
+  it("rejects a multi-word org name wholly absent from source content → 'hallucinated_entity'", () => {
+    const source =
+      "A battery developer secured 200 million in funding to expand solid-state cell output at two plants this year";
+    const draft =
+      "Northvolt Systems secures 200 million to expand solid-state battery cell output at two new plants this year";
+    assert.equal(
+      reasonFor("Battery maker raises funds", draft, ctx(true, source)),
+      "hallucinated_entity",
+    );
+  });
+
+  it("accepts a multi-word entity that shares a token with the source", () => {
+    const source =
+      "The Mountain Valley Pipeline was blocked by a federal appeals court over environmental review failures and water permits";
+    const draft =
+      "Federal appeals court blocks Mountain Valley Pipeline over environmental review failures, water permit issues nationwide";
+    assert.equal(validateHeadline("x", draft, ctx(true, source)).ok, true);
+  });
+
+  it("does not run the entity guard without content (title+dek only)", () => {
+    const source = "Court blocks pipeline over permits";
+    const draft =
+      "Federal Energy Regulatory Commission blocks Atlantic Coast Pipeline over water permit issues, citing review gaps";
+    // hasContent=false → entity guard skipped; should not be hallucinated_entity
+    assert.notEqual(
+      reasonFor("Court blocks pipeline", draft, ctx(false, source)),
+      "hallucinated_entity",
+    );
+  });
+});
+
+describe("validateHeadline — meta-refusal + prioritization exception", () => {
+  it("rejects a refusal sentence emitted as the headline → 'meta_refusal'", () => {
+    const draft =
+      "No climate or energy entity action found in source; headline not applicable for rewriting";
+    assert.equal(
+      reasonFor("Some climate story headline", draft, ctx(false)),
+      "meta_refusal",
+    );
+  });
+
+  it("accepts a 'legal challenge' headline (prioritization exception)", () => {
+    const source =
+      "A coalition of states filed a legal challenge to the EPA power plant rule in federal court, arguing the agency exceeded its authority over emissions limits under the law";
+    const draft =
+      "States file legal challenge to EPA power plant rule, arguing agency exceeded its authority over emissions limits";
+    assert.equal(validateHeadline("x", draft, ctx(true, source)).ok, true);
+  });
 });

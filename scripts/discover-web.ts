@@ -18,6 +18,7 @@ import {
   type PromptInputs,
 } from "@/config/webSearchProfiles";
 import { generateEmbedding, assignArticleToCluster } from "@/lib/clustering";
+import { resolveGoogleNewsUrl } from "@/lib/googleNews";
 import { safeFetch, SsrfError } from "@/lib/urlSafety";
 import {
   classifyArticleLanguageForIngest,
@@ -55,7 +56,8 @@ type DiscoveryProvider =
   | "tavily"
   | "openai_web_search"
   | "openai_google_suggestions"
-  | "google_news_rss";
+  | "google_news_rss"
+  | "google_news_site";
 
 type DiscoverySegment = "broad" | "outlet" | "google_news";
 
@@ -72,6 +74,7 @@ type DiscoveryOutcomeReason =
   | "invalid_date"
   | "fabricated_url"
   | "aggregator_url"
+  | "unresolved_aggregator"
   | "out_of_domain"
   | "unreachable"
   | "insert_failed"
@@ -130,7 +133,11 @@ const GOOGLE_SUGGESTION_MAX_OUTPUT_TOKENS = parseEnvInt(
   600,
 );
 
-const WEB_SEARCH_ENABLED = process.env.WEB_SEARCH_ENABLED !== "0";
+// Paid OpenAI web-search fallback. OFF by default: the free Google News `site:`
+// provider + GN RSS carry outlet/broad discovery at $0. Set WEB_SEARCH_ENABLED=1
+// to re-enable the paid serendipity channel (each forced tool call ~$0.01,
+// capped by WEB_SEARCH_MAX_CALLS_PER_RUN).
+const WEB_SEARCH_ENABLED = process.env.WEB_SEARCH_ENABLED === "1";
 const WEB_SEARCH_MODEL = process.env.WEB_SEARCH_MODEL || "gpt-4.1-mini";
 const WEB_SEARCH_MAX_OUTPUT_TOKENS = parseEnvInt(
   "WEB_SEARCH_MAX_OUTPUT_TOKENS",
@@ -155,6 +162,30 @@ const WEB_SEARCH_MAX_CALLS_PER_RUN = parseEnvInt(
   25,
 );
 const WEB_SEARCH_DEBUG = process.env.WEB_SEARCH_DEBUG === "1";
+// Tavily segments are opt-in: the plan has been over its limit since May 2026,
+// and free Google News site: queries now carry outlet coverage.
+const TAVILY_OUTLETS_ENABLED =
+  TAVILY_ENABLED && process.env.WEB_SEARCH_TAVILY_OUTLETS === "1";
+const TAVILY_BROAD_ENABLED =
+  TAVILY_ENABLED && process.env.WEB_SEARCH_TAVILY_BROAD === "1";
+const WEB_SEARCH_FORCE = process.env.WEB_SEARCH_FORCE === "1";
+// Cap on per-run Google News redirect resolutions (~100-150ms network call each)
+const WEB_SEARCH_GN_RESOLVE_CAP = parseEnvInt("WEB_SEARCH_GN_RESOLVE_CAP", 40);
+const GN_SITE_RESULTS_PER_DOMAIN = 5;
+const SEGMENT_SKIP_RECENT_HOURS = 4;
+
+// Wall-clock budget for the current run (set by run() from opts.deadlineAt).
+// Segments check hasRunTime() before starting each outlet/batch/query so a
+// time-budgeted cron degrades to partial coverage instead of being hard-killed
+// at maxDuration (which would also skip the rescore + pipeline_runs logging
+// that run after discovery).
+let runDeadlineAt = Infinity;
+function setRunDeadline(deadlineAt: number): void {
+  runDeadlineAt = deadlineAt;
+}
+function hasRunTime(marginMs = 5_000): boolean {
+  return Date.now() < runDeadlineAt - marginMs;
+}
 const DISCOVERY_PAUSE_MS = 1000; // Reduced from 2000ms for faster processing
 const DEFAULT_OUTLET_FRESHNESS_HOURS = 72; // Reduced from 96 for fresher content
 const HOST_BLOCKLIST = new Set([
@@ -296,13 +327,42 @@ const GOOGLE_SUGGESTION_OUTLET_EXAMPLES = (
   .map((outlet) => outlet.name)
   .join(", ");
 
+const OPENAI_MODEL_PRICING: Record<
+  string,
+  { inputPerM: number; outputPerM: number }
+> = {
+  "gpt-4.1-mini": { inputPerM: 0.4, outputPerM: 1.6 },
+  "gpt-4o-mini": { inputPerM: 0.15, outputPerM: 0.6 },
+  "gpt-4o": { inputPerM: 2.5, outputPerM: 10 },
+};
+
+/**
+ * Token pricing for cost telemetry, keyed off the actual model (longest-prefix
+ * match so dated variants like gpt-4o-mini-2024-07-18 resolve). Unknown models
+ * fall back to conservative gpt-4o rates.
+ */
+export function defaultWebSearchPricing(model: string): {
+  inputPerM: number;
+  outputPerM: number;
+} {
+  const match = Object.keys(OPENAI_MODEL_PRICING)
+    .filter((key) => model === key || model.startsWith(`${key}-`))
+    .sort((a, b) => b.length - a.length)[0];
+  if (match) return OPENAI_MODEL_PRICING[match];
+  console.warn(
+    `⚠️  Unknown web search model "${model}" for cost telemetry; assuming gpt-4o pricing`,
+  );
+  return OPENAI_MODEL_PRICING["gpt-4o"];
+}
+
+const WEB_SEARCH_MODEL_PRICING = defaultWebSearchPricing(WEB_SEARCH_MODEL);
 const OPENAI_WEB_SEARCH_INPUT_PER_M = parseEnvFloat(
   "OPENAI_WEB_SEARCH_INPUT_PER_M",
-  2.5,
+  WEB_SEARCH_MODEL_PRICING.inputPerM,
 );
 const OPENAI_WEB_SEARCH_OUTPUT_PER_M = parseEnvFloat(
   "OPENAI_WEB_SEARCH_OUTPUT_PER_M",
-  10,
+  WEB_SEARCH_MODEL_PRICING.outputPerM,
 );
 const OPENAI_WEB_SEARCH_TOOL_CALL_COST = parseEnvFloat(
   "OPENAI_WEB_SEARCH_TOOL_CALL_COST_USD",
@@ -468,6 +528,36 @@ async function ensureDiscoveryTelemetryTables(): Promise<boolean> {
   } catch (error) {
     telemetry.telemetryUnavailable = true;
     console.error("Failed to check discovery telemetry tables:", error);
+    return false;
+  }
+}
+
+/**
+ * Read-only guard against full+refresh double-runs: true when the segment had
+ * a successful search logged within the last SEGMENT_SKIP_RECENT_HOURS.
+ */
+async function hasRecentSegmentSuccess(
+  provider: DiscoveryProvider,
+  segment: DiscoverySegment,
+): Promise<boolean> {
+  if (!(await ensureDiscoveryTelemetryTables())) return false;
+
+  try {
+    const { rows } = await query<{ id: number }>(
+      `
+      SELECT id
+      FROM discovery_searches
+      WHERE provider = $1
+        AND segment = $2
+        AND status = 'success'
+        AND created_at > NOW() - make_interval(hours => $3)
+      LIMIT 1
+    `,
+      [provider, segment, SEGMENT_SKIP_RECENT_HOURS],
+    );
+    return rows.length > 0;
+  } catch (error) {
+    console.error("Failed to check recent discovery segment runs:", error);
     return false;
   }
 }
@@ -1199,6 +1289,16 @@ export function parseWebSearchJson(
   }
 }
 
+/**
+ * OpenAI rejects the web-search `filters` parameter for mini/nano model
+ * variants ("Parameter 'filters' not supported with model 'gpt-4.1-mini'" —
+ * 1,053/1,053 production calls failed this way). Domain enforcement still
+ * happens client-side via isAllowedDomain.
+ */
+export function modelSupportsWebSearchFilters(model: string): boolean {
+  return !/-(mini|nano)(-|$)/.test(model);
+}
+
 async function callOpenAIWebSearch(
   query: string,
   overrides?: WebSearchOverrides,
@@ -1264,7 +1364,9 @@ Rules:
       tools: {
         webSearch: openai.tools.webSearch({
           searchContextSize: WEB_SEARCH_CONTEXT_SIZE,
-          ...(allowedDomains && allowedDomains.length > 0
+          ...(allowedDomains &&
+          allowedDomains.length > 0 &&
+          modelSupportsWebSearchFilters(WEB_SEARCH_MODEL)
             ? { filters: { allowedDomains } }
             : {}),
         }),
@@ -1804,6 +1906,111 @@ async function searchGoogleNewsRSS(query: string): Promise<WebSearchResult[]> {
       { status: "error", error },
     );
     return [];
+  }
+}
+
+export function buildGoogleNewsSiteQuery(domain: string): string {
+  return `site:${normalizeDomain(domain)} when:2d`;
+}
+
+export function buildGoogleNewsSiteFeedUrl(domain: string): string {
+  return `https://news.google.com/rss/search?q=${encodeURIComponent(buildGoogleNewsSiteQuery(domain))}&hl=en-US&gl=US&ceid=US:en`;
+}
+
+/**
+ * Free outlet discovery via Google News site: RSS queries (replaces paid
+ * Tavily outlet searches). Links resolve to publisher URLs through
+ * resolveGoogleNewsUrl, capped per run; candidates left on news.google.com
+ * are returned separately so callers reject them instead of inserting
+ * aggregator URLs.
+ */
+async function searchGoogleNewsSiteOutlet(
+  domain: string,
+  resolveState: { used: number },
+): Promise<{ results: WebSearchResult[]; unresolved: WebSearchResult[] }> {
+  const searchQuery = buildGoogleNewsSiteQuery(domain);
+  const startedAt = Date.now();
+
+  const Parser = (await import("rss-parser")).default;
+  const parser = new Parser({
+    headers: {
+      "User-Agent": "ClimateRiverBot/0.1 (+https://climateriver.org)",
+    },
+    requestOptions: { timeout: 10000 },
+    customFields: {
+      item: [["source", "source", { keepArray: true }]],
+    },
+  });
+
+  try {
+    console.log(`📰 Google News site search: ${searchQuery}`);
+    const feed = await parser.parseURL(buildGoogleNewsSiteFeedUrl(domain));
+    const items = (feed.items || []).slice(0, GN_SITE_RESULTS_PER_DOMAIN);
+
+    const collected: WebSearchResult[] = [];
+    for (const item of items) {
+      if (!item.title || !item.link) continue;
+
+      let realUrl = extractRealUrl(item.link);
+      if (
+        hostFromUrl(realUrl) === "news.google.com" &&
+        resolveState.used < WEB_SEARCH_GN_RESOLVE_CAP
+      ) {
+        resolveState.used++;
+        const resolution = await resolveGoogleNewsUrl(item.link);
+        if (resolution.url) {
+          realUrl = canonical(resolution.url);
+        }
+      }
+
+      const publisher = extractPublisherFromRssItem(item);
+      collected.push({
+        title: cleanGoogleNewsTitle(item.title),
+        url: realUrl,
+        snippet: item.contentSnippet || item.content || "",
+        publishedDate: item.isoDate || item.pubDate,
+        source: publisher.name || extractSourceFromUrl(realUrl),
+        publisherHomepage: publisher.homepage,
+      });
+    }
+
+    const meta: SearchTelemetryMeta = {
+      provider: "google_news_site",
+      segment: "outlet",
+      searchQuery,
+      requestedDomains: [domain],
+    };
+    const searchId = await logSearchOutcome(meta, startedAt, {
+      status: "success",
+      resultCount: collected.length,
+    });
+    const annotated = await attachDiscoveryCandidates(collected, {
+      provider: "google_news_site",
+      searchId,
+      searchQuery,
+    });
+
+    return {
+      results: annotated.filter(
+        (result) => hostFromUrl(result.url) !== "news.google.com",
+      ),
+      unresolved: annotated.filter(
+        (result) => hostFromUrl(result.url) === "news.google.com",
+      ),
+    };
+  } catch (error) {
+    console.error(`Google News site search error for ${domain}:`, error);
+    await logSearchOutcome(
+      {
+        provider: "google_news_site",
+        segment: "outlet",
+        searchQuery,
+        requestedDomains: [domain],
+      },
+      startedAt,
+      { status: "error", error },
+    );
+    return { results: [], unresolved: [] };
   }
 }
 
@@ -2665,12 +2872,14 @@ async function runOutletDiscoverySegment({
   batchSize,
   articleCap,
   freshHours,
+  coveredDomains,
 }: {
   fallbackSourceId: number;
   limitPerBatch: number;
   batchSize: number;
   articleCap: number;
   freshHours: number;
+  coveredDomains?: Set<string>;
 }): Promise<DiscoverySegmentStats> {
   if (DISCOVERY_OUTLETS.length === 0 || articleCap <= 0) {
     return {
@@ -2681,6 +2890,12 @@ async function runOutletDiscoverySegment({
       browseToolCalls: 0,
       duration: 0,
     };
+  }
+
+  if (!TAVILY_OUTLETS_ENABLED) {
+    console.log(
+      "Tavily outlet tier disabled (set WEB_SEARCH_TAVILY_OUTLETS=1 and TAVILY_API_KEY to enable)",
+    );
   }
 
   const segmentStart = Date.now();
@@ -2698,6 +2913,10 @@ async function runOutletDiscoverySegment({
     if (inserted >= articleCap) {
       break;
     }
+    if (!hasRunTime()) {
+      console.log("⏱️  Deadline reached — skipping remaining outlet batches");
+      break;
+    }
 
     const outletNames = batch.map((outlet) => outlet.promptHint || outlet.name);
     const domains = batch.map((outlet) => outlet.domain);
@@ -2709,10 +2928,10 @@ async function runOutletDiscoverySegment({
 
     console.log(`Searching (site-specific batch): ${outletNames.join(", ")}`);
 
-    // TIER 1: Try Tavily first (20x cheaper than OpenAI)
+    // TIER 1: Try Tavily first (opt-in; cheaper than OpenAI when enabled)
     let batchResults: WebSearchResult[] = [];
 
-    if (TAVILY_ENABLED) {
+    if (TAVILY_OUTLETS_ENABLED) {
       console.log(`  → Tier 1: Tavily search for ${domains.length} domains`);
       const { results: tavilyResults, totalCost } = await searchViaTavilyBatch(
         domains,
@@ -2723,8 +2942,14 @@ async function runOutletDiscoverySegment({
       queriesRun += domains.length;
     }
 
-    // Check which domains got results from Tavily
+    // Check which domains already have coverage (Google News site: tier) or
+    // got results from Tavily, so paid OpenAI fallbacks only run for gaps.
     const domainHitCounts = new Map<string, number>();
+    for (const entry of normalizedDomainEntries) {
+      if (coveredDomains?.has(entry.normalized)) {
+        domainHitCounts.set(entry.normalized, 1);
+      }
+    }
     updateDomainHitCounts(
       domainHitCounts,
       batchResults,
@@ -2900,6 +3125,144 @@ async function runOutletDiscoverySegment({
   };
 }
 
+// Free outlet discovery: one Google News site: RSS query per curated domain.
+async function runGoogleNewsSiteOutletSegment({
+  fallbackSourceId,
+  articleCap,
+  freshHours,
+}: {
+  fallbackSourceId: number;
+  articleCap: number;
+  freshHours: number;
+}): Promise<DiscoverySegmentStats & { coveredDomains: Set<string> }> {
+  const emptyStats = {
+    inserted: 0,
+    scanned: 0,
+    queriesRun: 0,
+    browseCost: 0,
+    browseToolCalls: 0,
+    duration: 0,
+    coveredDomains: new Set<string>(),
+  };
+
+  if (DISCOVERY_OUTLETS.length === 0 || articleCap <= 0) {
+    return emptyStats;
+  }
+
+  if (
+    !WEB_SEARCH_FORCE &&
+    (await hasRecentSegmentSuccess("google_news_site", "outlet"))
+  ) {
+    console.log(
+      `Skipping Google News site: discovery — successful run within the last ${SEGMENT_SKIP_RECENT_HOURS}h (set WEB_SEARCH_FORCE=1 to override)`,
+    );
+    return emptyStats;
+  }
+
+  const segmentStart = Date.now();
+  const freshnessCutoffMs =
+    freshHours > 0 ? Date.now() - freshHours * 60 * 60 * 1000 : null;
+  const resolveState = { used: 0 };
+  const coveredDomains = new Set<string>();
+
+  console.log(
+    `\n📰 Google News site: discovery (${DISCOVERY_OUTLETS.length} domains, resolve cap ${WEB_SEARCH_GN_RESOLVE_CAP})`,
+  );
+
+  let collected: WebSearchResult[] = [];
+  let queriesRun = 0;
+
+  for (const outlet of DISCOVERY_OUTLETS) {
+    if (!hasRunTime()) {
+      console.log(
+        `⏱️  Deadline reached — skipping remaining GN site: outlets (${queriesRun}/${DISCOVERY_OUTLETS.length} queried)`,
+      );
+      break;
+    }
+    const { results, unresolved } = await searchGoogleNewsSiteOutlet(
+      outlet.domain,
+      resolveState,
+    );
+    queriesRun++;
+
+    if (unresolved.length > 0) {
+      console.log(
+        `  ${outlet.domain}: rejected ${unresolved.length} unresolved aggregator links`,
+      );
+      await markUnprocessedCandidates(unresolved, "unresolved_aggregator");
+    }
+
+    const inDomain = results.filter((result) =>
+      isAllowedDomain(result.url, [outlet.domain]),
+    );
+    const outOfDomain = results.filter(
+      (result) => !isAllowedDomain(result.url, [outlet.domain]),
+    );
+    if (outOfDomain.length > 0) {
+      await markUnprocessedCandidates(outOfDomain, "out_of_domain");
+    }
+
+    if (inDomain.length > 0) {
+      coveredDomains.add(normalizeDomain(outlet.domain));
+    }
+    collected.push(...inDomain);
+
+    await delay(DISCOVERY_PAUSE_MS);
+  }
+
+  collected = await dedupeWebResultsForProcessing(collected);
+  const scanned = collected.length;
+
+  let inserted = 0;
+  const outcomeRecords: CandidateOutcomeRecord[] = [];
+  for (let i = 0; i < collected.length; i++) {
+    const result = collected[i];
+    if (inserted >= articleCap) {
+      await markUnprocessedCandidates(
+        collected.slice(i),
+        "article_cap_reached",
+      );
+      break;
+    }
+    const freshnessReason = freshnessCutoffMs
+      ? freshnessOutcomeReason(result, freshnessCutoffMs)
+      : null;
+    if (freshnessReason) {
+      console.log(
+        `- Skipped stale (${result.publishedDate ?? "unknown"}): ${result.title.substring(0, 80)}`,
+      );
+      outcomeRecords.push({
+        result,
+        outcome: {
+          accepted: false,
+          reason: freshnessReason,
+        },
+      });
+      continue;
+    }
+    const outcome = await tryInsertDiscoveredArticle(result, fallbackSourceId);
+    outcomeRecords.push({ result, outcome });
+    if (outcome.accepted) {
+      inserted++;
+    }
+  }
+  await recordDiscoveryCandidateOutcomes(outcomeRecords);
+
+  console.log(
+    `  Google News site: discovery complete: ${inserted} articles from ${scanned} results (${resolveState.used} URL resolutions)`,
+  );
+
+  return {
+    inserted,
+    scanned,
+    queriesRun,
+    browseCost: 0,
+    browseToolCalls: 0,
+    duration: Math.round((Date.now() - segmentStart) / 1000),
+    coveredDomains,
+  };
+}
+
 // Broad climate discovery - searches the web generally for high-quality climate content
 async function runBroadClimateDiscovery({
   fallbackSourceId,
@@ -2910,15 +3273,31 @@ async function runBroadClimateDiscovery({
   articleCap: number;
   freshHours: number;
 }): Promise<DiscoverySegmentStats> {
-  if (!TAVILY_ENABLED || articleCap <= 0) {
-    return {
-      inserted: 0,
-      scanned: 0,
-      queriesRun: 0,
-      browseCost: 0,
-      browseToolCalls: 0,
-      duration: 0,
-    };
+  const emptyStats: DiscoverySegmentStats = {
+    inserted: 0,
+    scanned: 0,
+    queriesRun: 0,
+    browseCost: 0,
+    browseToolCalls: 0,
+    duration: 0,
+  };
+
+  if (!TAVILY_BROAD_ENABLED) {
+    console.log(
+      "Broad Tavily discovery disabled (set WEB_SEARCH_TAVILY_BROAD=1 and TAVILY_API_KEY to enable)",
+    );
+    return emptyStats;
+  }
+
+  if (articleCap <= 0) {
+    return emptyStats;
+  }
+
+  if (!WEB_SEARCH_FORCE && (await hasRecentSegmentSuccess("tavily", "broad"))) {
+    console.log(
+      `Skipping broad Tavily discovery — successful run within the last ${SEGMENT_SKIP_RECENT_HOURS}h (set WEB_SEARCH_FORCE=1 to override)`,
+    );
+    return emptyStats;
   }
 
   const segmentStart = Date.now();
@@ -2961,12 +3340,16 @@ async function runBroadClimateDiscovery({
 
   for (const searchQuery of broadQueries) {
     if (inserted >= articleCap) break;
+    if (!hasRunTime()) {
+      console.log("⏱️  Deadline reached — skipping remaining broad queries");
+      break;
+    }
 
     const searchStartedAt = Date.now();
     try {
       console.log(`  → Searching: "${searchQuery}"`);
 
-      // tavilyClient guaranteed non-null (TAVILY_ENABLED check at function start)
+      // tavilyClient guaranteed non-null (TAVILY_BROAD_ENABLED implies TAVILY_ENABLED)
       const response = await tavilyClient!.search(searchQuery, {
         searchDepth: TAVILY_SEARCH_DEPTH,
         topic: "news",
@@ -3093,6 +3476,10 @@ export async function run(
     outletLimitPerBatch?: number;
     outletBatchSize?: number;
     outletFreshHours?: number;
+    // Absolute wall-clock deadline (Date.now() ms). Segments stop starting new
+    // outlets/batches/queries once it passes, so a time-budgeted cron can call
+    // this without risking a hard kill at maxDuration.
+    deadlineAt?: number;
   } = {},
 ) {
   return discoveryTelemetryScope.run(new DiscoveryTelemetry(), async () => {
@@ -3103,10 +3490,11 @@ export async function run(
     const outletBatchSize = Math.max(2, opts.outletBatchSize ?? 4);
     const outletFreshHours =
       opts.outletFreshHours ?? DEFAULT_OUTLET_FRESHNESS_HOURS;
+    setRunDeadline(opts.deadlineAt ?? Infinity);
 
     console.log("Starting web discovery...");
     console.log(
-      `Search tiers: ${TAVILY_ENABLED ? "0) Broad → 1) Tavily → " : ""}2) OpenAI → 3) Google News`,
+      `Search tiers: ${TAVILY_BROAD_ENABLED ? "0) Broad (Tavily) → " : ""}1) Google News site:${TAVILY_OUTLETS_ENABLED ? " → 1b) Tavily outlets" : ""} → 2) OpenAI → 3) Google News`,
     );
 
     if (RSS_SKIPPED_OUTLETS.length > 0) {
@@ -3130,13 +3518,21 @@ export async function run(
       freshHours: outletFreshHours,
     });
 
-    // Tier 1-3: Outlet-specific discovery
+    // Tier 1: Free Google News site: queries across curated outlet domains
+    const gnSiteStats = await runGoogleNewsSiteOutletSegment({
+      fallbackSourceId,
+      articleCap: outletArticleCap,
+      freshHours: outletFreshHours,
+    });
+
+    // Tier 1b-3: Outlet-specific discovery for domains still missing coverage
     const outletStats = await runOutletDiscoverySegment({
       fallbackSourceId,
       limitPerBatch: outletLimitPerBatch,
       batchSize: outletBatchSize,
-      articleCap: outletArticleCap,
+      articleCap: Math.max(0, outletArticleCap - gnSiteStats.inserted),
       freshHours: outletFreshHours,
+      coveredDomains: gnSiteStats.coveredDomains,
     });
 
     if (outletStats.queriesRun > 0) {
@@ -3149,11 +3545,14 @@ export async function run(
       );
     }
 
-    const totalInserted = broadStats.inserted + outletStats.inserted;
-    const totalScanned = broadStats.scanned + outletStats.scanned;
+    const totalInserted =
+      broadStats.inserted + gnSiteStats.inserted + outletStats.inserted;
+    const totalScanned =
+      broadStats.scanned + gnSiteStats.scanned + outletStats.scanned;
     const totalBrowseCost = broadStats.browseCost + outletStats.browseCost;
     const totalBrowseToolCalls = outletStats.browseToolCalls;
-    const totalQueries = broadStats.queriesRun + outletStats.queriesRun;
+    const totalQueries =
+      broadStats.queriesRun + gnSiteStats.queriesRun + outletStats.queriesRun;
 
     const duration = Math.round((Date.now() - startTime) / 1000);
     console.log(
@@ -3163,7 +3562,7 @@ export async function run(
     if (totalBrowseCost > 0) {
       console.log(
         `Estimated search spend: ~$${totalBrowseCost.toFixed(4)} ` +
-          `(${TAVILY_ENABLED ? "Tavily + " : ""}OpenAI${totalBrowseToolCalls > 0 ? `, ${totalBrowseToolCalls} tool calls` : ""})`,
+          `(${TAVILY_OUTLETS_ENABLED || TAVILY_BROAD_ENABLED ? "Tavily + " : ""}OpenAI${totalBrowseToolCalls > 0 ? `, ${totalBrowseToolCalls} tool calls` : ""})`,
       );
     }
 

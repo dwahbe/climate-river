@@ -15,12 +15,16 @@ import {
   cleanGoogleNewsTitle,
 } from "@/lib/utils";
 import { resolveTier } from "@/config/sourceTiers";
+import { resolveGoogleNewsUrl } from "@/lib/googleNews";
+import { findRecentDuplicate } from "@/lib/articleDedupe";
 
 type RssItem = {
   title?: string;
   link?: string;
   isoDate?: string;
   pubDate?: string;
+  // Google News RSS <source url="https://publisher.com">Publisher</source>
+  source?: string | { _?: string; $?: { url?: string } };
 };
 
 // ------- config -------
@@ -57,18 +61,24 @@ function slugify(input: string) {
     .slice(0, 80);
 }
 
-/** Google News sometimes links to news.google.com/... with a ?url= param. Extract it if present. */
-function resolveGoogleNewsLink(link: string) {
-  try {
-    const u = new URL(link);
-    if (u.hostname.endsWith("news.google.com")) {
-      const real = u.searchParams.get("url");
-      if (real) return real;
-    }
-  } catch {
-    // Ignore malformed URLs and fall back to the original link
+// Per-run cap on GN token resolutions (each costs 1-2 HTTP calls to Google).
+// Items over the cap are inserted unresolved; they stay clusterable but
+// lead-ineligible, and the backfill script can resolve them later.
+const RESOLVE_CAP = Math.max(0, Number(process.env.DISCOVER_RESOLVE_CAP || 80));
+
+function extractPublisher(it: RssItem): {
+  name: string | null;
+  homepage: string | null;
+} {
+  const src = it.source;
+  if (!src) return { name: null, homepage: null };
+  if (typeof src === "string") {
+    return { name: src.trim() || null, homepage: null };
   }
-  return link;
+  return {
+    name: (src._ ?? "").trim() || null,
+    homepage: src.$?.url?.trim() || null,
+  };
 }
 
 // ------- minimal schema guards (safe if already run elsewhere) -------
@@ -143,13 +153,10 @@ async function insertArticle(
   url: string,
   publishedAt?: string,
   language?: LanguageDetection,
+  publisher?: { name: string | null; homepage: string | null },
 ) {
   // Skip duplicates before generating embedding to avoid wasted OpenAI API calls
-  const existing = await query<{ id: number }>(
-    `SELECT id FROM articles WHERE canonical_url = $1`,
-    [url],
-  );
-  if (existing.rows.length > 0) return undefined;
+  if ((await findRecentDuplicate({ title, url })) !== null) return undefined;
 
   // Validate the date before spending an OpenAI embedding call. Mirrors
   // ingest.ts / discover-web.ts; discover.ts previously inserted unvalidated
@@ -177,9 +184,11 @@ async function insertArticle(
       language_confidence,
       language_raw_code,
       language_source,
-      language_checked_at
+      language_checked_at,
+      publisher_name,
+      publisher_homepage
     )
-    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), $10, $11)
     ON CONFLICT (canonical_url) DO NOTHING
     RETURNING id
   `,
@@ -193,6 +202,8 @@ async function insertArticle(
       language?.languageConfidence ?? null,
       language?.languageRawCode ?? null,
       language?.languageSource ?? null,
+      publisher?.name ?? null,
+      publisher?.homepage ?? null,
     ],
   );
   return row.rows[0]?.id;
@@ -210,7 +221,25 @@ function googleNewsUrl(q: string) {
   return `${base}?${qs.toString()}`;
 }
 
-async function ingestQuery(q: string, limitPerQuery = 25) {
+type RunBudget = {
+  remaining: number;
+  resolved: number;
+  unresolved: number;
+  // Wall-clock deadline (Date.now() ms). Past it, stop processing new items so
+  // a time-budgeted cron degrades to partial coverage instead of a hard kill.
+  deadlineAt: number;
+};
+
+async function ingestQuery(
+  q: string,
+  limitPerQuery = 25,
+  budget: RunBudget = {
+    remaining: RESOLVE_CAP,
+    resolved: 0,
+    unresolved: 0,
+    deadlineAt: Infinity,
+  },
+) {
   const parser = new Parser({
     headers: {
       // polite but browsery UA; helps some endpoints
@@ -219,6 +248,7 @@ async function ingestQuery(q: string, limitPerQuery = 25) {
       Accept: "application/rss+xml, application/xml;q=0.9, */*;q=0.8",
     },
     requestOptions: { timeout: 20000 },
+    customFields: { item: ["source"] },
   });
   const url = googleNewsUrl(q);
   let feed;
@@ -235,13 +265,14 @@ async function ingestQuery(q: string, limitPerQuery = 25) {
   let scanned = 0;
 
   for (const it of items.slice(0, limitPerQuery)) {
+    if (Date.now() > budget.deadlineAt) {
+      console.log(`⏱️  Deadline reached — stopping discover query "${q}"`);
+      break;
+    }
     scanned++;
     const title = (it.title || "").trim();
     const raw = (it.link || "").trim();
     if (!title || !raw) continue;
-
-    const resolved = resolveGoogleNewsLink(raw);
-    const urlCanon = canonical(resolved);
 
     // Climate relevance check - skip non-climate articles before insertion
     if (!isClimateRelevant({ title, summary: undefined })) {
@@ -258,22 +289,53 @@ async function ingestQuery(q: string, limitPerQuery = 25) {
     }
     const { language } = languageGate;
 
+    // Strip the " - Publisher" suffix Google News appends, so the stored title
+    // and its embedding match the ingest path (which already cleans these).
+    const cleanTitle = cleanGoogleNewsTitle(title);
+
+    // Feeds keep items in the window for days; skip already-seen titles BEFORE
+    // paying for URL resolution or embedding (shared rule: lib/articleDedupe).
+    if ((await findRecentDuplicate({ title: cleanTitle })) !== null) continue;
+
+    // Resolve the GN redirect to the real publisher URL. Unresolved articles
+    // are still inserted (they corroborate clusters) but keep the aggregator
+    // host, which downstream treats as lead-ineligible. The resolve budget is
+    // only spent on actual news.google.com links — passthrough URLs cost no
+    // network call and shouldn't consume it.
+    let urlCanon = canonical(raw);
+    const isGnLink = (() => {
+      try {
+        return new URL(raw).hostname.endsWith("news.google.com");
+      } catch {
+        return false;
+      }
+    })();
+    if (isGnLink && budget.remaining > 0) {
+      budget.remaining--;
+      const resolution = await resolveGoogleNewsUrl(raw);
+      if (resolution.url && resolution.method !== "passthrough") {
+        urlCanon = canonical(resolution.url);
+        budget.resolved++;
+      } else {
+        budget.unresolved++;
+      }
+    }
+
     let host = "";
     try {
       host = new URL(urlCanon).hostname;
     } catch {
       continue;
     }
+    const publisher = extractPublisher(it);
     const sid = await upsertSourceForHost(host);
-    // Strip the " - Publisher" suffix Google News appends, so the stored title
-    // and its embedding match the ingest path (which already cleans these).
-    const cleanTitle = cleanGoogleNewsTitle(title);
     const id = await insertArticle(
       sid,
       cleanTitle,
       urlCanon,
       it.isoDate || it.pubDate,
       language,
+      publisher,
     );
     if (id) {
       inserted++;
@@ -287,10 +349,16 @@ async function ingestQuery(q: string, limitPerQuery = 25) {
 export async function run(
   opts: {
     limitPerQuery?: number;
+    // Accept `limit` as an alias so the full cron's `?discover=` knob (which
+    // passes `limit`) actually takes effect — it was silently ignored before.
+    limit?: number;
+    // Relative time budget (ms from now); item processing stops past it.
+    deadlineMs?: number;
     closePool?: boolean;
   } = {},
 ) {
-  await ensureSchema();
+  // schema.ts owns DDL; skip the per-run guard unless explicitly opted in.
+  if (process.env.SCHEMA_ENSURE === "1") await ensureSchema();
 
   const queries = process.env.DISCOVER_QUERIES
     ? process.env.DISCOVER_QUERIES.split(",")
@@ -298,16 +366,33 @@ export async function run(
         .filter(Boolean)
     : DEFAULT_QUERIES;
 
-  const limitPerQuery = Math.max(5, Math.min(50, opts.limitPerQuery ?? 20));
+  const limitPerQuery = Math.max(
+    5,
+    Math.min(50, opts.limitPerQuery ?? opts.limit ?? 20),
+  );
+
+  // Shared across queries so the per-run resolution cap and deadline are global.
+  const budget: RunBudget = {
+    remaining: RESOLVE_CAP,
+    resolved: 0,
+    unresolved: 0,
+    deadlineAt: opts.deadlineMs ? Date.now() + opts.deadlineMs : Infinity,
+  };
 
   const results = await mapLimit(queries, 4, (q) =>
-    ingestQuery(q, limitPerQuery),
+    ingestQuery(q, limitPerQuery, budget),
   );
   const scanned = results.reduce((a, b) => a + b.scanned, 0);
   const inserted = results.reduce((a, b) => a + b.inserted, 0);
 
   if (opts.closePool) await endPool();
-  return { queries: queries.length, scanned, inserted };
+  return {
+    queries: queries.length,
+    scanned,
+    inserted,
+    urlsResolved: budget.resolved,
+    urlsUnresolved: budget.unresolved,
+  };
 }
 
 // CLI: npx tsx scripts/discover.ts

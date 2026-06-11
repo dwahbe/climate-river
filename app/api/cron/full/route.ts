@@ -35,10 +35,11 @@ export async function GET(req: Request) {
   try {
     console.log("🎯 Full cron job starting...");
 
-    // 1) Feed discovery - fast
+    // 1) Feed discovery - fast (deadline bounds GN URL resolutions)
     console.log("📡 Running discover...");
     const discoverResult = await safeRun(import("@/scripts/discover"), {
       limit: discoverLimit,
+      deadlineMs: 75_000,
       closePool: false,
     });
     console.log(`✅ Discover completed (${elapsed()}s):`, discoverResult);
@@ -64,7 +65,7 @@ export async function GET(req: Request) {
     // for web-discovered articles inserted late in a refresh cycle).
     console.log("📖 Prefetching article content...");
     const prefetchResult = await safeRun(import("@/scripts/prefetch-content"), {
-      limit: 40,
+      limit: 60,
       catchupDays: 7,
       deadlineMs: 70_000,
       closePool: false,
@@ -84,14 +85,7 @@ export async function GET(req: Request) {
       recategorizeResult,
     );
 
-    // 5) Rescore clusters - fast
-    console.log("🔢 Running rescore...");
-    const rescoreResult = await safeRun(import("@/scripts/rescore"), {
-      closePool: false,
-    });
-    console.log(`✅ Rescore completed (${elapsed()}s):`, rescoreResult);
-
-    // 5b) Cluster maintenance - fix orphaned articles and merge similar clusters
+    // 5) Cluster maintenance - fix orphaned articles and merge similar clusters
     let clusterMaintenanceResult: unknown = { skipped: "timeout" };
     if (hasTime()) {
       console.log("🔧 Running cluster maintenance...");
@@ -120,6 +114,8 @@ export async function GET(req: Request) {
           outletLimitPerBatch: 6,
           outletBatchSize: 3,
           outletFreshHours: 72,
+          // Leave ≥60s for discovered-prefetch + rescore + inline rewrite.
+          deadlineAt: t0 + timeoutMs - 60_000,
           closePool: false,
         });
         console.log(`✅ AI web discovery completed (${elapsed()}s)`);
@@ -149,6 +145,35 @@ export async function GET(req: Request) {
       );
     }
 
+    // 7) Rescore clusters LAST so it scores everything maintenance merged and
+    // web discovery just created — otherwise new/merged clusters sit at score 0
+    // (their interim metadata score) until the next run, up to 6h later.
+    console.log("🔢 Running rescore...");
+    const rescoreResult = await safeRun(import("@/scripts/rescore"), {
+      closePool: false,
+    });
+    console.log(`✅ Rescore completed (${elapsed()}s):`, rescoreResult);
+
+    // 8) Rewrite-at-ingest: rescore just elected leads for newly discovered /
+    // merged clusters — rewrite them now (deadline-aware) instead of waiting up
+    // to an hour for the rewrite cron, which becomes a sweeper.
+    let inlineRewriteResult: unknown = { skipped: "timeout" };
+    {
+      const remainingMs = t0 + timeoutMs - Date.now();
+      if (remainingMs > 20_000) {
+        console.log("✏️  Inline rewrite of fresh leads...");
+        inlineRewriteResult = await safeRun(import("@/scripts/rewrite"), {
+          limit: 25,
+          deadlineMs: remainingMs - 10_000,
+          closePool: false,
+        });
+        console.log(
+          `✅ Inline rewrite completed (${elapsed()}s):`,
+          inlineRewriteResult,
+        );
+      }
+    }
+
     console.log(`🎯 Full cron job completed in ${elapsed()}s!`);
 
     const result = {
@@ -157,10 +182,11 @@ export async function GET(req: Request) {
       categorize: categorizeResult,
       prefetch: prefetchResult,
       recategorize: recategorizeResult,
-      rescore: rescoreResult,
       clusterMaintenance: clusterMaintenanceResult,
       webDiscover: webDiscoverResult,
       prefetchDiscovered: prefetchDiscoveredResult,
+      rescore: rescoreResult,
+      inlineRewrite: inlineRewriteResult,
     };
 
     await logPipelineRun({
