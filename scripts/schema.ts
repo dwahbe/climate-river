@@ -1,6 +1,7 @@
 // scripts/schema.ts
 import { query, endPool } from "@/lib/db";
 import { visibleLanguagePredicate } from "@/lib/languagePolicy";
+import { serveTimeScoreSql } from "@/lib/scoring";
 
 /**
  * Idempotent schema guard.
@@ -79,6 +80,27 @@ export async function run() {
     `alter table if exists articles add column if not exists content_image text;`,
   );
 
+  // Per-stage pipeline state (status / attempts / last error / timestamp),
+  // e.g. {"categorize":{"status":"no_category","attempts":2,"at":"..."}}.
+  // Selection queries gate on attempts so no stage retries forever; a stage
+  // becomes eligible again when content_fetched_at passes its last attempt.
+  await query(
+    `alter table if exists articles add column if not exists pipeline_state jsonb not null default '{}'::jsonb;`,
+  );
+
+  // Publisher attribution (set by ingest + discover for Google News items).
+  // schema.ts owns these so a fresh DB can define get_river_clusters, which
+  // references them, before the first ingest runs.
+  await query(
+    `alter table if exists articles add column if not exists publisher_name text;`,
+  );
+  await query(
+    `alter table if exists articles add column if not exists publisher_homepage text;`,
+  );
+  await query(
+    `alter table if exists articles add column if not exists author text;`,
+  );
+
   await query(
     `alter table if exists articles add column if not exists language_code text;`,
   );
@@ -122,6 +144,10 @@ export async function run() {
     create index if not exists idx_articles_content_status 
       on articles(content_status) where content_status is not null;
   `);
+  await query(`
+    create index if not exists idx_articles_fetched_at
+      on articles(fetched_at desc);
+  `);
   await query(`drop index if exists idx_articles_language_code;`);
   await query(`
     create index if not exists idx_articles_non_english_language_code
@@ -141,6 +167,49 @@ export async function run() {
   await query(
     `create unique index if not exists idx_clusters_key on clusters(key);`,
   );
+  // Clustering v2: persisted centroid + membership stats, maintained
+  // incrementally by lib/clustering.ts refreshClusterCentroid (and refreshed
+  // by cluster-maintenance). findBestCluster is one HNSW lookup against this
+  // instead of re-AVGing every cluster's members per article (~309ms/article).
+  await query(
+    `alter table clusters add column if not exists centroid vector(1536);`,
+  );
+  await query(
+    `alter table clusters add column if not exists member_count int not null default 0;`,
+  );
+  await query(
+    `alter table clusters add column if not exists last_member_at timestamptz;`,
+  );
+  await query(
+    `alter table clusters add column if not exists centroid_updated_at timestamptz;`,
+  );
+  await query(`
+    create index if not exists idx_clusters_centroid_hnsw
+      on clusters using hnsw (centroid vector_cosine_ops);
+  `);
+  // One-shot backfill for pre-v2 rows (only fills NULL centroids; incremental
+  // maintenance owns them afterwards).
+  await query(`
+    update clusters c
+    set centroid = agg.centroid,
+        member_count = agg.member_count,
+        last_member_at = agg.last_member_at,
+        centroid_updated_at = now()
+    from (
+      select
+        ac.cluster_id,
+        avg(a.embedding) filter (
+          where a.embedding is not null and ${visibleLanguagePredicate("a")}
+        ) as centroid,
+        count(*)::int as member_count,
+        max(a.fetched_at) as last_member_at
+      from article_clusters ac
+      join articles a on a.id = ac.article_id
+      group by ac.cluster_id
+    ) agg
+    where agg.cluster_id = c.id
+      and c.centroid is null;
+  `);
 
   // --- article_clusters (link) ---------------------------------------------
   await query(`
@@ -162,9 +231,23 @@ export async function run() {
       updated_at      timestamptz not null default now()
     );
   `);
+  // Serve-time freshness columns (see scripts/rescore.ts + get_river_clusters):
+  // base_score is the decay-free blend, latest_pub the newest member, why a
+  // JSON breakdown of the score components for tuning/debugging.
+  await query(
+    `alter table cluster_scores add column if not exists base_score double precision not null default 0;`,
+  );
+  await query(
+    `alter table cluster_scores add column if not exists latest_pub timestamptz;`,
+  );
+  await query(`alter table cluster_scores add column if not exists why text;`);
   await query(`
     create index if not exists idx_cluster_scores_score
       on cluster_scores(score desc, updated_at desc);
+  `);
+  await query(`
+    create index if not exists idx_cluster_scores_latest_pub
+      on cluster_scores(latest_pub desc);
   `);
 
   // (Optional) helpful FK indexes (no-ops if they already exist)
@@ -301,6 +384,10 @@ export async function run() {
     create index if not exists idx_discovery_searches_provider
       on discovery_searches(provider, created_at desc);
   `);
+  await query(`
+    create index if not exists idx_discovery_searches_pipeline_run
+      on discovery_searches(pipeline_run_id) where pipeline_run_id is not null;
+  `);
   await query(`alter table discovery_searches enable row level security;`);
 
   await query(`
@@ -345,6 +432,15 @@ export async function run() {
     create index if not exists idx_discovery_candidates_host_accepted
       on discovery_candidates(host)
       where accepted = true;
+  `);
+  // FK covering indexes: protect article deletes (cleanup) from per-row scans.
+  await query(`
+    create index if not exists idx_discovery_candidates_article_id
+      on discovery_candidates(article_id) where article_id is not null;
+  `);
+  await query(`
+    create index if not exists idx_discovery_candidates_dup_article_id
+      on discovery_candidates(duplicate_article_id) where duplicate_article_id is not null;
   `);
   await query(`alter table discovery_candidates enable row level security;`);
 
@@ -454,8 +550,14 @@ export async function run() {
         select
           cs.cluster_id,
           cs.size,
-          cs.score,
+          -- Serve-time score: decay-free base_score plus the cluster-freshness
+          -- term recomputed against latest_pub at read time, so the homepage
+          -- ranking is current at ISR granularity rather than frozen between
+          -- rescore runs. Falls back to the stored score for any pre-migration
+          -- row. Math shared with rescore via lib/scoring.ts — can't drift.
+          ${serveTimeScoreSql("cs.base_score", "cs.latest_pub", "cs.score")} as score,
           cs.lead_article_id,
+          coalesce(cs.latest_pub, a.published_at) as activity_at,
           a.published_at,
           coalesce(a.rewritten_title, a.title) as lead_title,
           (a.rewritten_title is not null) as lead_was_rewritten,
@@ -470,14 +572,18 @@ export async function run() {
         from cluster_scores cs
         join articles a on a.id = cs.lead_article_id
         left join sources s on s.id = a.source_id
-        where a.published_at >= now() - make_interval(hours => coalesce(p_window_hours, 168))
+        -- Window on cluster activity (latest member), NOT the lead's own date —
+        -- a developing story with a several-day-old authoritative lead but
+        -- fresh follow-ups should stay in the river.
+        where coalesce(cs.latest_pub, a.published_at) >= now() - make_interval(hours => coalesce(p_window_hours, 168))
           and ${visibleLanguagePredicate("a")}
+          -- Lead eligibility (real publisher URL, trustworthy date) is enforced
+          -- in rescore's lead selection; the only clusters whose lead is still
+          -- an aggregator are those with no eligible member, which have nothing
+          -- displayable — keep hiding just those.
           and a.canonical_url not like 'https://news.google.com%'
           and a.canonical_url not like 'https://news.yahoo.com%'
           and a.canonical_url not like 'https://www.msn.com%'
-          -- CRITICAL FIX: Exclude articles with bad dates (published_at ≈ fetched_at)
-          -- These are old articles where date parsing failed and NOW() was used as fallback
-          and abs(extract(epoch from (a.published_at - a.fetched_at))) > 60
       ),
       category_matches as (
         select
@@ -539,9 +645,9 @@ export async function run() {
             c.*,
             row_number() over (
               order by
-                case when coalesce(p_is_latest, false) then c.published_at end desc,
+                case when coalesce(p_is_latest, false) then c.activity_at end desc,
                 case when not coalesce(p_is_latest, false) then c.score end desc,
-                c.published_at desc
+                c.activity_at desc
             ) as rownum
           from category_filtered c
         ) ranked_inner

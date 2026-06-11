@@ -5,6 +5,18 @@ import { embed } from "ai";
 import { openai } from "@ai-sdk/openai";
 import { query } from "@/lib/db";
 import { visibleLanguagePredicate } from "@/lib/languagePolicy";
+import { UNKNOWN_SOURCE_WEIGHT } from "@/config/sourceTiers";
+import { AGGREGATOR_URL_SQL_REGEX } from "@/lib/aggregators";
+
+// Articles that should never be a cluster's displayed lead (aggregator
+// interstitials, or suspect dates where published ≈ fetched). Imported by
+// rescore, cluster-maintenance, and ingest-time metadata so the rule can't
+// drift between selectors. Expects the articles table aliased as `a`.
+export const LEAD_INELIGIBLE_SQL = `(
+  a.canonical_url ~* '${AGGREGATOR_URL_SQL_REGEX}'
+  OR a.published_at IS NULL
+  OR abs(extract(epoch from (a.published_at - a.fetched_at))) <= 60
+)`;
 
 export const CLUSTER_CONFIG = {
   /** Cosine similarity threshold for adding articles to clusters */
@@ -170,7 +182,52 @@ export function clusterKey(title: string): string {
 }
 
 /**
- * Find the best matching cluster for an article embedding using centroid similarity.
+ * Recompute a single cluster's persisted centroid + membership stats from its
+ * members. Cheap (one cluster's ≤25 rows via idx_article_clusters_cluster_id);
+ * called after every assignment/merge/split so findBestCluster's HNSW lookup
+ * stays current. member_count counts ALL members (the size cap applies to the
+ * whole cluster); the centroid averages embedded, visible-language members.
+ * Non-throwing — clustering should not fail because stats lagged.
+ */
+export async function refreshClusterCentroid(clusterId: number): Promise<void> {
+  try {
+    await query(
+      `
+      UPDATE clusters c
+      SET centroid = agg.centroid,
+          member_count = agg.member_count,
+          last_member_at = agg.last_member_at,
+          centroid_updated_at = now()
+      FROM (
+        SELECT
+          AVG(a.embedding) FILTER (
+            WHERE a.embedding IS NOT NULL AND ${visibleLanguagePredicate("a")}
+          ) AS centroid,
+          COUNT(*)::int AS member_count,
+          MAX(a.fetched_at) AS last_member_at
+        FROM article_clusters ac
+        JOIN articles a ON a.id = ac.article_id
+        WHERE ac.cluster_id = $1
+      ) agg
+      WHERE c.id = $1
+    `,
+      [clusterId],
+    );
+  } catch (error) {
+    console.error(
+      `Failed to refresh centroid for cluster ${clusterId}:`,
+      error,
+    );
+  }
+}
+
+/**
+ * Find the best matching cluster for an article embedding.
+ * One HNSW index lookup against the persisted clusters.centroid (v2) —
+ * replaces the per-article AVG over every recent cluster's members, which was
+ * the pipeline's hottest query (~309ms × every ingested article) and drifted
+ * as the rolling window slid. Size/threshold/recency are post-filtered in app
+ * code so the index scan stays an index scan.
  * Returns null if no cluster exceeds the similarity threshold.
  */
 export async function findBestCluster(
@@ -189,50 +246,44 @@ export async function findBestCluster(
     cluster_id: number;
     similarity: number;
     size: number;
+    last_member_at: string | null;
   }>(
     `
-    WITH cluster_centroids AS (
-      SELECT
-        ac.cluster_id,
-        AVG(a.embedding) AS centroid
-      FROM article_clusters ac
-      JOIN articles a ON a.id = ac.article_id
-      WHERE a.embedding IS NOT NULL
-        AND ${visibleLanguagePredicate("a")}
-        AND a.fetched_at >= now() - make_interval(days => $4)
-      GROUP BY ac.cluster_id
-    ),
-    -- TOTAL membership per candidate cluster (NOT just the rolling window).
-    -- The cap must apply to the whole cluster; counting only recent members let
-    -- clusters grow without bound as the window slid (observed up to 271 members
-    -- against a MAX_CLUSTER_SIZE of 25).
-    cluster_totals AS (
-      SELECT cluster_id, COUNT(*)::int AS total_size
-      FROM article_clusters
-      WHERE cluster_id IN (SELECT cluster_id FROM cluster_centroids)
-      GROUP BY cluster_id
-    )
     SELECT
-      cc.cluster_id,
-      1 - (cc.centroid <=> $1::vector) AS similarity,
-      ct.total_size AS size
-    FROM cluster_centroids cc
-    JOIN cluster_totals ct ON ct.cluster_id = cc.cluster_id
-    WHERE ct.total_size < $2
-      AND 1 - (cc.centroid <=> $1::vector) > $3
-    ORDER BY cc.centroid <=> $1::vector
-    LIMIT 1
+      c.id AS cluster_id,
+      1 - (c.centroid <=> $1::vector) AS similarity,
+      c.member_count AS size,
+      c.last_member_at
+    FROM clusters c
+    WHERE c.centroid IS NOT NULL
+    ORDER BY c.centroid <=> $1::vector
+    LIMIT 8
   `,
-    [embedding, maxSize, threshold, lookbackDays],
+    [embedding],
   );
 
-  if (candidates.rows.length === 0) return null;
-  const best = candidates.rows[0];
-  return {
-    clusterId: best.cluster_id,
-    similarity: best.similarity,
-    size: best.size,
-  };
+  const cutoffMs = Date.now() - lookbackDays * 24 * 3600 * 1000;
+  for (const cand of candidates.rows) {
+    // Ordered by distance: once below the threshold, the rest are too.
+    if (cand.similarity <= threshold) break;
+    // Cap applies to TOTAL membership (clusters once grew to 271 members when
+    // only windowed members were counted).
+    if (cand.size >= maxSize) continue;
+    // Only recently-active clusters attract new articles (old stories stay
+    // closed; a fresh take on an old topic becomes its own cluster).
+    if (
+      !cand.last_member_at ||
+      new Date(cand.last_member_at).getTime() < cutoffMs
+    ) {
+      continue;
+    }
+    return {
+      clusterId: cand.cluster_id,
+      similarity: cand.similarity,
+      size: cand.size,
+    };
+  }
+  return null;
 }
 
 /**
@@ -247,7 +298,8 @@ export async function updateClusterMetadata(clusterId: number): Promise<void> {
         SELECT
           a.id,
           a.published_at,
-          COALESCE(s.weight, 6) AS source_weight
+          COALESCE(s.weight, ${UNKNOWN_SOURCE_WEIGHT}) AS source_weight,
+          (NOT ${LEAD_INELIGIBLE_SQL})::int AS is_eligible_lead
         FROM articles a
         JOIN article_clusters ac ON ac.article_id = a.id
         LEFT JOIN sources s ON s.id = a.source_id
@@ -258,7 +310,7 @@ export async function updateClusterMetadata(clusterId: number): Promise<void> {
         SELECT
           (SELECT id
            FROM visible_articles
-           ORDER BY source_weight DESC, published_at DESC, id DESC
+           ORDER BY is_eligible_lead DESC, source_weight DESC, published_at DESC, id DESC
            LIMIT 1) AS lead_article_id,
           COUNT(*)::int AS size
         FROM visible_articles
@@ -337,6 +389,7 @@ export async function assignArticleToCluster(
       `INSERT INTO article_clusters (article_id, cluster_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
       [articleId, match.clusterId],
     );
+    await refreshClusterCentroid(match.clusterId);
     if (shouldUpdateMetadata) await updateClusterMetadata(match.clusterId);
     return;
   }
@@ -360,5 +413,6 @@ export async function assignArticleToCluster(
   console.log(
     `Created singleton cluster ${clusterId} for article ${articleId}`,
   );
+  await refreshClusterCentroid(clusterId);
   if (shouldUpdateMetadata) await updateClusterMetadata(clusterId);
 }
