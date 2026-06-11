@@ -31,7 +31,13 @@
     "tier-sources:apply": "bun --env-file=.env.local scripts/set-source-tiers.ts --apply",
     "migrate-weights": "bun --env-file=.env.local scripts/migrate-weights-x2.ts",
     "migrate-weights:apply": "bun --env-file=.env.local scripts/migrate-weights-x2.ts --apply",
-    "format": "prettier --write ."
+    "format": "prettier --write .",
+    "health": "bun --env-file=.env.local scripts/health-report.ts",
+    "snapshot": "bun --env-file=.env.local scripts/snapshot-river.ts",
+    "gn:backfill": "bun --env-file=.env.local scripts/backfill-gn-urls.ts",
+    "gn:backfill:apply": "bun --env-file=.env.local scripts/backfill-gn-urls.ts --apply",
+    "feeds:discover": "bun --env-file=.env.local scripts/discover-feeds.ts",
+    "feeds:discover:apply": "bun --env-file=.env.local scripts/discover-feeds.ts --apply"
   },
   "dependencies": {
     "@ai-sdk/openai": "^3.0.53",

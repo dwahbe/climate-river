@@ -273,6 +273,19 @@ export async function categorizeArticleHybrid(
       normalized.title,
       normalized.summary ?? undefined,
     );
+    // Persist it: every retry used to regenerate this embedding and throw it
+    // away, paying the OpenAI call again. Only fills a NULL slot — a stored
+    // embedding (from ingest) is built from title+dek and stays authoritative.
+    if (articleId && articleEmbedding && articleEmbedding.length > 0) {
+      try {
+        await query(
+          `UPDATE articles SET embedding = $2 WHERE id = $1 AND embedding IS NULL`,
+          [articleId, JSON.stringify(articleEmbedding)],
+        );
+      } catch {
+        // Non-fatal: categorization still works from memory this invocation
+      }
+    }
   }
 
   if (!articleEmbedding) {
@@ -377,7 +390,7 @@ export async function storeArticleCategories(
   articleId: number,
   scores: CategoryScore[],
   minConfidence: number = 0.25,
-): Promise<void> {
+): Promise<number> {
   try {
     // Filter scores by minimum confidence
     const validScores = filterStorableCategoryScores(scores, minConfidence);
@@ -392,7 +405,7 @@ export async function storeArticleCategories(
       console.log(
         `No categories with sufficient confidence for article ${articleId}`,
       );
-      return;
+      return 0;
     }
 
     // Find primary category (highest confidence)
@@ -410,6 +423,7 @@ export async function storeArticleCategories(
     console.log(
       `Stored ${validScores.length} categories for article ${articleId}, primary: ${primaryCategory.slug}`,
     );
+    return validScores.length;
   } catch (error) {
     console.error(`Error storing categories for article ${articleId}:`, error);
     throw error;
@@ -485,10 +499,10 @@ export async function categorizeAndStoreArticle(
   articleId: number,
   title: string,
   summary?: string,
-): Promise<void> {
+): Promise<number> {
   try {
     const scores = await categorizeArticleHybrid(title, summary, articleId);
-    await storeArticleCategories(articleId, scores);
+    return await storeArticleCategories(articleId, scores);
   } catch (error) {
     console.error(`Error categorizing article ${articleId}:`, error);
     throw error;

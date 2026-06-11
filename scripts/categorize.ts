@@ -2,6 +2,63 @@
 import { query, endPool } from "@/lib/db";
 import { categorizeAndStoreArticle } from "@/lib/categorizer";
 
+// Pipeline state machine (categorize stage): every attempt is recorded in
+// articles.pipeline_state->'categorize' with {status, attempts, at}. Selection
+// stops re-picking articles after MAX_ATTEMPTS errors, and stops re-picking
+// 'no_category' articles entirely — UNLESS content was (re)fetched after the
+// last attempt, which makes any article eligible again (it may pass the
+// climate check with content it didn't have before). This replaces the old
+// NULL-column scan that retried the same non-climate articles on every one of
+// ~9 runs/day for 30 days, regenerating throwaway embeddings each time.
+const MAX_ATTEMPTS = 3;
+
+const CATEGORIZE_STATE_GATE = `
+  (
+    a.pipeline_state->'categorize' IS NULL
+    OR (
+      COALESCE((a.pipeline_state#>>'{categorize,attempts}')::int, 0) < ${MAX_ATTEMPTS}
+      AND COALESCE(a.pipeline_state#>>'{categorize,status}', '') <> 'no_category'
+    )
+    OR a.content_fetched_at > COALESCE(
+      (a.pipeline_state#>>'{categorize,at}')::timestamptz,
+      'epoch'::timestamptz
+    )
+  )
+`;
+
+async function recordCategorizeAttempt(
+  articleId: number,
+  prevAttempts: number,
+  status: "done" | "no_category" | "error",
+  error?: string,
+): Promise<void> {
+  try {
+    await query(
+      `UPDATE articles
+       SET pipeline_state = jsonb_set(
+         COALESCE(pipeline_state, '{}'::jsonb),
+         '{categorize}',
+         $2::jsonb
+       )
+       WHERE id = $1`,
+      [
+        articleId,
+        JSON.stringify({
+          status,
+          attempts: prevAttempts + 1,
+          at: new Date().toISOString(),
+          ...(error ? { last_error: error.slice(0, 200) } : {}),
+        }),
+      ],
+    );
+  } catch (stateError) {
+    console.warn(
+      `  ⚠️  Failed to record categorize state for ${articleId}:`,
+      stateError,
+    );
+  }
+}
+
 export async function run(
   opts: {
     limit?: number;
@@ -20,8 +77,10 @@ export async function run(
   // Build query based on options
   let sql: string;
   if (opts.recategorizeAll) {
+    // Explicit override: ignore the state gate.
     sql = `
-      SELECT a.id, a.title, a.dek, a.content_text
+      SELECT a.id, a.title, a.dek, a.content_text,
+             COALESCE((a.pipeline_state#>>'{categorize,attempts}')::int, 0) AS attempts
       FROM articles a
       WHERE a.published_at >= now() - interval '30 days'
       ORDER BY a.published_at DESC
@@ -31,22 +90,26 @@ export async function run(
     // Only retry articles that have content now - avoids wasting API calls
     // on articles that would fail climate check again with just title+dek
     sql = `
-      SELECT a.id, a.title, a.dek, a.content_text
+      SELECT a.id, a.title, a.dek, a.content_text,
+             COALESCE((a.pipeline_state#>>'{categorize,attempts}')::int, 0) AS attempts
       FROM articles a
       LEFT JOIN article_categories ac ON ac.article_id = a.id
       WHERE ac.article_id IS NULL
         AND a.published_at >= now() - interval '30 days'
         AND a.content_status = 'success'
+        AND ${CATEGORIZE_STATE_GATE}
       ORDER BY a.published_at DESC
       LIMIT $1
     `;
   } else {
     sql = `
-      SELECT a.id, a.title, a.dek, a.content_text
+      SELECT a.id, a.title, a.dek, a.content_text,
+             COALESCE((a.pipeline_state#>>'{categorize,attempts}')::int, 0) AS attempts
       FROM articles a
       LEFT JOIN article_categories ac ON ac.article_id = a.id
       WHERE ac.article_id IS NULL
         AND a.published_at >= now() - interval '30 days'
+        AND ${CATEGORIZE_STATE_GATE}
       ORDER BY a.published_at DESC
       LIMIT $1
     `;
@@ -59,6 +122,7 @@ export async function run(
     title: string;
     dek: string | null;
     content_text: string | null;
+    attempts: number;
   }>(sql, [limit]);
 
   console.log(
@@ -80,10 +144,15 @@ export async function run(
         .join(" ")
         .slice(0, 2000); // Limit to reasonable length
 
-      await categorizeAndStoreArticle(
+      const stored = await categorizeAndStoreArticle(
         article.id,
         article.title,
         summary || undefined,
+      );
+      await recordCategorizeAttempt(
+        article.id,
+        article.attempts,
+        stored > 0 ? "done" : "no_category",
       );
       succeeded++;
 
@@ -94,8 +163,15 @@ export async function run(
       }
     } catch (error) {
       failed++;
+      const message = error instanceof Error ? error.message : String(error);
+      await recordCategorizeAttempt(
+        article.id,
+        article.attempts,
+        "error",
+        message,
+      );
       console.error(
-        `  ❌ Failed to categorize article ${article.id}: ${error instanceof Error ? error.message : String(error)}`,
+        `  ❌ Failed to categorize article ${article.id}: ${message}`,
       );
     }
   }
