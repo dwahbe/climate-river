@@ -20,6 +20,7 @@ bun run gn:backfill[:apply]        # Resolve stored news.google.com URLs → pub
 bun run feeds:discover[:apply]     # Upgrade productive pseudo-feed hosts to real RSS sources
 bun run language:backfill[:apply]  # Article language metadata
 bun run tier-sources[:apply]       # Source weights from config/sourceTiers.ts
+bun run reader:invalidate[:apply]  # Clear cached reader content dominated by link text (nav junk)
 
 bun scripts/rewrite.ts --dry-run --limit 10   # Exercise LLM + validator with no DB writes
 
@@ -69,6 +70,7 @@ Change the owning module, not call sites — several are pinned by parity tests:
 ## Gotchas
 
 - **jsdom pinned to 22.1.0**: 23+ pulls ESM-only transitives that throw `ERR_REQUIRE_ESM` on Vercel's Lambda runtime (it disables `require(esm)`), breaking every prefetch/reader call. Don't bump without verifying production prefetch.
+- **jsdom selector shim required for Defuddle**: jsdom's selector engine (nwsapi) can't parse some Defuddle cleanup selectors (`header:not(:has(p + p))…`); an unshimmed throw makes Defuddle return the whole `<body>` (site chrome) as "content". `installSelectorCompat` from `lib/domSelectorCompat.ts` must be applied to every JSDOM instance handed to Defuddle; the reader's link-density gate (`blocked` over 50% link text) is the backstop.
 - Build must use webpack (see Commands); dev Turbopack is fine.
 - Source weights are integer 1–10 (`config/sourceTiers.ts`); `UNKNOWN_SOURCE_WEIGHT = 2` is the only fallback for unknown sources.
 - Homepage freshness comes from the RPC's read-time decay (ISR 5min), not rescore cadence — don't "fix" staleness by adding rescore runs.

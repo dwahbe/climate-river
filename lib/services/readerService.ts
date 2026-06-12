@@ -1,5 +1,6 @@
 // lib/services/readerService.ts
 import { query } from "@/lib/db";
+import { installSelectorCompat } from "@/lib/domSelectorCompat";
 import {
   detectArticleLanguageFromContent,
   shouldDetectLanguageFromContent,
@@ -17,10 +18,12 @@ function stripLeadingImage(html: string, leadImage?: string): string {
   // If we have a lead image, strip everything up to and including the first figure/img
   // This handles various junk that can appear before the image (hr, skip links, etc)
   const figureMatch = html.match(
-    /^[\s\S]*?(<figure[^>]*>[\s\S]*?<\/figure>|<img[^>]*>)\s*/i,
+    /^([\s\S]*?)(?:<figure[^>]*>[\s\S]*?<\/figure>|<img[^>]*>)\s*/i,
   );
 
-  if (figureMatch) {
+  // Only strip when the image actually leads the content — a mid-article
+  // image preceded by real paragraphs is not a duplicate hero
+  if (figureMatch && htmlToText(figureMatch[1]).length <= 200) {
     // Remove everything up to and including the matched figure/img
     return html.slice(figureMatch[0].length);
   }
@@ -116,6 +119,20 @@ function sanitizeContent(html: string, leadImage?: string): string {
     },
     // Don't encode entities - keep readable
     disallowedTagsMode: "discard",
+    // Drop these subtrees entirely (defaults plus site chrome) — discard mode
+    // alone keeps their children, so nav link lists would survive as <a> soup
+    nonTextTags: [
+      "script",
+      "style",
+      "textarea",
+      "option",
+      "noscript",
+      "nav",
+      "footer",
+      "form",
+      "button",
+      "iframe",
+    ],
   });
 
   // Additional cleanup for common boilerplate patterns
@@ -141,6 +158,29 @@ function htmlToText(html: string): string {
   return sanitize(html, { allowedTags: [], allowedAttributes: {} })
     .replace(/\s+/g, " ")
     .trim();
+}
+
+// Above this fraction of link-text words, the "content" is site chrome
+// (nav menus, footer link lists), not an article
+const LINK_DENSITY_LIMIT = 0.5;
+
+function countWords(text: string): number {
+  return text.split(/\s+/).filter(Boolean).length;
+}
+
+/**
+ * Fraction of words that sit inside <a> tags. Extraction failures that return
+ * page chrome are nearly all link text; real articles rarely exceed ~20%.
+ */
+export function linkTextDensity(html: string, totalWords: number): number {
+  if (totalWords <= 0) return 0;
+  let linkWords = 0;
+  const anchorPattern = /<a\b[^>]*>([\s\S]*?)<\/a>/gi;
+  let match: RegExpExecArray | null;
+  while ((match = anchorPattern.exec(html)) !== null) {
+    linkWords += countWords(htmlToText(match[1]));
+  }
+  return Math.min(1, linkWords / totalWords);
 }
 
 // Types
@@ -181,7 +221,7 @@ function isReaderErrorStatus(
 // Paywall detection patterns
 const PAYWALL_INDICATORS = [
   /subscribe to read/i,
-  /subscription required/i,
+  /subscription (?:is )?required/i,
   /become a subscriber/i,
   /sign in to continue/i,
   /this article is for subscribers/i,
@@ -202,8 +242,9 @@ const BLOCKED_INDICATORS = [
  * Detect if content appears to be a paywall message
  */
 function detectPaywall(text: string, wordCount: number): boolean {
-  // Very short content is suspicious
-  if (wordCount < 100) {
+  // Too short to be a full article — a paywall phrase anywhere means the
+  // page is a teaser + subscription pitch (e.g. Carbon Pulse)
+  if (wordCount < 300) {
     return PAYWALL_INDICATORS.some((pattern) => text.match(pattern));
   }
 
@@ -226,7 +267,7 @@ function detectBlocked(text: string): boolean {
 const jsdomModule = import("jsdom");
 const defuddleModule = import("defuddle/node");
 
-async function fetchArticleContent(url: string): Promise<ReaderResult> {
+export async function fetchArticleContent(url: string): Promise<ReaderResult> {
   const startTime = Date.now();
   const TIMEOUT = 12000; // 12 seconds (increased for slower sites)
 
@@ -289,6 +330,11 @@ async function fetchArticleContent(url: string): Promise<ReaderResult> {
       // Parse with JSDOM
       const dom = new JSDOM(rawHtml, { url });
 
+      // jsdom 22's selector engine can't parse some of Defuddle's cleanup
+      // selectors; without this shim Defuddle's catch-all returns the whole
+      // <body> (site chrome included) instead of the extracted article
+      installSelectorCompat(dom.window);
+
       // Use Defuddle to extract content in HTML mode (not markdown)
       // This avoids mixed HTML/markdown output that's hard to process
       const result = await Defuddle(dom, url, {
@@ -329,6 +375,18 @@ async function fetchArticleContent(url: string): Promise<ReaderResult> {
           success: false,
           status: "error",
           error: `Insufficient content extracted (${wordCount} words, ${htmlContent.length} chars)`,
+        } as ReaderError;
+      }
+
+      // Link-dominated "content" is site chrome that survived extraction
+      // (e.g. a failed extraction falling back to the full page) — word count
+      // alone can't catch it because nav link text counts as words
+      const linkDensity = linkTextDensity(htmlContent, wordCount);
+      if (linkDensity > LINK_DENSITY_LIMIT) {
+        return {
+          success: false,
+          status: "blocked",
+          error: `Extracted content is mostly navigation links (${Math.round(linkDensity * 100)}% link text)`,
         } as ReaderError;
       }
 

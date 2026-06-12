@@ -36,6 +36,8 @@
     "snapshot": "bun --env-file=.env.local scripts/snapshot-river.ts",
     "gn:backfill": "bun --env-file=.env.local scripts/backfill-gn-urls.ts",
     "gn:backfill:apply": "bun --env-file=.env.local scripts/backfill-gn-urls.ts --apply",
+    "reader:invalidate": "bun --env-file=.env.local scripts/invalidate-reader-junk.ts",
+    "reader:invalidate:apply": "bun --env-file=.env.local scripts/invalidate-reader-junk.ts --apply",
     "feeds:discover": "bun --env-file=.env.local scripts/discover-feeds.ts",
     "feeds:discover:apply": "bun --env-file=.env.local scripts/discover-feeds.ts --apply"
   },
