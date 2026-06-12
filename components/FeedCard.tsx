@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { Sparkles, ChevronDown } from "lucide-react";
 import LocalTime from "@/components/LocalTime";
@@ -33,7 +33,21 @@ export default function FeedCard({
   variant = "list",
 }: FeedCardProps) {
   const [isExpanded, setIsExpanded] = useState(false);
+  const cardRef = useRef<HTMLElement>(null);
   const isSummaryGrid = variant === "summaryGrid";
+
+  // Follow the reader's prev/next selection so the highlighted card stays in
+  // view and closing the reader lands where the user left off
+  useEffect(() => {
+    if (!isSelected) return;
+    const reduceMotion = window.matchMedia(
+      "(prefers-reduced-motion: reduce)",
+    ).matches;
+    cardRef.current?.scrollIntoView({
+      block: "nearest",
+      behavior: reduceMotion ? "auto" : "smooth",
+    });
+  }, [isSelected]);
   const publisher = cluster.lead_source || hostFrom(cluster.lead_url);
   const publisherDomain = cluster.lead_homepage
     ? hostFrom(cluster.lead_homepage)
@@ -50,6 +64,7 @@ export default function FeedCard({
 
   return (
     <article
+      ref={cardRef}
       className={`bg-white ${isSummaryGrid ? "flex h-full flex-col overflow-hidden rounded-card border border-zinc-200/80 transition-colors hover:border-zinc-300" : ""} ${!isSummaryGrid && isSelected ? "lg:bg-zinc-50 lg:ring-2 lg:ring-inset lg:ring-zinc-200" : ""}`}
     >
       {/* Header with padding */}

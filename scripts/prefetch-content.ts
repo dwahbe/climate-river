@@ -2,6 +2,8 @@
 import { query, endPool } from "@/lib/db";
 import { prefetchArticles } from "@/lib/services/readerService";
 import { visibleLanguagePredicate } from "@/lib/languagePolicy";
+import { PAYWALL_URL_SQL_REGEX } from "@/lib/paywalls";
+import { AGGREGATOR_URL_SQL_REGEX } from "@/lib/aggregators";
 
 type PrefetchOptions = {
   limit?: number;
@@ -18,16 +20,12 @@ type PrefetchOptions = {
   deadlineAt?: number;
 };
 
+// Derived from the shared domain lists so the pipeline never burns fetches
+// on articles the reader UI will refuse to show (lib/paywalls.ts) or on
+// aggregator interstitials that extract as "0 words" (lib/aggregators.ts).
 const PAYWALL_FILTER = `
-  canonical_url NOT LIKE '%nytimes.com%'
-  AND canonical_url NOT LIKE '%wsj.com%'
-  AND canonical_url NOT LIKE '%ft.com%'
-  AND canonical_url NOT LIKE '%economist.com%'
-  AND canonical_url NOT LIKE '%bloomberg.com%'
-  -- Aggregator interstitials extract as "0 words"; never burn a fetch on them.
-  AND canonical_url NOT LIKE 'https://news.google.com%'
-  AND canonical_url NOT LIKE '%news.yahoo.com%'
-  AND canonical_url NOT LIKE '%://www.msn.com%'
+  canonical_url !~* '${PAYWALL_URL_SQL_REGEX}'
+  AND canonical_url !~* '${AGGREGATOR_URL_SQL_REGEX}'
 `;
 
 const LANGUAGE_FILTER = visibleLanguagePredicate();

@@ -9,6 +9,7 @@ type ReaderViewProps = {
   articleId: number;
   articleTitle: string;
   articleUrl: string;
+  articleSummary?: string | null;
   isOpen: boolean;
   onClose: () => void;
   onPrev?: () => void;
@@ -31,6 +32,7 @@ type ReaderContentProps = {
   error: string | null;
   data: ReaderData | null;
   articleUrl: string;
+  articleSummary?: string | null;
 };
 
 // Side panel from md up, bottom sheet below
@@ -53,6 +55,7 @@ function ReaderContent({
   error,
   data,
   articleUrl,
+  articleSummary,
 }: ReaderContentProps) {
   return (
     <>
@@ -63,16 +66,25 @@ function ReaderContent({
       )}
 
       {error && (
-        <div className="bg-zinc-50 border border-zinc-200 rounded-control p-6 text-center">
-          <p className="text-zinc-700 mb-3">{error}</p>
-          <a
-            href={articleUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-block px-4 py-2 bg-zinc-900 text-white text-sm rounded-control hover:bg-zinc-800 transition"
-          >
-            Read on original site
-          </a>
+        <div>
+          {/* Full text unavailable — fall back to the feed's summary so the
+              story can still be triaged from the reader */}
+          {articleSummary && (
+            <p className="text-zinc-700 leading-relaxed mb-6">
+              {articleSummary}
+            </p>
+          )}
+          <div className="bg-zinc-50 border border-zinc-200 rounded-control p-6 text-center">
+            <p className="text-zinc-700 mb-3">{error}</p>
+            <a
+              href={articleUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-block px-4 py-2 bg-zinc-900 text-white text-sm rounded-control hover:bg-zinc-800 transition"
+            >
+              Read on original site
+            </a>
+          </div>
         </div>
       )}
 
@@ -104,6 +116,7 @@ export default function ReaderView({
   articleId,
   articleTitle,
   articleUrl,
+  articleSummary,
   isOpen,
   onClose,
   onPrev,
@@ -336,6 +349,7 @@ export default function ReaderView({
                 error={error}
                 data={data}
                 articleUrl={articleUrl}
+                articleSummary={articleSummary}
               />
             </div>
           </div>
@@ -404,6 +418,7 @@ export default function ReaderView({
                 error={error}
                 data={data}
                 articleUrl={articleUrl}
+                articleSummary={articleSummary}
               />
             </div>
           </div>

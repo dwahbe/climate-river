@@ -52,6 +52,7 @@ Change the owning module, not call sites — several are pinned by parity tests:
 - **Lead eligibility**: `LEAD_INELIGIBLE_SQL` in `lib/clustering.ts` — aggregator URL or suspect date (published ≈ fetched) never becomes the displayed lead. The RPC hides a cluster only when it has no eligible lead at all.
 - **Dedup**: `lib/articleDedupe.ts` (same URL, or same title within 7 days), used by ingest + discover; `isExisting` hits skip re-clustering/re-categorization.
 - **Aggregator hosts**: `lib/aggregators.ts` (dependency-free list + SQL regex).
+- **Paywall domains**: `lib/paywalls.ts` (dependency-free list + host matcher + SQL regex), used by `lib/readerAvailability.ts` (reader/Preview gating + prev/next skip) and the prefetch SQL filter.
 - **DDL**: `scripts/schema.ts` only; per-run ensure guards in scripts are gated behind `SCHEMA_ENSURE=1`.
 
 ## Clustering

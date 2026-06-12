@@ -156,6 +156,7 @@ export default function RiverClusterList({
                   articleId={cluster.lead_article_id}
                   articleTitle={cluster.lead_title}
                   articleUrl={cluster.lead_url}
+                  articleSummary={cluster.lead_dek}
                   contentStatus={cluster.lead_content_status}
                   contentWordCount={cluster.lead_content_word_count}
                 />
