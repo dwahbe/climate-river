@@ -14,13 +14,13 @@ export default function Error({ reset }: { error: Error; reset: () => void }) {
       <div className="flex gap-4">
         <button
           onClick={reset}
-          className="px-6 py-3 bg-zinc-900 text-white rounded-lg hover:bg-zinc-800 text-sm"
+          className="px-6 py-3 bg-zinc-900 text-white rounded-control hover:bg-zinc-800 text-sm"
         >
           Try again
         </button>
         <Link
           href="/"
-          className="px-6 py-3 border border-zinc-300 text-zinc-700 rounded-lg hover:bg-zinc-50 text-sm no-underline"
+          className="px-6 py-3 border border-zinc-300 text-zinc-700 rounded-control hover:bg-zinc-50 text-sm no-underline"
         >
           Return home
         </Link>

@@ -3,6 +3,11 @@
 @plugin '@tailwindcss/typography';
 
 @theme {
+  /* Radius scale: card = surfaces (feed, leaderboard, drawers, images),
+     control = buttons/inputs/tooltips; pills use rounded-full */
+  --radius-card: 0.75rem;
+  --radius-control: 0.5rem;
+
   --color-cat-government: #3b82f6;
   --color-cat-activism: #ec4899;
   --color-cat-business: #06b6d4;

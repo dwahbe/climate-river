@@ -75,6 +75,9 @@ export default function PreviewButton({
   contentWordCount,
   onPreview,
 }: PreviewButtonProps) {
+  // Without a handler (e.g. category pages) the button would be a no-op
+  if (!onPreview) return null;
+
   const isAvailable = shouldShowButton(
     articleUrl,
     contentStatus,

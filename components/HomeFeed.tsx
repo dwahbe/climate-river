@@ -1,8 +1,7 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import FeedCard from "@/components/FeedCard";
-import ReaderPanel from "@/components/ReaderPanel";
 import ReaderView from "@/components/ReaderView";
 import PublicationLeaderboard from "@/components/PublicationLeaderboard";
 import type { Cluster } from "@/lib/models/cluster";
@@ -19,34 +18,14 @@ type HomeFeedProps = {
   leaderboard: LeaderboardEntry[];
 };
 
-type DeviceType = "mobile" | "tablet" | "desktop";
-
 export default function HomeFeed({ clusters, leaderboard }: HomeFeedProps) {
   const [selectedArticle, setSelectedArticle] = useState<SelectedArticle>(null);
-  const [deviceType, setDeviceType] = useState<DeviceType>("desktop");
-
-  useEffect(() => {
-    const checkDevice = () => {
-      const width = window.innerWidth;
-      if (width < 768) {
-        setDeviceType("mobile");
-      } else if (width < 1024) {
-        setDeviceType("tablet");
-      } else {
-        setDeviceType("desktop");
-      }
-    };
-    checkDevice();
-    window.addEventListener("resize", checkDevice);
-    return () => window.removeEventListener("resize", checkDevice);
-  }, []);
+  // Kept mounted after close so the sheet/panel can animate out
+  const [readerOpen, setReaderOpen] = useState(false);
 
   const handlePreview = (articleId: number, title: string, url: string) => {
     setSelectedArticle({ id: articleId, title, url });
-  };
-
-  const handleClosePreview = () => {
-    setSelectedArticle(null);
+    setReaderOpen(true);
   };
 
   // Find current index for navigation
@@ -76,8 +55,6 @@ export default function HomeFeed({ clusters, leaderboard }: HomeFeedProps) {
     }
   };
 
-  const isOpen = !!selectedArticle;
-
   return (
     <>
       <div className="lg:flex lg:gap-6">
@@ -87,13 +64,15 @@ export default function HomeFeed({ clusters, leaderboard }: HomeFeedProps) {
             Top Stories
           </h1>
 
-          <div className="divide-y divide-zinc-200/80 -mx-4 sm:mx-0">
+          <div className="divide-y divide-zinc-200/80 border-zinc-200/80 -mx-4 border-b sm:mx-0 sm:overflow-hidden sm:rounded-card sm:border">
             {clusters.map((cluster) => (
               <FeedCard
                 key={cluster.cluster_id}
                 cluster={cluster}
                 onPreview={handlePreview}
-                isSelected={selectedArticle?.id === cluster.lead_article_id}
+                isSelected={
+                  readerOpen && selectedArticle?.id === cluster.lead_article_id
+                }
               />
             ))}
           </div>
@@ -105,55 +84,32 @@ export default function HomeFeed({ clusters, leaderboard }: HomeFeedProps) {
           )}
         </div>
 
-        {/* Right Column — Leaderboard swaps to Reader Panel */}
-        <div
-          className={`hidden lg:block shrink-0 ${
-            isOpen ? "lg:w-[400px] xl:w-[500px]" : "lg:w-[300px] xl:w-[300px]"
-          }`}
-        >
-          {isOpen && selectedArticle ? (
-            <div className="h-full bg-white overflow-hidden animate-[slideInRight_200ms_ease-out]">
-              <ReaderPanel
-                articleId={selectedArticle.id}
-                articleTitle={selectedArticle.title}
-                articleUrl={selectedArticle.url}
-                onClose={handleClosePreview}
-                onPrev={handlePrev}
-                onNext={handleNext}
-                hasPrev={currentIndex > 0}
-                hasNext={currentIndex < clusters.length - 1}
-              />
-            </div>
-          ) : (
-            <div>
-              <h2 className="mb-3 text-xl font-semibold tracking-tight">
-                Weekly Leaderboard
-              </h2>
-              <PublicationLeaderboard entries={leaderboard} />
-              <p className="mt-2 px-1 text-[11px] text-zinc-400">
-                Ranked by story impact — how widely each outlet&apos;s scoops
-                are covered.{" "}
-                <a
-                  href="/about#how-is-the-weekly-leaderboard-calculated"
-                  className="underline decoration-zinc-300 hover:decoration-zinc-400"
-                >
-                  Learn more
-                </a>
-              </p>
-            </div>
-          )}
+        {/* Right Column — Leaderboard */}
+        <div className="hidden lg:block shrink-0 lg:w-[300px]">
+          <h2 className="mb-3 text-xl font-semibold tracking-tight">
+            Weekly Leaderboard
+          </h2>
+          <PublicationLeaderboard entries={leaderboard} />
+          <p className="mt-2 px-1 text-[11px] text-zinc-400">
+            Ranked by story impact — how widely each outlet&apos;s scoops are
+            covered.{" "}
+            <a
+              href="/about#how-is-the-weekly-leaderboard-calculated"
+              className="underline decoration-zinc-300 hover:decoration-zinc-400"
+            >
+              Learn more
+            </a>
+          </p>
         </div>
       </div>
 
-      {/* Reader View — Mobile/Tablet */}
-      {deviceType !== "desktop" && selectedArticle && (
+      {selectedArticle && (
         <ReaderView
           articleId={selectedArticle.id}
           articleTitle={selectedArticle.title}
           articleUrl={selectedArticle.url}
-          isOpen={isOpen}
-          onClose={handleClosePreview}
-          mode={deviceType}
+          isOpen={readerOpen}
+          onClose={() => setReaderOpen(false)}
           onPrev={handlePrev}
           onNext={handleNext}
           hasPrev={currentIndex > 0}

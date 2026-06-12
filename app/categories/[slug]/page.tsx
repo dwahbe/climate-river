@@ -101,7 +101,7 @@ export default async function CategoryDetailPage(props: {
             No stories available right now.
           </p>
         ) : (
-          <div className="divide-y divide-zinc-200/80 -mx-4 sm:mx-0">
+          <div className="divide-y divide-zinc-200/80 border-zinc-200/80 -mx-4 border-b sm:mx-0 sm:overflow-hidden sm:rounded-card sm:border">
             {clusters.map((cluster) => (
               <FeedCard key={cluster.cluster_id} cluster={cluster} />
             ))}

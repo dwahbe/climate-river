@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import FeedCard from "@/components/FeedCard";
 import ReaderView from "@/components/ReaderView";
 import type { Cluster } from "@/lib/models/cluster";
@@ -11,26 +11,14 @@ type SelectedArticle = {
   url: string;
 } | null;
 
-type DeviceType = "mobile" | "tablet" | "desktop";
-
 export default function SearchFeed({ clusters }: { clusters: Cluster[] }) {
   const [selectedArticle, setSelectedArticle] = useState<SelectedArticle>(null);
-  const [deviceType, setDeviceType] = useState<DeviceType>("desktop");
-
-  useEffect(() => {
-    const checkDevice = () => {
-      const width = window.innerWidth;
-      if (width < 768) setDeviceType("mobile");
-      else if (width < 1280) setDeviceType("tablet");
-      else setDeviceType("desktop");
-    };
-    checkDevice();
-    window.addEventListener("resize", checkDevice);
-    return () => window.removeEventListener("resize", checkDevice);
-  }, []);
+  // Kept mounted after close so the sheet/panel can animate out
+  const [readerOpen, setReaderOpen] = useState(false);
 
   const handlePreview = (articleId: number, title: string, url: string) => {
     setSelectedArticle({ id: articleId, title, url });
+    setReaderOpen(true);
   };
 
   const currentIndex = selectedArticle
@@ -61,13 +49,15 @@ export default function SearchFeed({ clusters }: { clusters: Cluster[] }) {
 
   return (
     <>
-      <div className="divide-y divide-zinc-200/80 -mx-4 sm:mx-0">
+      <div className="divide-y divide-zinc-200/80 border-zinc-200/80 -mx-4 border-b sm:mx-0 sm:overflow-hidden sm:rounded-card sm:border">
         {clusters.map((cluster) => (
           <FeedCard
             key={cluster.cluster_id}
             cluster={cluster}
             onPreview={handlePreview}
-            isSelected={selectedArticle?.id === cluster.lead_article_id}
+            isSelected={
+              readerOpen && selectedArticle?.id === cluster.lead_article_id
+            }
           />
         ))}
       </div>
@@ -77,9 +67,8 @@ export default function SearchFeed({ clusters }: { clusters: Cluster[] }) {
           articleId={selectedArticle.id}
           articleTitle={selectedArticle.title}
           articleUrl={selectedArticle.url}
-          isOpen={!!selectedArticle}
-          onClose={() => setSelectedArticle(null)}
-          mode={deviceType === "desktop" ? "tablet" : deviceType}
+          isOpen={readerOpen}
+          onClose={() => setReaderOpen(false)}
           onPrev={handlePrev}
           onNext={handleNext}
           hasPrev={currentIndex > 0}

@@ -119,6 +119,10 @@ export default function SearchLink() {
         const editable = (e.target as HTMLElement)?.isContentEditable;
         if (tag === "INPUT" || tag === "TEXTAREA" || editable) return;
 
+        // Don't steal focus into the (hidden) search input while a modal
+        // like the reader panel or sheet is open
+        if (document.querySelector('[role="dialog"]')) return;
+
         e.preventDefault();
         expandDesktop();
       }
@@ -157,7 +161,7 @@ export default function SearchLink() {
       >
         <div
           onClick={() => desktopInputRef.current?.focus()}
-          className={`h-full w-full rounded-lg p-[1.5px] transition-colors ${
+          className={`h-full w-full rounded-card p-[1.5px] transition-colors ${
             desktopOpen
               ? "animate-[gradient-spin_3s_linear_infinite]"
               : "bg-zinc-200 hover:bg-zinc-300"
@@ -171,7 +175,7 @@ export default function SearchLink() {
               : undefined
           }
         >
-          <div className="relative h-full flex items-center rounded-[calc(0.5rem-1.5px)] bg-white">
+          <div className="relative h-full flex items-center rounded-[calc(var(--radius-card)-1.5px)] bg-white">
             <SearchIcon className="absolute left-2.5 h-3.5 w-3.5 text-zinc-400 pointer-events-none" />
             <input
               ref={desktopInputRef}
@@ -181,7 +185,7 @@ export default function SearchLink() {
               aria-label="Search"
               onFocus={() => setDesktopOpen(true)}
               onBlur={() => setDesktopOpen(false)}
-              className="h-full w-full appearance-none rounded-[calc(0.5rem-1.5px)] bg-transparent py-0 pl-8 pr-10 text-sm placeholder:text-zinc-400 focus:outline-none cursor-pointer focus:cursor-text"
+              className="h-full w-full appearance-none rounded-[calc(var(--radius-card)-1.5px)] bg-transparent py-0 pl-8 pr-10 text-sm placeholder:text-zinc-400 focus:outline-none cursor-pointer focus:cursor-text"
             />
             <kbd className="absolute right-2 text-[10px] leading-none text-zinc-400 border border-zinc-200 rounded px-1 py-0.5 font-sans pointer-events-none">
               {desktopOpen ? "Esc" : "F"}

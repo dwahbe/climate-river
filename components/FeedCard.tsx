@@ -50,7 +50,7 @@ export default function FeedCard({
 
   return (
     <article
-      className={`bg-white ${isSummaryGrid ? "flex h-full flex-col overflow-hidden rounded-xl border border-zinc-200/80 transition-colors hover:border-zinc-300" : "border-b border-zinc-200/80"} ${!isSummaryGrid && isSelected ? "lg:bg-zinc-50 lg:ring-2 lg:ring-inset lg:ring-zinc-200" : ""}`}
+      className={`bg-white ${isSummaryGrid ? "flex h-full flex-col overflow-hidden rounded-card border border-zinc-200/80 transition-colors hover:border-zinc-300" : ""} ${!isSummaryGrid && isSelected ? "lg:bg-zinc-50 lg:ring-2 lg:ring-inset lg:ring-zinc-200" : ""}`}
     >
       {/* Header with padding */}
       <div

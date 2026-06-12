@@ -62,7 +62,7 @@ export default function PublicationLeaderboard({ entries }: Props) {
   if (entries.length === 0) return null;
 
   return (
-    <div className="overflow-hidden rounded-xl border border-zinc-200/80 bg-white divide-y divide-zinc-200/80">
+    <div className="overflow-hidden rounded-card border border-zinc-200/80 bg-white divide-y divide-zinc-200/80">
       {entries.map((entry, i) => (
         <a
           key={entry.homepage}

@@ -36,7 +36,7 @@ export default function SearchInput({
           defaultValue={defaultValue}
           placeholder="Search climate news..."
           autoComplete="off"
-          className="w-full rounded-xl border border-zinc-200 bg-white px-4 py-3 pl-11 text-base placeholder:text-zinc-400 focus:border-zinc-300 focus:outline-none focus:ring-2 focus:ring-zinc-100 transition-shadow"
+          className="w-full rounded-card border border-zinc-200 bg-white px-4 py-3 pl-11 text-base placeholder:text-zinc-400 focus:border-zinc-300 focus:outline-none focus:ring-2 focus:ring-zinc-100 transition-shadow"
         />
       </div>
     </form>

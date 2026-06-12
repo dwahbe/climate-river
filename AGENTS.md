@@ -79,6 +79,7 @@ Change the owning module, not call sites — several are pinned by parity tests:
 
 - MVC-ish layers: repositories for DB access, services for business logic; follow existing patterns
 - Functional React components; Tailwind for all styling; minimal comments
+- Corner radii come from tokens in `app/global.css`: `rounded-card` (surfaces: feed, leaderboard, drawers, images) and `rounded-control` (buttons, inputs, tooltips); `rounded-full` for pills/avatars — don't use raw `rounded-md/lg/xl`
 - Error handling: try-catch with `error instanceof Error` guards
 - `@/*` maps to project root; scripts run with `bun scripts/<name>.ts`
 - No pre-commit hooks — lint/build/test manually before pushing
