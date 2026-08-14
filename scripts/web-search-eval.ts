@@ -369,7 +369,7 @@ async function runScenarioForProfile(
     };
     const result = await generateText({
       model,
-      system: buildSystemPrompt(profile.promptVariant, promptInputs),
+      instructions: buildSystemPrompt(profile.promptVariant, promptInputs),
       prompt: buildUserPrompt(profile.promptVariant, promptInputs),
       tools: {
         webSearch: openai.tools.webSearch({

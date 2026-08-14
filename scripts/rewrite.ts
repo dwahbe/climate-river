@@ -122,7 +122,7 @@ async function generateWithOpenAI(
       // On gateway failure (free-tier 429s killed ~90% of attempts for a month)
       // we fall back to direct OpenAI when OPENAI_API_KEY is configured.
       model: direct ? openai(model) : gateway(`openai/${model}`),
-      system,
+      instructions: system,
       prompt,
       temperature: 0.15,
       maxOutputTokens: 80,
@@ -173,7 +173,7 @@ async function generateWithOpenAI(
           inputTokenDetails?: { cacheReadTokens?: number };
         }
       | undefined;
-    // AI SDK v6 exposes cached tokens at usage.inputTokenDetails.cacheReadTokens.
+    // AI SDK v7 exposes cached tokens at usage.inputTokenDetails.cacheReadTokens.
     // Older shapes (usage.cachedInputTokens, providerMetadata.openai.cachedPromptTokens)
     // are kept as fallbacks for forward/back compat. Gateway preserves the
     // unified shape, but we also peek at providerMetadata.gateway as a fallback

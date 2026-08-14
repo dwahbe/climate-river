@@ -42,14 +42,14 @@
     "feeds:discover:apply": "bun --env-file=.env.local scripts/discover-feeds.ts --apply"
   },
   "dependencies": {
-    "@ai-sdk/openai": "^3.0.96",
+    "@ai-sdk/openai": "^4",
     "@supabase/supabase-js": "2.90.0",
     "@tailwindcss/typography": "^0.5.20",
     "@tavily/core": "^0.7.7",
     "@types/sanitize-html": "^2.16.1",
     "@vercel/analytics": "^2.0.1",
     "@vercel/oidc": "^3.8.4",
-    "ai": "^6.0.255",
+    "ai": "^7",
     "clsx": "^2.1.1",
     "dayjs": "^1.11.21",
     "defuddle": "^0.19.2",

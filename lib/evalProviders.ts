@@ -1,6 +1,6 @@
-import type { LanguageModelV3 } from "@ai-sdk/provider";
+import type { LanguageModelV4 } from "@ai-sdk/provider";
 
-type ProviderFactory = (modelId: string) => LanguageModelV3;
+type ProviderFactory = (modelId: string) => LanguageModelV4;
 
 /**
  * Explicit provider loaders for installed packages. Providers not listed here
@@ -55,7 +55,7 @@ const resolvedFactories = new Map<string, ProviderFactory>();
 export async function resolveModel(
   provider: string,
   modelId: string,
-): Promise<LanguageModelV3> {
+): Promise<LanguageModelV4> {
   let factory = resolvedFactories.get(provider);
   if (!factory) {
     const loader = PROVIDER_LOADERS[provider];

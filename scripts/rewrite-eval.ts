@@ -337,7 +337,7 @@ async function generateWithProfile(
     const model = await resolveModel(profile.provider, profile.modelId);
     const result = await generateText({
       model,
-      system,
+      instructions: system,
       prompt,
       temperature: profile.temperature,
       maxOutputTokens: profile.maxOutputTokens,

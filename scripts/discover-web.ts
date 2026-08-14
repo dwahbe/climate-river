@@ -1351,16 +1351,8 @@ Rules:
 
     const response = await generateText({
       model: openai(WEB_SEARCH_MODEL),
-      messages: [
-        {
-          role: "system",
-          content: systemMessage,
-        },
-        {
-          role: "user",
-          content: userMessage,
-        },
-      ],
+      instructions: systemMessage,
+      prompt: userMessage,
       tools: {
         webSearch: openai.tools.webSearch({
           searchContextSize: WEB_SEARCH_CONTEXT_SIZE,
@@ -1732,16 +1724,8 @@ async function generateGoogleNewsSuggestions(
   try {
     const { text } = await generateText({
       model: openai(GOOGLE_SUGGESTION_MODEL),
-      messages: [
-        {
-          role: "system",
-          content: `You build advanced Google News RSS queries for climate reporting. Return only a JSON array. Each element must contain "searchTerm" (Google News-ready string), "reasoning" (short justification), and "expectedSources" (array). Every searchTerm must use boolean operators and/or quoted phrases, include a recency constraint such as when:1d/when:3d, and when helpful reference curated climate outlets (e.g., ${GOOGLE_SUGGESTION_OUTLET_EXAMPLES}) via site:domain or source keywords.${domainInstruction} Avoid generic requests like "climate change news". No prose outside the JSON.`,
-        },
-        {
-          role: "user",
-          content: `Provide 2-4 advanced Google News search strings to surface fresh ${ENGLISH_LANGUAGE_PROMPT_CONSTRAINT} climate or environment coverage for: "${query}". Combine climate subtopics (policy, finance, science, justice) with geography or sector cues, apply recency filters (e.g., when:1d), and bias toward reputable climate outlets.${allowedDomains.length > 0 ? ` Only target these domains: ${allowedDomains.join(", ")}.` : ""} Avoid generic or repetitive phrases.`,
-        },
-      ],
+      instructions: `You build advanced Google News RSS queries for climate reporting. Return only a JSON array. Each element must contain "searchTerm" (Google News-ready string), "reasoning" (short justification), and "expectedSources" (array). Every searchTerm must use boolean operators and/or quoted phrases, include a recency constraint such as when:1d/when:3d, and when helpful reference curated climate outlets (e.g., ${GOOGLE_SUGGESTION_OUTLET_EXAMPLES}) via site:domain or source keywords.${domainInstruction} Avoid generic requests like "climate change news". No prose outside the JSON.`,
+      prompt: `Provide 2-4 advanced Google News search strings to surface fresh ${ENGLISH_LANGUAGE_PROMPT_CONSTRAINT} climate or environment coverage for: "${query}". Combine climate subtopics (policy, finance, science, justice) with geography or sector cues, apply recency filters (e.g., when:1d), and bias toward reputable climate outlets.${allowedDomains.length > 0 ? ` Only target these domains: ${allowedDomains.join(", ")}.` : ""} Avoid generic or repetitive phrases.`,
       maxOutputTokens: GOOGLE_SUGGESTION_MAX_OUTPUT_TOKENS,
     });
 
