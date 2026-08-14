@@ -38,6 +38,20 @@ export const MODEL_PRICING: Record<string, ModelPricing> = {
     inputPerMillion: 0.1,
     outputPerMillion: 0.4,
   },
+  // Open-weight candidates (rates from the gateway /v1/models catalog, 2026-07).
+  "openai/gpt-oss-120b": { inputPerMillion: 0.1, outputPerMillion: 0.5 },
+  "deepseek/deepseek-v4-flash": {
+    inputPerMillion: 0.14,
+    outputPerMillion: 0.28,
+  },
+  "deepseek/deepseek-v4-pro": {
+    inputPerMillion: 0.435,
+    outputPerMillion: 0.87,
+  },
+  "alibaba/qwen3.7-plus": { inputPerMillion: 0.4, outputPerMillion: 1.6 },
+  "zai/glm-4.7-flash": { inputPerMillion: 0.07, outputPerMillion: 0.4 },
+  "google/gemma-4-31b-it": { inputPerMillion: 0.14, outputPerMillion: 0.4 },
+  "minimax/minimax-m2.7": { inputPerMillion: 0.3, outputPerMillion: 1.2 },
 };
 
 /**
@@ -110,5 +124,71 @@ export const DEFAULT_EVAL_PROFILES: EvalProfile[] = [
     retryPromptVariant: "legacy",
     temperature: 0.15,
     maxOutputTokens: 80,
+  },
+  // Open-weight candidates. Reasoning-capable models (gpt-oss, deepseek-v4,
+  // minimax) get a larger token budget so thinking doesn't starve the answer;
+  // the validator only sees result.text.
+  {
+    id: "ow-gpt-oss-120b",
+    provider: "gateway",
+    modelId: "openai/gpt-oss-120b",
+    promptVariant: "legacy",
+    retryPromptVariant: "legacy",
+    temperature: 0.15,
+    maxOutputTokens: 1024,
+  },
+  {
+    id: "ow-deepseek-v4-flash",
+    provider: "gateway",
+    modelId: "deepseek/deepseek-v4-flash",
+    promptVariant: "legacy",
+    retryPromptVariant: "legacy",
+    temperature: 0.15,
+    maxOutputTokens: 1024,
+  },
+  {
+    id: "ow-deepseek-v4-pro",
+    provider: "gateway",
+    modelId: "deepseek/deepseek-v4-pro",
+    promptVariant: "legacy",
+    retryPromptVariant: "legacy",
+    temperature: 0.15,
+    maxOutputTokens: 1024,
+  },
+  {
+    id: "ow-qwen3.7-plus",
+    provider: "gateway",
+    modelId: "alibaba/qwen3.7-plus",
+    promptVariant: "legacy",
+    retryPromptVariant: "legacy",
+    temperature: 0.15,
+    maxOutputTokens: 80,
+  },
+  {
+    id: "ow-glm-4.7-flash",
+    provider: "gateway",
+    modelId: "zai/glm-4.7-flash",
+    promptVariant: "legacy",
+    retryPromptVariant: "legacy",
+    temperature: 0.15,
+    maxOutputTokens: 80,
+  },
+  {
+    id: "ow-gemma-4-31b",
+    provider: "gateway",
+    modelId: "google/gemma-4-31b-it",
+    promptVariant: "legacy",
+    retryPromptVariant: "legacy",
+    temperature: 0.15,
+    maxOutputTokens: 80,
+  },
+  {
+    id: "ow-minimax-m2.7",
+    provider: "gateway",
+    modelId: "minimax/minimax-m2.7",
+    promptVariant: "legacy",
+    retryPromptVariant: "legacy",
+    temperature: 0.15,
+    maxOutputTokens: 1024,
   },
 ];
