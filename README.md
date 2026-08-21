@@ -2,7 +2,7 @@
 
 Minimal, fast climate news river. Next.js (App Router) + Tailwind + Postgres (Supabase).
 
-Built by [Dylan Wahbe](https://dylanwahbe.com).
+Created by [Dylan Wahbe](https://dylanwahbe.com).
 
 ## Pipeline Architecture
 
