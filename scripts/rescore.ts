@@ -3,13 +3,21 @@ import { query, endPool } from "@/lib/db";
 import { visibleLanguagePredicate } from "@/lib/languagePolicy";
 import { UNKNOWN_SOURCE_WEIGHT } from "@/config/sourceTiers";
 import { LEAD_INELIGIBLE_SQL } from "@/lib/clustering";
-import { AGGREGATOR_URL_SQL_REGEX } from "@/lib/aggregators";
+import {
+  AGGREGATOR_URL_SQL_REGEX,
+  LOW_VALUE_URL_SQL_REGEX,
+} from "@/lib/aggregators";
 import {
   HL_CLUSTER_H,
   NOVELTY_DISTANCE_CEIL,
   NOVELTY_DISTANCE_FLOOR,
   SCORE_WEIGHTS,
+  VELOCITY_WINDOW_H,
+  clusterAgeDampingSql,
   clusterFreshnessSql,
+  publisherHostSql,
+  sourceWeightSql,
+  strongSourceCountSql,
 } from "@/lib/scoring";
 
 const HOUR = 3600;
@@ -24,8 +32,8 @@ const HL_ARTICLE_H = 6; // 6h half-life: articles lose 50% score every 6 hours
 const ACTIVE_DAYS = 10;
 
 // Normalization constants — divide each blend term by its practical maximum so
-// the documented weights (51% fresh / 27% velocity / 12% coverage / 5% avg_w /
-// 5% pool) are the real contribution shares. coverage max =
+// the documented weights (30% fresh / 35% velocity / 15% coverage / 15%
+// authority / 5% pool) are the real contribution shares. coverage max =
 // ln(101)+0.8·ln(11)+0.4·ln(16); velocity max = ln(1+10 distinct sources);
 // pool max = ln(1+50). avg_w is divided by the max tier (10).
 const COVERAGE_MAX = Math.log(101) + 0.8 * Math.log(11) + 0.4 * Math.log(16);
@@ -35,13 +43,13 @@ const POOL_MAX = Math.log(51);
 export async function run(opts: { closePool?: boolean } = {}) {
   console.log("🔄 Starting rescore process...");
 
-  // Ensure table. This MUST mirror the authoritative definition in
-  // scripts/schema.ts (single source of truth) — previously the two diverged on
-  // lead_article_id nullability and the updated_at column, which on a fresh DB
-  // could leave the table without updated_at (breaking the score index and the
-  // updated_at writes in clustering/cluster-maintenance).
-  console.log("📋 Ensuring cluster_scores table exists...");
-  await query(`
+  // Ensure table. scripts/schema.ts owns this DDL (`bun run schema`); the
+  // per-run guard is opt-in like ingest/discover so the 9×/day rescore doesn't
+  // take an AccessExclusiveLock on the homepage's hottest table for no-op
+  // ALTERs. The definition MUST mirror schema.ts when it does run.
+  if (process.env.SCHEMA_ENSURE === "1") {
+    console.log("📋 Ensuring cluster_scores table exists...");
+    await query(`
     CREATE TABLE IF NOT EXISTS cluster_scores (
       cluster_id      bigint PRIMARY KEY REFERENCES clusters(id) ON DELETE CASCADE,
       lead_article_id bigint NOT NULL REFERENCES articles(id) ON DELETE CASCADE,
@@ -50,24 +58,33 @@ export async function run(opts: { closePool?: boolean } = {}) {
       updated_at      timestamptz NOT NULL DEFAULT now()
     );
   `);
-  // Serve-time freshness: base_score is the decay-free blend, latest_pub is the
-  // cluster's newest article. get_river_clusters applies the cluster-freshness
-  // decay to base_score at read time, so the homepage stays current at ISR
-  // granularity (5min) instead of only when rescore runs (gaps up to 6h).
-  await query(
-    `ALTER TABLE cluster_scores ADD COLUMN IF NOT EXISTS base_score double precision NOT NULL DEFAULT 0;`,
-  );
-  await query(
-    `ALTER TABLE cluster_scores ADD COLUMN IF NOT EXISTS latest_pub timestamptz;`,
-  );
-  await query(`ALTER TABLE cluster_scores ADD COLUMN IF NOT EXISTS why text;`);
-  // Clustering v2: persisted centroid (maintained incrementally by
-  // lib/clustering.ts; backfilled by schema.ts/cluster-maintenance). The
-  // novelty term reads it — ensure the column exists even on a pre-v2 DB.
-  await query(
-    `ALTER TABLE clusters ADD COLUMN IF NOT EXISTS centroid vector(1536);`,
-  );
-  console.log("✅ Table ensured");
+    // Serve-time freshness: base_score is the decay-free blend, latest_pub is the
+    // cluster's newest article. get_river_clusters applies the cluster-freshness
+    // decay to base_score at read time, so the homepage stays current at ISR
+    // granularity (5min) instead of only when rescore runs (gaps up to 6h).
+    await query(
+      `ALTER TABLE cluster_scores ADD COLUMN IF NOT EXISTS base_score double precision NOT NULL DEFAULT 0;`,
+    );
+    await query(
+      `ALTER TABLE cluster_scores ADD COLUMN IF NOT EXISTS latest_pub timestamptz;`,
+    );
+    await query(
+      `ALTER TABLE cluster_scores ADD COLUMN IF NOT EXISTS why text;`,
+    );
+    await query(
+      `ALTER TABLE cluster_scores ADD COLUMN IF NOT EXISTS first_pub timestamptz;`,
+    );
+    await query(
+      `ALTER TABLE cluster_scores ADD COLUMN IF NOT EXISTS strong_sources int;`,
+    );
+    // Clustering v2: persisted centroid (maintained incrementally by
+    // lib/clustering.ts; backfilled by schema.ts/cluster-maintenance). The
+    // novelty term reads it — ensure the column exists even on a pre-v2 DB.
+    await query(
+      `ALTER TABLE clusters ADD COLUMN IF NOT EXISTS centroid vector(1536);`,
+    );
+    console.log("✅ Table ensured");
+  }
 
   console.log("🔄 Starting main rescore query...");
   console.log(
@@ -94,6 +111,7 @@ export async function run(opts: { closePool?: boolean } = {}) {
         author,
         canonical_url,
         source_id,
+        host_norm,
         src_weight,
         is_aggregator,
         is_wire,
@@ -107,10 +125,16 @@ export async function run(opts: { closePool?: boolean } = {}) {
           a.author,
           a.canonical_url,
           a.source_id,
-          COALESCE(s.weight, ${UNKNOWN_SOURCE_WEIGHT})         AS src_weight,
+          -- corroboration is counted per OUTLET (normalized publisher host),
+          -- not per sources row — one outlet has several rows (RSS, discover://,
+          -- web://) and must not corroborate itself (lib/scoring.ts)
+          ${publisherHostSql("a.canonical_url")}               AS host_norm,
+          -- effective weight: source tier, capped for journal-paper URLs
+          ${sourceWeightSql("s.weight", "a.canonical_url")}   AS src_weight,
           -- penalties (ints, not booleans)
           (a.canonical_url ~* '${AGGREGATOR_URL_SQL_REGEX}')::int                             AS is_aggregator,
-          (a.canonical_url ~ '(prnewswire|businesswire)\\.com')::int                          AS is_wire,
+          -- press releases / low-value hosts (shared list, lib/aggregators.ts)
+          (a.canonical_url ~* '${LOW_VALUE_URL_SQL_REGEX}')::int                              AS is_wire,
           -- lead eligibility (shared rule, lib/clustering.ts): aggregator URLs
           -- link to interstitials; suspect dates (published ≈ fetched) are
           -- usually parse failures. Such articles can still corroborate a
@@ -165,15 +189,36 @@ export async function run(opts: { closePool?: boolean } = {}) {
         MAX(a.published_at)                                              AS latest_pub,
         SUM(COALESCE(a.src_weight,0))                                    AS sum_w,
         AVG(COALESCE(a.src_weight,0))                                    AS avg_w,
-        -- velocity = distinct sources publishing in the last 4h. Counting
-        -- DISTINCT sources (not raw articles) stops one outlet live-blogging
-        -- from inflating velocity; the bounded window also excludes
-        -- future-dated articles (which the old (now()-pub)<=4h test let in).
+        MAX(COALESCE(a.src_weight,0))                                    AS max_w,
+        MIN(a.published_at)                                              AS first_pub,
+        -- "strong" corroboration for the Top gate: distinct OUTLETS (publisher
+        -- hosts) at or above the trusted-weight floor (shared SQL, lib/scoring.ts)
+        ${strongSourceCountSql("a.host_norm", "a.src_weight")}          AS strong_sources,
+        -- raw velocity = distinct sources publishing in the last 4h (kept in
+        -- why (JSON) for debugging; the score uses the trust-weighted v4w below).
+        -- Counting DISTINCT sources (not raw articles) stops one outlet
+        -- live-blogging from inflating velocity; the bounded window also
+        -- excludes future-dated articles.
         COUNT(DISTINCT a.source_id) FILTER (
           WHERE a.published_at BETWEEN now() - interval '4 hours' AND now()
         )                                                                AS v4
       FROM art a
       GROUP BY a.cluster_id
+    ),
+    -- Trust-weighted velocity over VELOCITY_WINDOW_H (lib/scoring.ts): each
+    -- distinct source publishing in the window contributes weight/10, so three
+    -- tier-8 outlets (2.4) outrun six weight-2 blogs or PR mirrors (1.2).
+    -- Capped at 10 "tier-10 equivalents" below.
+    velw AS (
+      SELECT cluster_id, SUM(w) / 10.0 AS vw
+      FROM (
+        SELECT a.cluster_id, a.host_norm,
+               MAX(COALESCE(a.src_weight, ${UNKNOWN_SOURCE_WEIGHT})) AS w
+        FROM art a
+        WHERE a.published_at BETWEEN now() - make_interval(hours => ${VELOCITY_WINDOW_H}) AND now()
+        GROUP BY a.cluster_id, a.host_norm
+      ) per_outlet
+      GROUP BY cluster_id
     ),
     -- Reference set for the novelty boost: centroids of the current top-scored
     -- recently-active clusters. A cluster far from ALL of these is covering
@@ -195,16 +240,22 @@ export async function run(opts: { closePool?: boolean } = {}) {
         c.latest_pub,
         c.sum_w,
         c.avg_w,
+        c.max_w,
+        c.first_pub,
+        c.strong_sources,
         c.v4,
+        COALESCE(v.vw, 0) AS vw,
         -- coverage normalized to [0,1] (capped so mega-clusters can't dominate)
         ( LN(1 + LEAST(COALESCE(c.sum_w,0), 100))
           + 0.8*LN(1 + LEAST(COALESCE(c.distinct_sources,0), 10))
           + 0.4*LN(1 + LEAST(COALESCE(c.size,0), 15))
         ) / ${COVERAGE_MAX} AS coverage_norm,
-        -- velocity normalized to [0,1]
-        LN(1 + LEAST(COALESCE(c.v4,0), 10)) / ${VELOCITY_MAX} AS velocity_norm,
-        -- avg source weight normalized to [0,1] (max tier = 10)
-        LEAST(COALESCE(c.avg_w,0), 10) / 10.0 AS avg_w_norm,
+        -- trust-weighted velocity normalized to [0,1]
+        LN(1 + LEAST(COALESCE(v.vw,0), 10)) / ${VELOCITY_MAX} AS velocity_norm,
+        -- authority: best source covering the story, normalized (max tier 10).
+        -- (Was the member average, which low-weight corroborators dragged
+        -- down — a Reuters story plus three GN mirrors averaged a 4.)
+        LEAST(COALESCE(c.max_w,0), 10) / 10.0 AS authority_norm,
         -- novelty normalized to [0,1]: cosine distance from the nearest current
         -- top cluster, ramped between NOVELTY_DISTANCE_FLOOR and _CEIL (see
         -- lib/scoring.ts for the live calibration). Incumbent top clusters
@@ -228,6 +279,7 @@ export async function run(opts: { closePool?: boolean } = {}) {
             WHERE af.cluster_id = c.cluster_id), 50)) / ${POOL_MAX} AS pool_norm
       FROM clust c
       LEFT JOIN clusters cl ON cl.id = c.cluster_id
+      LEFT JOIN velw v ON v.cluster_id = c.cluster_id
     ),
     -- NOTE: every clust row has ≥1 art member (clust GROUPs art), so the lead
     -- subquery always returns a row, and the art CTE assigns each article to
@@ -243,31 +295,42 @@ export async function run(opts: { closePool?: boolean } = {}) {
         -- read time in get_river_clusters (shared math in lib/scoring.ts).
         (${SCORE_WEIGHTS.velocity} * velocity_norm)
           + (${SCORE_WEIGHTS.coverage} * coverage_norm)
-          + (${SCORE_WEIGHTS.avgWeight} * avg_w_norm)
+          + (${SCORE_WEIGHTS.authority} * authority_norm)
           + (${SCORE_WEIGHTS.pool} * pool_norm)
           + (${SCORE_WEIGHTS.novelty} * novelty_norm) AS base_score,
         -- cluster freshness, clamped to (0, 1] — for the stored score snapshot.
         ${clusterFreshnessSql("latest_pub")} AS fresh,
+        -- age damping on the cluster's first article (shared math, lib/scoring.ts)
+        ${clusterAgeDampingSql("first_pub")} AS age_damping,
+        first_pub,
+        strong_sources,
         lead_article_id,
         jsonb_build_object(
           'velocity_norm', round(velocity_norm::numeric, 4),
           'coverage_norm', round(coverage_norm::numeric, 4),
-          'avg_w_norm', round(avg_w_norm::numeric, 4),
+          'authority_norm', round(authority_norm::numeric, 4),
           'pool_norm', round(pool_norm::numeric, 4),
           'novelty_norm', round(novelty_norm::numeric, 4),
+          'age_damping', round((${clusterAgeDampingSql("first_pub")})::numeric, 4),
           'distinct_sources', distinct_sources,
-          'v4', v4
+          'strong_sources', strong_sources,
+          'max_w', max_w,
+          'v4', v4,
+          'vel_w', round(vw::numeric, 3),
+          'vel_window_h', ${VELOCITY_WINDOW_H}
         )::text AS why
       FROM clust_scored
       WHERE lead_article_id IS NOT NULL
     )
-    INSERT INTO cluster_scores (cluster_id, size, score, base_score, latest_pub, lead_article_id, why)
+    INSERT INTO cluster_scores (cluster_id, size, score, base_score, latest_pub, first_pub, strong_sources, lead_article_id, why)
     SELECT
       cluster_id,
       size,
-      base_score + ${SCORE_WEIGHTS.freshness} * fresh AS score,
+      (base_score + ${SCORE_WEIGHTS.freshness} * fresh) * age_damping AS score,
       base_score,
       latest_pub,
+      first_pub,
+      strong_sources,
       lead_article_id,
       why
     FROM final
@@ -276,6 +339,8 @@ export async function run(opts: { closePool?: boolean } = {}) {
           score = EXCLUDED.score,
           base_score = EXCLUDED.base_score,
           latest_pub = EXCLUDED.latest_pub,
+          first_pub = EXCLUDED.first_pub,
+          strong_sources = EXCLUDED.strong_sources,
           lead_article_id = EXCLUDED.lead_article_id,
           why = EXCLUDED.why,
           updated_at = now();

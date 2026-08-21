@@ -17,6 +17,7 @@ import {
 import { resolveTier } from "@/config/sourceTiers";
 import { resolveGoogleNewsUrl } from "@/lib/googleNews";
 import { findRecentDuplicate } from "@/lib/articleDedupe";
+import { isLowValueHost, isLowValueUrl } from "@/lib/aggregators";
 
 type RssItem = {
   title?: string;
@@ -28,21 +29,31 @@ type RssItem = {
 };
 
 // ------- config -------
+// Broad Google News queries. Tuned 2026-08-21: dropped "EV sales", "solar
+// power", "wind power", "renewable energy" (they pulled trade press, PR wires
+// and stock sites — the "random EV/company news" feel) in favour of policy,
+// science and impact phrasing that matches how major outlets headline.
 const DEFAULT_QUERIES = [
   "climate change",
   "global warming",
+  "greenhouse gas emissions",
   "carbon emissions",
-  "renewable energy",
-  "solar power",
-  "wind power",
+  "climate policy",
+  "EPA rule emissions",
+  "endangerment finding",
+  "climate lawsuit",
+  "clean energy tax credits",
+  "COP31 climate summit",
+  "Paris Agreement",
+  "IEA report energy",
+  "IPCC",
   "carbon capture",
-  "EV sales",
-  "heat wave",
+  "offshore wind",
+  "heat wave record",
   "wildfire",
   "flooding",
   "drought",
   "sea level rise",
-  "IPCC",
 ];
 
 // locale / edition for Google News (defaults to US-English)
@@ -297,6 +308,24 @@ async function ingestQuery(
     // paying for URL resolution or embedding (shared rule: lib/articleDedupe).
     if ((await findRecentDuplicate({ title: cleanTitle })) !== null) continue;
 
+    // The GN RSS <source url> names the publisher before any resolution, so
+    // low-value hosts (PR wires, mirrors, content farms) are dropped here and
+    // never spend a resolve slot; the post-resolution check below is the backstop.
+    const publisher = extractPublisher(it);
+    const publisherHost = (() => {
+      try {
+        return publisher.homepage ? new URL(publisher.homepage).hostname : null;
+      } catch {
+        return null;
+      }
+    })();
+    if (publisherHost && isLowValueHost(publisherHost)) {
+      console.log(
+        `⏭️  Skipped (low-value host ${publisherHost}): "${title.substring(0, 60)}..."`,
+      );
+      continue;
+    }
+
     // Resolve the GN redirect to the real publisher URL. Unresolved articles
     // are still inserted (they corroborate clusters) but keep the aggregator
     // host, which downstream treats as lead-ineligible. The resolve budget is
@@ -327,7 +356,14 @@ async function ingestQuery(
     } catch {
       continue;
     }
-    const publisher = extractPublisher(it);
+    // PR wires, stock-tip sites, syndication mirrors, content farms: never
+    // worth an article row (they'd be lead-ineligible anyway).
+    if (isLowValueUrl(urlCanon)) {
+      console.log(
+        `⏭️  Skipped (low-value host ${host}): "${title.substring(0, 60)}..."`,
+      );
+      continue;
+    }
     const sid = await upsertSourceForHost(host);
     const id = await insertArticle(
       sid,

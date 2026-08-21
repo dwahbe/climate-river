@@ -8,7 +8,7 @@
 -- =============================================================================
 -- 1) Per-provider yield, cost, and acceptance rate (last 7 days)
 -- =============================================================================
--- Answers: "What's our $/inserted for Tavily vs OpenAI vs Google News?"
+-- Answers: "What's our $/inserted for Exa vs OpenAI vs Google News?"
 WITH search_rollup AS (
   SELECT
     provider,
@@ -79,7 +79,7 @@ ORDER BY provider, n DESC;
 -- =============================================================================
 -- 3) Cross-provider duplicates: who's finding what others already found?
 -- =============================================================================
--- Answers: "Is OpenAI returning 50% duplicates of Tavily articles?
+-- Answers: "Is OpenAI returning 50% duplicates of Exa articles?
 --          Could we drop the OpenAI fallback without losing unique inserts?"
 SELECT
   c.provider,
@@ -165,7 +165,7 @@ LIMIT 25;
 -- 7) Run-level rollup (group searches into discovery runs by run_id)
 -- =============================================================================
 -- Answers: "What does a typical discovery run look like end to end? Are we
---          spending most of our budget on Tavily or OpenAI within a run?"
+--          spending most of our budget on Exa or OpenAI within a run?"
 WITH search_rollup AS (
   SELECT
     run_id,
@@ -213,7 +213,7 @@ WITH search_rollup AS (
     ROUND(SUM(cost_usd)::numeric, 4) AS cost_usd
   FROM discovery_searches
   WHERE created_at >= NOW() - INTERVAL '14 days'
-    AND provider IN ('tavily', 'openai_web_search')
+    AND provider IN ('exa', 'openai_web_search')
   GROUP BY 1, 2, 3
 ),
 candidate_rollup AS (
@@ -228,7 +228,7 @@ candidate_rollup AS (
   FROM discovery_searches s
   LEFT JOIN discovery_candidates c ON c.discovery_search_id = s.id
   WHERE s.created_at >= NOW() - INTERVAL '14 days'
-    AND s.provider IN ('tavily', 'openai_web_search')
+    AND s.provider IN ('exa', 'openai_web_search')
   GROUP BY 1, 2, 3
 )
 SELECT

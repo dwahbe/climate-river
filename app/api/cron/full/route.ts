@@ -109,7 +109,6 @@ export async function GET(req: Request) {
       try {
         console.log(`🔎 Running AI web discovery (${elapsed()}s elapsed)...`);
         webDiscoverResult = await safeRun(import("@/scripts/discover-web"), {
-          broadArticleCap: 10,
           outletArticleCap: 20,
           outletLimitPerBatch: 6,
           outletBatchSize: 3,

@@ -407,9 +407,10 @@ export function buildSourceQuantContext(
   const numbers = new Set([...extractNumericTokens(combined), ...spelled]);
   const measurements: Measurement[] = [
     ...parseMeasurements(combined),
-    ...spelled.map(
-      (token): Measurement => ({ value: Number(token), unit: "" }),
-    ),
+    ...spelled.map((token): Measurement => ({
+      value: Number(token),
+      unit: "",
+    })),
   ];
   return {
     hasQuantEvidence: containsQuantifier(combined),
@@ -690,8 +691,7 @@ export type HeadlineFailureReason =
   | "llm_error";
 
 export type HeadlineCheck =
-  | { ok: true; reason: null }
-  | { ok: false; reason: HeadlineFailureReason };
+  { ok: true; reason: null } | { ok: false; reason: HeadlineFailureReason };
 
 /**
  * Structured validator for rewritten headlines. Returns a stable failure

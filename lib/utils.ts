@@ -172,10 +172,7 @@ export function cleanGoogleNewsTitle(title: string): string {
  * Rejects future dates, suspiciously-close-to-now dates, and dates older than maxAgeDays.
  */
 export type ArticleDateValidationCode =
-  | "missing_date"
-  | "future_date"
-  | "suspicious_current_time"
-  | "too_old";
+  "missing_date" | "future_date" | "suspicious_current_time" | "too_old";
 
 export type ArticleDateValidation =
   | { valid: true }
@@ -226,4 +223,23 @@ export function isValidArticleDate(
   }
 
   return { valid: true };
+}
+
+/**
+ * Feeds are disabled (not deleted) by prefixing `sources.feed_url` with this
+ * marker; ingest only fetches `http%` feeds. Every consumer that enumerates
+ * feed URLs (feed autodiscovery, admin health, coverage checks) must treat
+ * such rows as inactive — use these helpers rather than re-deriving the rule.
+ */
+export const DISABLED_FEED_PREFIX = "disabled://";
+
+export function isDisabledFeedUrl(feedUrl: string | null | undefined): boolean {
+  return !!feedUrl && feedUrl.startsWith(DISABLED_FEED_PREFIX);
+}
+
+/** The original feed URL behind a disabled:// marker (unchanged otherwise). */
+export function stripDisabledFeedPrefix(feedUrl: string): string {
+  return isDisabledFeedUrl(feedUrl)
+    ? feedUrl.slice(DISABLED_FEED_PREFIX.length)
+    : feedUrl;
 }

@@ -1,6 +1,7 @@
 // scripts/categorize.ts
 import { query, endPool } from "@/lib/db";
 import { categorizeAndStoreArticle } from "@/lib/categorizer";
+import { isTrustedClimateSource } from "@/config/trustedClimateSources";
 
 // Pipeline state machine (categorize stage): every attempt is recorded in
 // articles.pipeline_state->'categorize' with {status, attempts, at}. Selection
@@ -79,9 +80,10 @@ export async function run(
   if (opts.recategorizeAll) {
     // Explicit override: ignore the state gate.
     sql = `
-      SELECT a.id, a.title, a.dek, a.content_text,
+      SELECT a.id, a.title, a.dek, a.content_text, s.feed_url, s.homepage_url,
              COALESCE((a.pipeline_state#>>'{categorize,attempts}')::int, 0) AS attempts
       FROM articles a
+      LEFT JOIN sources s ON s.id = a.source_id
       WHERE a.published_at >= now() - interval '30 days'
       ORDER BY a.published_at DESC
       LIMIT $1
@@ -90,9 +92,10 @@ export async function run(
     // Only retry articles that have content now - avoids wasting API calls
     // on articles that would fail climate check again with just title+dek
     sql = `
-      SELECT a.id, a.title, a.dek, a.content_text,
+      SELECT a.id, a.title, a.dek, a.content_text, s.feed_url, s.homepage_url,
              COALESCE((a.pipeline_state#>>'{categorize,attempts}')::int, 0) AS attempts
       FROM articles a
+      LEFT JOIN sources s ON s.id = a.source_id
       LEFT JOIN article_categories ac ON ac.article_id = a.id
       WHERE ac.article_id IS NULL
         AND a.published_at >= now() - interval '30 days'
@@ -103,9 +106,10 @@ export async function run(
     `;
   } else {
     sql = `
-      SELECT a.id, a.title, a.dek, a.content_text,
+      SELECT a.id, a.title, a.dek, a.content_text, s.feed_url, s.homepage_url,
              COALESCE((a.pipeline_state#>>'{categorize,attempts}')::int, 0) AS attempts
       FROM articles a
+      LEFT JOIN sources s ON s.id = a.source_id
       LEFT JOIN article_categories ac ON ac.article_id = a.id
       WHERE ac.article_id IS NULL
         AND a.published_at >= now() - interval '30 days'
@@ -122,6 +126,8 @@ export async function run(
     title: string;
     dek: string | null;
     content_text: string | null;
+    feed_url: string | null;
+    homepage_url: string | null;
     attempts: number;
   }>(sql, [limit]);
 
@@ -144,10 +150,16 @@ export async function run(
         .join(" ")
         .slice(0, 2000); // Limit to reasonable length
 
+      // Climate-only sources bypass the keyword gate (same rule as ingest)
+      const trusted = isTrustedClimateSource({
+        feedUrl: article.feed_url,
+        homepageUrl: article.homepage_url,
+      });
       const stored = await categorizeAndStoreArticle(
         article.id,
         article.title,
         summary || undefined,
+        { trusted },
       );
       await recordCategorizeAttempt(
         article.id,

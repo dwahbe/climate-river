@@ -2,6 +2,12 @@ export type ClimateOutlet = {
   name: string;
   domain: string;
   promptHint?: string;
+  /**
+   * Sweep sizing hint for paid outlet discovery (Exa): "high" volume
+   * outlets publish many climate stories a day and get one search each;
+   * everything else is batched several domains per call. Default: low.
+   */
+  volume?: "high" | "low";
 };
 
 export const CURATED_CLIMATE_OUTLETS: ClimateOutlet[] = [
@@ -13,36 +19,43 @@ export const CURATED_CLIMATE_OUTLETS: ClimateOutlet[] = [
   {
     name: "Bloomberg Green",
     domain: "bloomberg.com",
+    volume: "high",
     promptHint: "Bloomberg Green climate finance and technology coverage",
   },
   {
     name: "Financial Times Climate",
     domain: "ft.com",
+    volume: "high",
     promptHint: "FT climate transition and net-zero reporting",
   },
   {
     name: "The New York Times Climate Forward",
     domain: "nytimes.com",
+    volume: "high",
     promptHint: "NYT Climate Forward desk",
   },
   {
     name: "Associated Press Climate",
     domain: "apnews.com",
+    volume: "high",
     promptHint: "AP News climate desk",
   },
   {
     name: "Reuters Climate",
     domain: "reuters.com",
+    volume: "high",
     promptHint: "Reuters climate and energy transition bureau",
   },
   {
     name: "The Guardian Environment",
     domain: "theguardian.com",
+    volume: "high",
     promptHint: "Guardian climate and environment desk",
   },
   {
     name: "Washington Post Climate Solutions",
     domain: "washingtonpost.com",
+    volume: "high",
     promptHint: "WaPo climate desk and Climate Solutions vertical",
   },
   {
@@ -108,11 +121,13 @@ export const CURATED_CLIMATE_OUTLETS: ClimateOutlet[] = [
   {
     name: "E&E News",
     domain: "eenews.net",
+    volume: "high",
     promptHint: "E&E News climate policy reporting",
   },
   {
     name: "Politico Climate Wire",
     domain: "politico.com",
+    volume: "high",
     promptHint: "Politico climate and energy policy desk",
   },
   {
@@ -131,9 +146,9 @@ export const CURATED_CLIMATE_OUTLETS: ClimateOutlet[] = [
     promptHint: "Carbon Pulse carbon markets briefing",
   },
   {
-    name: "Ember Climate",
-    domain: "ember-climate.org",
-    promptHint: "Ember power sector analysis",
+    name: "Ember",
+    domain: "ember-energy.org",
+    promptHint: "Ember power sector and electricity transition analysis",
   },
   {
     name: "Rocky Mountain Institute",
@@ -199,5 +214,21 @@ export const CURATED_CLIMATE_OUTLETS: ClimateOutlet[] = [
     name: "Scientific American Climate",
     domain: "scientificamerican.com",
     promptHint: "Scientific American climate reporting",
+  },
+  // Added 2026-08-21 (no working RSS feed → discovery sweep only)
+  {
+    name: "Semafor Net Zero",
+    domain: "semafor.com",
+    promptHint: "Semafor Net Zero climate and energy newsletter stories",
+  },
+  {
+    name: "DeSmog",
+    domain: "desmog.com",
+    promptHint: "DeSmog fossil-fuel industry accountability reporting",
+  },
+  {
+    name: "Drilled",
+    domain: "drilled.media",
+    promptHint: "Drilled climate accountability journalism",
   },
 ];

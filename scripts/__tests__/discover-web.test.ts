@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   rootDomain,
+  coveredOutletDomains,
   isLikelyFabricatedUrl,
   parseWebSearchJson,
   filterUncitedResults,
@@ -657,5 +658,51 @@ describe("modelSupportsWebSearchFilters", () => {
     assert.equal(modelSupportsWebSearchFilters("gpt-4o"), true);
     assert.equal(modelSupportsWebSearchFilters("gpt-4.1"), true);
     assert.equal(modelSupportsWebSearchFilters("gpt-4o-2024-11-20"), true);
+  });
+});
+
+describe("coveredOutletDomains", () => {
+  const outlets = [
+    "nytimes.com",
+    "earthobservatory.nasa.gov",
+    "news.un.org",
+    "bbc.com",
+    "theguardian.com",
+    "mongabay.com",
+    "rmi.org",
+  ];
+  it("root-level outlets are covered by feeds on their subdomains", () => {
+    const covered = coveredOutletDomains(
+      ["rss.nytimes.com", "news.mongabay.com"],
+      outlets,
+    );
+    assert.ok(covered.has("nytimes.com"));
+    assert.ok(covered.has("mongabay.com"));
+  });
+  it("subdomain outlets are NOT covered by an unrelated feed on the parent domain", () => {
+    const covered = coveredOutletDomains(
+      ["www.nasa.gov", "climate.nasa.gov"],
+      outlets,
+    );
+    assert.equal(covered.has("earthobservatory.nasa.gov"), false);
+    assert.ok(
+      coveredOutletDomains(["earthobservatory.nasa.gov"], outlets).has(
+        "earthobservatory.nasa.gov",
+      ),
+    );
+    assert.equal(
+      coveredOutletDomains(["un.org"], outlets).has("news.un.org"),
+      false,
+    );
+  });
+  it("explicit aliases cover cross-root feed hosts", () => {
+    assert.ok(
+      coveredOutletDomains(["feeds.bbci.co.uk"], outlets).has("bbc.com"),
+    );
+  });
+  it("uncovered outlets stay uncovered", () => {
+    const covered = coveredOutletDomains(["www.theguardian.com"], outlets);
+    assert.ok(covered.has("theguardian.com"));
+    assert.equal(covered.has("rmi.org"), false);
   });
 });

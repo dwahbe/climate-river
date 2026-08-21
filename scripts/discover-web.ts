@@ -2,9 +2,18 @@
 import { query, endPool } from "@/lib/db";
 import { generateText } from "ai";
 import { openai } from "@ai-sdk/openai";
-import { tavily } from "@tavily/core";
 import { categorizeAndStoreArticle } from "@/lib/categorizer";
 import { isClimateRelevant } from "@/lib/tagger";
+import { isTrustedClimateSource } from "@/config/trustedClimateSources";
+import { isLowValueUrl } from "@/lib/aggregators";
+import { resolveTier, UNKNOWN_SOURCE_WEIGHT } from "@/config/sourceTiers";
+import {
+  EXA_MONTH_TO_DATE_SPEND_SQL,
+  domainMatches,
+  exaSearch,
+  hostFromUrl,
+  type ExaSearchType,
+} from "@/lib/exa";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { Buffer } from "node:buffer";
 import { randomUUID } from "node:crypto";
@@ -36,30 +45,9 @@ import {
   type ArticleDateValidation,
 } from "@/lib/utils";
 
-// Tavily client for cost-effective site-specific search
-// Only initialize if API key exists (SDK throws on empty key)
-const TAVILY_ENABLED = !!process.env.TAVILY_API_KEY;
-const tavilyClient = TAVILY_ENABLED
-  ? tavily({ apiKey: process.env.TAVILY_API_KEY! })
-  : null;
-const TAVILY_SEARCH_DEPTH = (process.env.TAVILY_SEARCH_DEPTH || "basic") as
-  | "basic"
-  | "advanced";
-const TAVILY_COST_PER_SEARCH = parseEnvFloat(
-  "TAVILY_COST_PER_SEARCH_USD",
-  TAVILY_SEARCH_DEPTH === "basic"
-    ? parseEnvFloat("TAVILY_BASIC_SEARCH_COST_USD", 0.008)
-    : parseEnvFloat("TAVILY_ADVANCED_SEARCH_COST_USD", 0.016),
-);
+type DiscoveryProvider = "exa" | "openai_web_search" | "google_news_site";
 
-type DiscoveryProvider =
-  | "tavily"
-  | "openai_web_search"
-  | "openai_google_suggestions"
-  | "google_news_rss"
-  | "google_news_site";
-
-type DiscoverySegment = "broad" | "outlet" | "google_news";
+type DiscoverySegment = "outlet";
 
 type DiscoveryOutcomeReason =
   | "inserted"
@@ -74,6 +62,7 @@ type DiscoveryOutcomeReason =
   | "invalid_date"
   | "fabricated_url"
   | "aggregator_url"
+  | "low_value_host"
   | "unresolved_aggregator"
   | "out_of_domain"
   | "unreachable"
@@ -126,15 +115,35 @@ type WebSearchOverrides = {
   segment?: DiscoverySegment;
 };
 
-const GOOGLE_SUGGESTION_MODEL =
-  process.env.GOOGLE_SUGGESTION_MODEL || "gpt-4o-mini";
-const GOOGLE_SUGGESTION_MAX_OUTPUT_TOKENS = parseEnvInt(
-  "GOOGLE_SUGGESTION_MAX_OUTPUT_TOKENS",
-  600,
-);
-
-// Paid OpenAI web-search fallback. OFF by default: the free Google News `site:`
-// provider + GN RSS carry outlet/broad discovery at $0. Set WEB_SEARCH_ENABLED=1
+// Exa outlet sweep (primary paid tier, 2026-08). Plain REST via lib/exa.ts —
+// no contents requested, so a call is $0.007 (+$0.001 per result past 10).
+// Throttled to the `full` crons (paidOutletSweep) and capped by a month-to-
+// date dollar budget computed from discovery_searches.cost_usd, so the free
+// $10/month Exa credit is a hard ceiling, not a hope.
+const EXA_API_KEY = process.env.EXA_API_KEY || "";
+const EXA_ENABLED = process.env.WEB_SEARCH_EXA === "1" && !!EXA_API_KEY;
+const EXA_SEARCH_TYPE: ExaSearchType = (() => {
+  const raw = (process.env.EXA_SEARCH_TYPE || "auto").toLowerCase();
+  return raw === "fast" || raw === "instant" ? raw : "auto";
+})();
+const EXA_USE_NEWS_CATEGORY = process.env.EXA_CATEGORY_NEWS !== "0";
+const EXA_QUERY =
+  process.env.EXA_QUERY ||
+  "news about climate change, greenhouse gas emissions, clean energy, extreme weather or climate policy";
+// Results per call: high-volume outlets (Reuters/Bloomberg/AP…) publish
+// dozens of stories a day and Exa's in-domain ranking is weak for short
+// windows, so ask for more and let the relevance gate filter.
+const EXA_RESULTS_HIGH_VOLUME = parseEnvInt("EXA_RESULTS_HIGH_VOLUME", 12);
+const EXA_RESULTS_LOW_VOLUME = parseEnvInt("EXA_RESULTS_LOW_VOLUME", 10);
+const EXA_LOW_VOLUME_BATCH = parseEnvInt("EXA_LOW_VOLUME_BATCH", 5);
+// Look-back window per sweep (hours). Live probe 2026-08-21: within 36h
+// Exa's index held only ~2 climate items per big outlet (index lag), while a
+// 7-day pool ranked ~65% relevant — so 72h (matching outletFreshHours) and
+// let the relevance gate + dedup handle repeats.
+const EXA_WINDOW_HOURS = parseEnvInt("EXA_WINDOW_HOURS", 72);
+const EXA_MONTHLY_BUDGET_USD = parseEnvFloat("EXA_MONTHLY_BUDGET_USD", 10);
+// Paid OpenAI web-search fallback. OFF by default: Exa (budget-capped) and the
+// free Google News `site:` tier carry outlet discovery. Set WEB_SEARCH_ENABLED=1
 // to re-enable the paid serendipity channel (each forced tool call ~$0.01,
 // capped by WEB_SEARCH_MAX_CALLS_PER_RUN).
 const WEB_SEARCH_ENABLED = process.env.WEB_SEARCH_ENABLED === "1";
@@ -162,12 +171,6 @@ const WEB_SEARCH_MAX_CALLS_PER_RUN = parseEnvInt(
   25,
 );
 const WEB_SEARCH_DEBUG = process.env.WEB_SEARCH_DEBUG === "1";
-// Tavily segments are opt-in: the plan has been over its limit since May 2026,
-// and free Google News site: queries now carry outlet coverage.
-const TAVILY_OUTLETS_ENABLED =
-  TAVILY_ENABLED && process.env.WEB_SEARCH_TAVILY_OUTLETS === "1";
-const TAVILY_BROAD_ENABLED =
-  TAVILY_ENABLED && process.env.WEB_SEARCH_TAVILY_BROAD === "1";
 const WEB_SEARCH_FORCE = process.env.WEB_SEARCH_FORCE === "1";
 // Cap on per-run Google News redirect resolutions (~100-150ms network call each)
 const WEB_SEARCH_GN_RESOLVE_CAP = parseEnvInt("WEB_SEARCH_GN_RESOLVE_CAP", 40);
@@ -185,6 +188,27 @@ function setRunDeadline(deadlineAt: number): void {
 }
 function hasRunTime(marginMs = 5_000): boolean {
   return Date.now() < runDeadlineAt - marginMs;
+}
+
+// Per-run counters (reset in run()). Single-run CLI/cron, so module state is fine.
+const runCounters = { exaSpendUsd: 0 };
+
+/**
+ * Exa dollars spent so far this calendar month, from logged discovery_searches
+ * rows (cost_usd comes from Exa's per-call costDollars). Used with the in-run
+ * counter to enforce EXA_MONTHLY_BUDGET_USD as a hard cap.
+ */
+async function exaMonthToDateSpendUsd(): Promise<number> {
+  try {
+    const { rows } = await query<{ usd: number }>(EXA_MONTH_TO_DATE_SPEND_SQL);
+    return Number(rows[0]?.usd ?? 0) || 0;
+  } catch (error) {
+    console.warn(
+      "Could not read Exa month-to-date spend (assuming 0):",
+      error instanceof Error ? error.message : String(error),
+    );
+    return 0;
+  }
 }
 const DISCOVERY_PAUSE_MS = 1000; // Reduced from 2000ms for faster processing
 const DEFAULT_OUTLET_FRESHNESS_HOURS = 72; // Reduced from 96 for fresher content
@@ -266,34 +290,140 @@ function normalizeDomain(domain: string): string {
     .toLowerCase();
 }
 
-const RSS_COVERED_DOMAINS = new Set([
-  "apnews.com",
+// Static fallback only — the live answer comes from the sources table (see
+// resolveDiscoveryOutlets): an outlet is feed-covered when it has an http feed
+// that fetched OK/empty in the last 48h. The old hardcoded list wrongly
+// excluded Reuters/AP/WaPo/Bloomberg (no working feed) from every sweep.
+const STATIC_RSS_COVERED_DOMAINS = new Set([
   "bbc.com",
   "bbci.co.uk",
-  "bloomberg.com",
+  "canarymedia.com",
+  "carbon-pulse.com",
   "carbonbrief.org",
   "climate.gov",
   "climatechangenews.com",
   "cleantechnica.com",
+  "downtoearth.org.in",
+  "energymonitor.ai",
   "ft.com",
   "grist.org",
+  "heatmap.news",
   "insideclimatenews.org",
   "jacobin.com",
+  "mongabay.com",
   "nature.com",
   "nytimes.com",
-  "reuters.com",
+  "politico.com",
+  "scientificamerican.com",
   "theguardian.com",
-  "washingtonpost.com",
   "yaleclimateconnections.org",
 ]);
 
-const DISCOVERY_OUTLETS = CURATED_CLIMATE_OUTLETS.filter(
-  (outlet) => !RSS_COVERED_DOMAINS.has(normalizeDomain(outlet.domain)),
-);
+// Feed hosts that don't share a registrable root with the outlet domain
+// (everything on a plain subdomain — rss.nytimes.com, news.mongabay.com — is
+// already handled by the root match in coveredOutletDomains).
+const FEED_HOST_ALIASES: Record<string, string> = {
+  "bbci.co.uk": "bbc.com",
+  "feeds.bbci.co.uk": "bbc.com",
+};
 
-const RSS_SKIPPED_OUTLETS = CURATED_CLIMATE_OUTLETS.filter((outlet) =>
-  RSS_COVERED_DOMAINS.has(normalizeDomain(outlet.domain)),
-);
+// A feed counts as live coverage only if it actually produced an article
+// recently — `last_fetch_status` can't tell a dead-but-parsing feed ("Hello
+// world!" from 2023) from a quiet one, since ingest writes 'empty' for any
+// fetch with zero inserts.
+const FEED_COVERAGE_DAYS = 7;
+
+function outletsNotCoveredBy(covered: Set<string>): ClimateOutlet[] {
+  return CURATED_CLIMATE_OUTLETS.filter(
+    (outlet) => !covered.has(normalizeDomain(outlet.domain)),
+  );
+}
+
+/**
+ * Which outlet domains are covered by the given live feed/homepage hosts.
+ * Root-level outlets (nytimes.com) are covered by any feed on a subdomain
+ * (rss.nytimes.com); subdomain outlets (earthobservatory.nasa.gov) only by an
+ * exact host or an explicit alias — a feed on www.nasa.gov must not cover
+ * them. Pure, exported for tests.
+ */
+export function coveredOutletDomains(
+  feedHosts: Iterable<string>,
+  outletDomains: string[],
+): Set<string> {
+  const hosts = new Set<string>();
+  for (const raw of feedHosts) {
+    const host = normalizeDomain(raw);
+    if (!host) continue;
+    hosts.add(host);
+    const aliased = FEED_HOST_ALIASES[host];
+    if (aliased) hosts.add(normalizeDomain(aliased));
+  }
+  const covered = new Set<string>();
+  for (const raw of outletDomains) {
+    const d = normalizeDomain(raw);
+    if (!d) continue;
+    if (hosts.has(d)) {
+      covered.add(d);
+      continue;
+    }
+    if (rootDomain(d) === d) {
+      for (const h of hosts) {
+        if (rootDomain(h) === d) {
+          covered.add(d);
+          break;
+        }
+      }
+    }
+  }
+  return covered;
+}
+
+/**
+ * Outlets that still need a discovery sweep: curated outlets minus those with
+ * a live RSS feed in `sources` (one that produced an article in the last
+ * FEED_COVERAGE_DAYS). Falls back to the static list if the DB lookup fails.
+ */
+async function resolveDiscoveryOutlets(): Promise<{
+  outlets: ClimateOutlet[];
+  source: "db" | "static";
+}> {
+  try {
+    const { rows } = await query<{
+      feed_url: string;
+      homepage_url: string | null;
+    }>(
+      `SELECT s.feed_url, s.homepage_url
+       FROM sources s
+       WHERE s.feed_url LIKE 'http%'
+         AND EXISTS (
+           SELECT 1 FROM articles a
+            WHERE a.source_id = s.id
+              AND a.fetched_at > now() - make_interval(days => ${FEED_COVERAGE_DAYS})
+         )`,
+    );
+    const feedHosts: string[] = [];
+    for (const row of rows) {
+      for (const candidate of [row.feed_url, row.homepage_url]) {
+        const host = hostFromUrl(candidate);
+        if (host) feedHosts.push(host);
+      }
+    }
+    const coveredOutlets = coveredOutletDomains(
+      feedHosts,
+      CURATED_CLIMATE_OUTLETS.map((o) => o.domain),
+    );
+    return { outlets: outletsNotCoveredBy(coveredOutlets), source: "db" };
+  } catch (error) {
+    console.warn(
+      "Falling back to static RSS-covered outlet list:",
+      error instanceof Error ? error.message : String(error),
+    );
+    return {
+      outlets: outletsNotCoveredBy(STATIC_RSS_COVERED_DOMAINS),
+      source: "static",
+    };
+  }
+}
 
 const sourceCache = new Map<string, number>();
 
@@ -311,7 +441,7 @@ const OUTLET_BATCH_DOMAIN_GROUPS: string[][] = [
   ["restofworld.org", "mongabay.com", "downtoearth.org.in", "grist.org"],
   ["eenews.net", "wri.org", "iea.org", "weforum.org"],
   ["amnesty.org", "news.un.org", "climate.gov", "earthobservatory.nasa.gov"],
-  ["carbon-pulse.com", "ember-climate.org", "energymonitor.ai", "rmi.org"],
+  ["carbon-pulse.com", "ember-energy.org", "energymonitor.ai", "rmi.org"],
   [
     "project-syndicate.org",
     "theatlantic.com",
@@ -319,13 +449,6 @@ const OUTLET_BATCH_DOMAIN_GROUPS: string[][] = [
     "nationalgeographic.com",
   ],
 ];
-
-const GOOGLE_SUGGESTION_OUTLET_EXAMPLES = (
-  DISCOVERY_OUTLETS.length > 0 ? DISCOVERY_OUTLETS : CURATED_CLIMATE_OUTLETS
-)
-  .slice(0, 10)
-  .map((outlet) => outlet.name)
-  .join(", ");
 
 const OPENAI_MODEL_PRICING: Record<
   string,
@@ -684,18 +807,16 @@ async function attachDiscoveryCandidates(
     searchQuery: string;
   },
 ): Promise<WebSearchResult[]> {
-  const annotated = results.map(
-    (result, index): WebSearchResult => ({
-      ...result,
-      discovery: {
-        ...(result.discovery ?? {}),
-        provider: params.provider,
-        searchId: params.searchId ?? undefined,
-        query: params.searchQuery,
-        rank: index + 1,
-      },
-    }),
-  );
+  const annotated = results.map((result, index): WebSearchResult => ({
+    ...result,
+    discovery: {
+      ...(result.discovery ?? {}),
+      provider: params.provider,
+      searchId: params.searchId ?? undefined,
+      query: params.searchQuery,
+      rank: index + 1,
+    },
+  }));
 
   if (!params.searchId || !(await ensureDiscoveryTelemetryTables())) {
     return annotated;
@@ -910,16 +1031,6 @@ function slugifyHost(host: string): string {
     .replace(/(^-|-$)/g, "");
 }
 
-function hostFromUrl(url: string | undefined): string | null {
-  if (!url) return null;
-  try {
-    const parsed = new URL(url);
-    return parsed.hostname.replace(/^www\./, "").toLowerCase();
-  } catch {
-    return null;
-  }
-}
-
 const COMPOUND_TLDS = new Set([
   "co.uk",
   "org.uk",
@@ -1007,11 +1118,6 @@ function humanizeHost(host: string): string {
   return meaningful
     .map((segment) => segment.charAt(0).toUpperCase() + segment.slice(1))
     .join(" ");
-}
-
-function domainMatches(host: string, normalizedDomain: string): boolean {
-  if (!host || !normalizedDomain) return false;
-  return host === normalizedDomain || host.endsWith(`.${normalizedDomain}`);
 }
 
 function isAllowedDomain(url: string, allowedDomains: string[]): boolean {
@@ -1140,67 +1246,6 @@ function cleanText(value: string | null | undefined): string {
     .replace(/\[(.*?)\]\((.*?)\)/g, "$1") // markdown links
     .replace(/<[^>]+>/g, "")
     .trim();
-}
-
-/**
- * Clean a snippet/dek by removing social share buttons, markdown artifacts,
- * images, navigation elements, and truncating to a reasonable length.
- */
-function cleanSnippet(
-  value: string | null | undefined,
-  maxLength = 250,
-): string {
-  if (!value) return "";
-
-  let cleaned = value
-    // Remove markdown images first (before link removal)
-    .replace(/!\[([^\]]*)\]\([^)]+\)/g, "")
-    // Remove markdown links, keeping text
-    .replace(/\[([^\]]*)\]\([^)]+(?:\s+"[^"]*")?\)/g, "$1")
-    // Remove social share button text patterns
-    .replace(/\b(Facebook|Twitter|Print|Email|Share this via [^)]+)\b/gi, "")
-    // Remove standalone URLs
-    .replace(/https?:\/\/[^\s]+/g, "")
-    // Remove mailto: patterns
-    .replace(/mailto:\S+/g, "")
-    // Remove markdown bold/italic
-    .replace(/\*\*([^*]+)\*\*/g, "$1")
-    .replace(/\*([^*]+)\*/g, "$1")
-    .replace(/__([^_]+)__/g, "$1")
-    .replace(/_([^_]+)_/g, "$1")
-    // Remove HTML tags
-    .replace(/<[^>]+>/g, "")
-    // Remove markdown headers
-    .replace(/^#{1,6}\s+/gm, "")
-    // Remove list markers
-    .replace(/^\s*[-*]\s+/gm, "")
-    // Remove image alt text patterns
-    .replace(/Image \d+:/gi, "")
-    // Clean up dates that appear alone
-    .replace(/^\d{1,2}\s+\w+\s+\d{4}\s*/gm, "")
-    // Remove category/tag-like text in square brackets
-    .replace(/\[[^\]]{1,30}\]/g, "")
-    // Normalize whitespace
-    .replace(/\s+/g, " ")
-    .trim();
-
-  // If the result is mostly garbage (too short or just punctuation), return empty
-  if (cleaned.length < 20 || /^[\s.,!?()-]*$/.test(cleaned)) {
-    return "";
-  }
-
-  // Find the first meaningful sentence (at least 40 chars ending in punctuation)
-  const sentenceMatch = cleaned.match(/^(.{40,}?[.!?])\s/);
-  if (sentenceMatch) {
-    cleaned = sentenceMatch[1];
-  }
-
-  // Truncate if still too long
-  if (cleaned.length > maxLength) {
-    cleaned = cleaned.slice(0, maxLength - 1).trimEnd() + "…";
-  }
-
-  return cleaned;
 }
 
 export function parseWebSearchJson(
@@ -1543,356 +1588,6 @@ Rules:
   }
 }
 
-// Tavily search - 20x cheaper than OpenAI for site-specific searches
-async function searchViaTavily(
-  domain: string,
-  maxResults = 5,
-  segment: DiscoverySegment = "outlet",
-): Promise<{ results: WebSearchResult[]; cost: number }> {
-  if (!TAVILY_ENABLED) {
-    return { results: [], cost: 0 };
-  }
-
-  const searchQuery = `site:${domain} climate energy environment`;
-  const startedAt = Date.now();
-
-  try {
-    console.log(`🔍 Tavily search: site:${domain} climate`);
-
-    // Tavily SDK: search(query: string, options?: TavilySearchOptions)
-    // tavilyClient is guaranteed non-null here because TAVILY_ENABLED check above
-    const response = await tavilyClient!.search(searchQuery, {
-      searchDepth: TAVILY_SEARCH_DEPTH,
-      includeAnswer: false,
-      maxResults,
-      includeDomains: [domain], // Use native domain filtering
-      topic: "news", // Focus on news articles
-      days: 7, // Last 7 days
-    });
-
-    const results: WebSearchResult[] = response.results
-      .filter((r) => {
-        // Verify the result is actually from the target domain
-        const host = hostFromUrl(r.url);
-        if (
-          !host ||
-          !domainMatches(normalizeDomain(host), normalizeDomain(domain))
-        ) {
-          return false;
-        }
-
-        // Filter out category pages, homepages, and non-article URLs
-        const path = new URL(r.url).pathname.toLowerCase();
-
-        // Skip if it's just a homepage or category page
-        if (path === "/" || path === "") return false;
-        if (
-          path.match(
-            /^\/(climate|energy|environment|news|about|contact|category|tag|topics?)?\/?$/,
-          )
-        )
-          return false;
-
-        // Skip if title looks like a category page
-        const title = r.title.toLowerCase();
-        if (
-          title === domain ||
-          title.match(/^(climate|energy|environment|news|about)\s*$/)
-        )
-          return false;
-        if (title.includes(" | home") || title.endsWith(" news")) return false;
-
-        return true;
-      })
-      .map((r) => ({
-        title: r.title,
-        url: r.url,
-        snippet: cleanSnippet(r.content),
-        publishedDate: r.publishedDate,
-        source: domain,
-        discovery: { raw: r },
-      }));
-
-    console.log(
-      `  Tavily returned ${results.length} results (~$${TAVILY_COST_PER_SEARCH.toFixed(4)})`,
-    );
-
-    const meta: SearchTelemetryMeta = {
-      provider: "tavily",
-      segment,
-      searchQuery,
-      requestedDomains: [domain],
-      searchDepth: TAVILY_SEARCH_DEPTH,
-    };
-    const searchId = await logSearchOutcome(meta, startedAt, {
-      status: "success",
-      resultCount: results.length,
-      costUsd: TAVILY_COST_PER_SEARCH,
-    });
-
-    return {
-      results: await attachDiscoveryCandidates(results, {
-        provider: "tavily",
-        searchId,
-        searchQuery,
-      }),
-      cost: TAVILY_COST_PER_SEARCH,
-    };
-  } catch (error) {
-    console.error(`Tavily search error for ${domain}:`, error);
-    await logSearchOutcome(
-      {
-        provider: "tavily",
-        segment,
-        searchQuery,
-        requestedDomains: [domain],
-        searchDepth: TAVILY_SEARCH_DEPTH,
-      },
-      startedAt,
-      { status: "error", error },
-    );
-    return { results: [], cost: 0 };
-  }
-}
-
-// Batch Tavily search for multiple domains
-async function searchViaTavilyBatch(
-  domains: string[],
-  maxResultsPerDomain = 4,
-): Promise<{ results: WebSearchResult[]; totalCost: number }> {
-  if (!TAVILY_ENABLED || domains.length === 0) {
-    return { results: [], totalCost: 0 };
-  }
-
-  const allResults: WebSearchResult[] = [];
-  let totalCost = 0;
-
-  // Search each domain sequentially to respect rate limits
-  for (const domain of domains) {
-    const { results, cost } = await searchViaTavily(
-      domain,
-      maxResultsPerDomain,
-    );
-    allResults.push(...results);
-    totalCost += cost;
-
-    // Small delay between searches
-    if (domains.indexOf(domain) < domains.length - 1) {
-      await new Promise((resolve) => setTimeout(resolve, 200));
-    }
-  }
-
-  return {
-    results: await dedupeWebResultsForProcessing(allResults),
-    totalCost,
-  };
-}
-
-async function discoverViaGoogleNews(
-  query: string,
-  allowedDomains: string[] = [],
-): Promise<WebSearchResult[]> {
-  const suggestionText = await generateGoogleNewsSuggestions(
-    query,
-    allowedDomains,
-  );
-  const suggestionResults = await executeAISearchSuggestions(suggestionText);
-
-  if (suggestionResults.length > 0) {
-    return suggestionResults;
-  }
-
-  console.log(
-    "AI suggestions empty, falling back to direct Google News search",
-  );
-  return await searchGoogleNewsRSS(
-    buildGoogleNewsFallbackQuery(query, allowedDomains),
-  );
-}
-
-async function generateGoogleNewsSuggestions(
-  query: string,
-  allowedDomains: string[] = [],
-): Promise<string | null> {
-  console.log(`OpenAI Google News suggestions: ${query}`);
-  const startedAt = Date.now();
-  const domainInstruction =
-    allowedDomains.length > 0
-      ? ` Every searchTerm must include a site: filter for at least one of these allowed domains: ${allowedDomains.join(", ")}.`
-      : "";
-
-  try {
-    const { text } = await generateText({
-      model: openai(GOOGLE_SUGGESTION_MODEL),
-      instructions: `You build advanced Google News RSS queries for climate reporting. Return only a JSON array. Each element must contain "searchTerm" (Google News-ready string), "reasoning" (short justification), and "expectedSources" (array). Every searchTerm must use boolean operators and/or quoted phrases, include a recency constraint such as when:1d/when:3d, and when helpful reference curated climate outlets (e.g., ${GOOGLE_SUGGESTION_OUTLET_EXAMPLES}) via site:domain or source keywords.${domainInstruction} Avoid generic requests like "climate change news". No prose outside the JSON.`,
-      prompt: `Provide 2-4 advanced Google News search strings to surface fresh ${ENGLISH_LANGUAGE_PROMPT_CONSTRAINT} climate or environment coverage for: "${query}". Combine climate subtopics (policy, finance, science, justice) with geography or sector cues, apply recency filters (e.g., when:1d), and bias toward reputable climate outlets.${allowedDomains.length > 0 ? ` Only target these domains: ${allowedDomains.join(", ")}.` : ""} Avoid generic or repetitive phrases.`,
-      maxOutputTokens: GOOGLE_SUGGESTION_MAX_OUTPUT_TOKENS,
-    });
-
-    const meta: SearchTelemetryMeta = {
-      provider: "openai_google_suggestions",
-      segment: "google_news",
-      searchQuery: query,
-      model: GOOGLE_SUGGESTION_MODEL,
-    };
-    await logSearchOutcome(meta, startedAt, {
-      status: "success",
-      resultCount: countGoogleSuggestionTerms(text),
-    });
-
-    return text ?? null;
-  } catch (error) {
-    console.error("Error generating Google News suggestions:", error);
-    await logSearchOutcome(
-      {
-        provider: "openai_google_suggestions",
-        segment: "google_news",
-        searchQuery: query,
-        model: GOOGLE_SUGGESTION_MODEL,
-      },
-      startedAt,
-      { status: "error", error },
-    );
-    return null;
-  }
-}
-
-function buildGoogleNewsFallbackQuery(
-  query: string,
-  allowedDomains: string[],
-): string {
-  if (allowedDomains.length === 0) return query;
-  const domainClause = allowedDomains
-    .map((domain) => `site:${domain}`)
-    .join(" OR ");
-  return `(${domainClause}) (climate OR energy OR environment) when:3d`;
-}
-
-function countGoogleSuggestionTerms(
-  content: string | null | undefined,
-): number {
-  if (!content) return 0;
-  try {
-    const suggestions = JSON.parse(content.match(/\[[\s\S]*\]/)?.[0] ?? "[]");
-    return Array.isArray(suggestions) ? suggestions.length : 0;
-  } catch {
-    return 0;
-  }
-}
-
-async function executeAISearchSuggestions(
-  content: string | null | undefined,
-): Promise<WebSearchResult[]> {
-  if (!content) {
-    return [];
-  }
-
-  try {
-    const suggestions = JSON.parse(content.match(/\[[\s\S]*\]/)?.[0] ?? "[]");
-    if (!Array.isArray(suggestions) || suggestions.length === 0) {
-      console.log("No JSON array found in AI response");
-      return [];
-    }
-
-    console.log(`AI suggested ${suggestions.length} search terms`);
-
-    const allResults: WebSearchResult[] = [];
-
-    for (const suggestion of suggestions.slice(0, 3)) {
-      // Limit to 3 suggestions
-      const searchTerm = suggestion.searchTerm || suggestion.search_term;
-      if (!searchTerm) continue;
-
-      console.log(`Executing AI suggestion: "${searchTerm}"`);
-      const results = await searchGoogleNewsRSS(searchTerm);
-      allResults.push(...results);
-
-      // Small delay between searches
-      await new Promise((resolve) => setTimeout(resolve, 1000));
-    }
-
-    return allResults;
-  } catch (error) {
-    console.error("Error executing AI search suggestions:", error);
-    return [];
-  }
-}
-
-async function searchGoogleNewsRSS(query: string): Promise<WebSearchResult[]> {
-  const startedAt = Date.now();
-  // Import RSS parser
-  const Parser = (await import("rss-parser")).default;
-  const parser = new Parser({
-    headers: {
-      "User-Agent": "ClimateRiverBot/0.1 (+https://climateriver.org)",
-    },
-    requestOptions: { timeout: 10000 },
-    customFields: {
-      item: [["source", "source", { keepArray: true }]],
-    },
-  });
-
-  try {
-    // Google News RSS search URL
-    const searchUrl = `https://news.google.com/rss/search?q=${encodeURIComponent(query)}&hl=en-US&gl=US&ceid=US:en`;
-
-    const feed = await parser.parseURL(searchUrl);
-
-    const results: WebSearchResult[] = [];
-    const items = (feed.items || []).slice(0, 5); // Limit to 5 results per query
-
-    for (const item of items) {
-      if (!item.title || !item.link) continue;
-
-      // Extract the real URL from Google News redirect
-      const realUrl = extractRealUrl(item.link);
-      if (hostFromUrl(realUrl) === "news.google.com") {
-        console.warn(`⚠️  Failed to resolve Google News URL: ${item.link}`);
-      }
-
-      // Extract publisher from RSS <source> element (same as ingest pipeline)
-      const publisher = extractPublisherFromRssItem(item);
-
-      results.push({
-        title: cleanGoogleNewsTitle(item.title),
-        url: realUrl,
-        snippet: item.contentSnippet || item.content || "",
-        publishedDate: item.isoDate || item.pubDate,
-        source: publisher.name || extractSourceFromUrl(realUrl),
-        publisherHomepage: publisher.homepage,
-      });
-    }
-
-    const meta: SearchTelemetryMeta = {
-      provider: "google_news_rss",
-      segment: "google_news",
-      searchQuery: query,
-    };
-    const searchId = await logSearchOutcome(meta, startedAt, {
-      status: "success",
-      resultCount: results.length,
-    });
-
-    return await attachDiscoveryCandidates(results, {
-      provider: "google_news_rss",
-      searchId,
-      searchQuery: query,
-    });
-  } catch (error) {
-    console.error(`Error searching Google News for "${query}":`, error);
-    await logSearchOutcome(
-      {
-        provider: "google_news_rss",
-        segment: "google_news",
-        searchQuery: query,
-      },
-      startedAt,
-      { status: "error", error },
-    );
-    return [];
-  }
-}
-
 export function buildGoogleNewsSiteQuery(domain: string): string {
   return `site:${normalizeDomain(domain)} when:2d`;
 }
@@ -1903,7 +1598,7 @@ export function buildGoogleNewsSiteFeedUrl(domain: string): string {
 
 /**
  * Free outlet discovery via Google News site: RSS queries (replaces paid
- * Tavily outlet searches). Links resolve to publisher URLs through
+ * paid sweeps). Links resolve to publisher URLs through
  * resolveGoogleNewsUrl, capped per run; candidates left on news.google.com
  * are returned separately so callers reject them instead of inserting
  * aggregator URLs.
@@ -2482,10 +2177,12 @@ async function getOrCreateSourceForResult(
       ? resultSource
       : humanizeHost(host);
 
-  // Default weight of 4 for web-discovered sources (lower than curated RSS sources)
-  // This prevents random/low-quality sites from ranking as high as major outlets.
-  // Scale is 1–10; see config/sourceTiers.ts.
-  const DEFAULT_WEB_DISCOVERED_WEIGHT = 4;
+  // Tiered hosts get their configured weight; everything else gets the same
+  // unknown-source default as RSS/GN discovery (2). The old flat 4 put
+  // "Trend Hunter"/"Raspberry Pi" above unknown-but-real newsrooms and let
+  // them lead clusters. Scale is 1–10; see config/sourceTiers.ts.
+  const DEFAULT_WEB_DISCOVERED_WEIGHT =
+    resolveTier(host) ?? UNKNOWN_SOURCE_WEIGHT;
 
   const inserted = await query<{ id: number }>(
     `
@@ -2666,6 +2363,72 @@ type DiscoverySegmentStats = {
   duration: number;
 };
 
+function emptySegmentStats(): DiscoverySegmentStats {
+  return {
+    inserted: 0,
+    scanned: 0,
+    queriesRun: 0,
+    browseCost: 0,
+    browseToolCalls: 0,
+    duration: 0,
+  };
+}
+
+// Rejection reasons that still prove a domain is being covered (the article
+// is already in the river).
+const DUPLICATE_REASONS = new Set<DiscoveryOutcomeReason>([
+  "duplicate_url",
+  "duplicate_title",
+  "duplicate_candidate",
+]);
+
+/**
+ * Shared tail of every discovery segment: walk deduped candidates in order,
+ * stop at the article cap (marking the rest), skip stale items, insert the
+ * rest, and record every outcome. Returns the inserted count and outcomes so
+ * callers can derive coverage from what was actually accepted.
+ */
+async function insertCollectedCandidates(params: {
+  results: WebSearchResult[];
+  articleCap: number;
+  insertedSoFar?: number;
+  freshnessCutoffMs: number | null;
+  fallbackSourceId: number;
+}): Promise<{ inserted: number; outcomes: CandidateOutcomeRecord[] }> {
+  const { results, articleCap, freshnessCutoffMs, fallbackSourceId } = params;
+  let inserted = params.insertedSoFar ?? 0;
+  let newlyInserted = 0;
+  const outcomes: CandidateOutcomeRecord[] = [];
+  for (let i = 0; i < results.length; i++) {
+    const result = results[i];
+    if (inserted >= articleCap) {
+      await markUnprocessedCandidates(results.slice(i), "article_cap_reached");
+      break;
+    }
+    const freshnessReason = freshnessCutoffMs
+      ? freshnessOutcomeReason(result, freshnessCutoffMs)
+      : null;
+    if (freshnessReason) {
+      console.log(
+        `- Skipped stale (${result.publishedDate ?? "unknown"}): ${result.title.substring(0, 80)}`,
+      );
+      outcomes.push({
+        result,
+        outcome: { accepted: false, reason: freshnessReason },
+      });
+      continue;
+    }
+    const outcome = await tryInsertDiscoveredArticle(result, fallbackSourceId);
+    outcomes.push({ result, outcome });
+    if (outcome.accepted) {
+      inserted++;
+      newlyInserted++;
+    }
+  }
+  await recordDiscoveryCandidateOutcomes(outcomes);
+  return { inserted: newlyInserted, outcomes };
+}
+
 function dateValidationOutcomeReason(
   validation: ArticleDateValidation,
 ): DiscoveryOutcomeReason {
@@ -2693,10 +2456,19 @@ async function tryInsertDiscoveredArticle(
     return { accepted: false, reason: "invalid_title" };
   }
 
-  const isClimate = isClimateRelevant({
-    title: result.title,
-    summary: result.snippet ?? undefined,
-  });
+  // Match ingest pipeline normalization (before the gate so the trusted-host
+  // check sees the publisher URL, not a redirect wrapper)
+  result = { ...result, url: canonical(extractRealUrl(result.url)) };
+
+  // Climate-only outlets (config/trustedClimateSources.ts) bypass the keyword
+  // gate — it dropped ~20% of Grist / 17% of Heatmap items in the 2026-08 audit.
+  const trusted = isTrustedClimateSource({ url: result.url });
+  const isClimate =
+    trusted ||
+    isClimateRelevant({
+      title: result.title,
+      summary: result.snippet ?? undefined,
+    });
 
   if (!isClimate) {
     const host = hostFromUrl(result.url) || result.source || "unknown source";
@@ -2705,9 +2477,6 @@ async function tryInsertDiscoveredArticle(
     );
     return { accepted: false, reason: "non_climate" };
   }
-
-  // Match ingest pipeline normalization
-  result = { ...result, url: canonical(extractRealUrl(result.url)) };
 
   // Reject URLs still pointing at aggregator hosts after resolution
   const normalizedHost = hostFromUrl(result.url);
@@ -2721,6 +2490,14 @@ async function tryInsertDiscoveredArticle(
   if (isLikelyFabricatedUrl(result.url)) {
     console.log(`⚠️  Skipping article with fabricated URL: ${result.url}`);
     return { accepted: false, reason: "fabricated_url" };
+  }
+
+  // PR wires / stock-tip sites / content farms (lib/aggregators.ts)
+  if (isLowValueUrl(result.url)) {
+    console.log(
+      `- Skipped low-value host ${normalizedHost}: ${result.title.substring(0, 80)}`,
+    );
+    return { accepted: false, reason: "low_value_host" };
   }
 
   const publishedAt = normalizePublishedDate(result.publishedDate);
@@ -2748,14 +2525,8 @@ async function tryInsertDiscoveredArticle(
   }
   const { language } = languageGate;
 
-  const reachable = await isUrlReachable(result.url);
-  if (!reachable) {
-    console.log(
-      `⚠️  Skipping unreachable URL (404/410): ${result.url} ("${result.title.substring(0, 60)}...")`,
-    );
-    return { accepted: false, reason: "unreachable" };
-  }
-
+  // Cheap DB duplicate check BEFORE the network reachability probe — most
+  // sweep results on later runs are already-known URLs.
   const duplicate = await findDuplicate(result.title, result.url);
 
   if (duplicate.duplicate) {
@@ -2765,6 +2536,14 @@ async function tryInsertDiscoveredArticle(
       reason: duplicate.reason,
       duplicateArticleId: duplicate.articleId,
     };
+  }
+
+  const reachable = await isUrlReachable(result.url);
+  if (!reachable) {
+    console.log(
+      `⚠️  Skipping unreachable URL (404/410): ${result.url} ("${result.title.substring(0, 60)}...")`,
+    );
+    return { accepted: false, reason: "unreachable" };
   }
 
   const { sourceId, publisherName, publisherHomepage } =
@@ -2790,6 +2569,7 @@ async function tryInsertDiscoveredArticle(
       articleId,
       result.title,
       result.snippet || undefined,
+      { trusted },
     );
     console.log(`✓ Added & categorized: ${result.title.substring(0, 60)}...`);
   } catch (error) {
@@ -2813,10 +2593,11 @@ function chunkArray<T>(items: T[], size: number): T[][] {
   return chunks;
 }
 
-function buildOutletBatches(batchSize: number): ClimateOutlet[][] {
-  const byDomain = new Map(
-    DISCOVERY_OUTLETS.map((outlet) => [outlet.domain, outlet]),
-  );
+function buildOutletBatches(
+  outlets: ClimateOutlet[],
+  batchSize: number,
+): ClimateOutlet[][] {
+  const byDomain = new Map(outlets.map((outlet) => [outlet.domain, outlet]));
   const assigned = new Set<string>();
   const batches: ClimateOutlet[][] = [];
 
@@ -2837,9 +2618,7 @@ function buildOutletBatches(batchSize: number): ClimateOutlet[][] {
     }
   }
 
-  const leftovers = DISCOVERY_OUTLETS.filter(
-    (outlet) => !assigned.has(outlet.domain),
-  );
+  const leftovers = outlets.filter((outlet) => !assigned.has(outlet.domain));
 
   for (const chunk of chunkArray(leftovers, batchSize)) {
     if (chunk.length > 0) {
@@ -2857,6 +2636,7 @@ async function runOutletDiscoverySegment({
   articleCap,
   freshHours,
   coveredDomains,
+  outlets,
 }: {
   fallbackSourceId: number;
   limitPerBatch: number;
@@ -2864,26 +2644,20 @@ async function runOutletDiscoverySegment({
   articleCap: number;
   freshHours: number;
   coveredDomains?: Set<string>;
+  outlets: ClimateOutlet[];
 }): Promise<DiscoverySegmentStats> {
-  if (DISCOVERY_OUTLETS.length === 0 || articleCap <= 0) {
-    return {
-      inserted: 0,
-      scanned: 0,
-      queriesRun: 0,
-      browseCost: 0,
-      browseToolCalls: 0,
-      duration: 0,
-    };
-  }
+  if (outlets.length === 0 || articleCap <= 0) return emptySegmentStats();
 
-  if (!TAVILY_OUTLETS_ENABLED) {
+  // This segment is the paid OpenAI web-search gap-filler (opt-in).
+  if (!WEB_SEARCH_ENABLED) {
     console.log(
-      "Tavily outlet tier disabled (set WEB_SEARCH_TAVILY_OUTLETS=1 and TAVILY_API_KEY to enable)",
+      "OpenAI outlet fallback disabled (set WEB_SEARCH_ENABLED=1 to enable)",
     );
+    return emptySegmentStats();
   }
 
   const segmentStart = Date.now();
-  const outletBatches = buildOutletBatches(batchSize);
+  const outletBatches = buildOutletBatches(outlets, batchSize);
   const freshnessCutoffMs =
     freshHours > 0 ? Date.now() - freshHours * 60 * 60 * 1000 : null;
 
@@ -2903,7 +2677,6 @@ async function runOutletDiscoverySegment({
     }
 
     const outletNames = batch.map((outlet) => outlet.promptHint || outlet.name);
-    const domains = batch.map((outlet) => outlet.domain);
     const normalizedDomainEntries = batch.map((outlet) => ({
       outlet,
       raw: outlet.domain,
@@ -2912,22 +2685,10 @@ async function runOutletDiscoverySegment({
 
     console.log(`Searching (site-specific batch): ${outletNames.join(", ")}`);
 
-    // TIER 1: Try Tavily first (opt-in; cheaper than OpenAI when enabled)
     let batchResults: WebSearchResult[] = [];
 
-    if (TAVILY_OUTLETS_ENABLED) {
-      console.log(`  → Tier 1: Tavily search for ${domains.length} domains`);
-      const { results: tavilyResults, totalCost } = await searchViaTavilyBatch(
-        domains,
-        Math.ceil(limitPerBatch / domains.length),
-      );
-      batchResults = tavilyResults;
-      browseCost += totalCost;
-      queriesRun += domains.length;
-    }
-
-    // Check which domains already have coverage (Google News site: tier) or
-    // got results from Tavily, so paid OpenAI fallbacks only run for gaps.
+    // Check which domains already have coverage (Exa / Google News site:
+    // tiers), so the paid OpenAI fallback only runs for gaps.
     const domainHitCounts = new Map<string, number>();
     for (const entry of normalizedDomainEntries) {
       if (coveredDomains?.has(entry.normalized)) {
@@ -2944,10 +2705,10 @@ async function runOutletDiscoverySegment({
       (entry) => (domainHitCounts.get(entry.normalized) ?? 0) === 0,
     );
 
-    // TIER 2: Fall back to OpenAI for domains Tavily missed
+    // OpenAI web search for domains still missing coverage
     if (missingDomainEntries.length > 0) {
       console.log(
-        `  → Tier 2: OpenAI fallback for ${missingDomainEntries.length} domains: ${missingDomainEntries
+        `  → OpenAI web search for ${missingDomainEntries.length} uncovered domains: ${missingDomainEntries
           .map((entry) => entry.outlet.name)
           .join(", ")}`,
       );
@@ -2993,55 +2754,9 @@ async function runOutletDiscoverySegment({
         openAIResults,
         missingDomainEntries.map((entry) => entry.normalized),
       );
-
-      const stillMissingAfterOpenAI = missingDomainEntries.filter(
-        (entry) => (domainHitCounts.get(entry.normalized) ?? 0) === 0,
-      );
-
-      if (stillMissingAfterOpenAI.length > 0) {
-        const googleDomains = stillMissingAfterOpenAI.map((entry) => entry.raw);
-        console.log(
-          `  → Tier 3: Google News fallback for ${googleDomains.length} domains: ${stillMissingAfterOpenAI
-            .map((entry) => entry.outlet.name)
-            .join(", ")}`,
-        );
-
-        const googleResults = await discoverViaGoogleNews(
-          `Latest climate coverage across: ${googleDomains.join(", ")}`,
-          googleDomains,
-        );
-        queriesRun++;
-        const domainFilteredGoogleResults = googleResults.filter((result) =>
-          isAllowedDomain(result.url, googleDomains),
-        );
-        const outOfDomainGoogleResults = googleResults.filter(
-          (result) => !isAllowedDomain(result.url, googleDomains),
-        );
-        if (outOfDomainGoogleResults.length > 0) {
-          console.log(
-            `  Dropped ${outOfDomainGoogleResults.length} Google News results outside fallback domains`,
-          );
-          await recordDiscoveryCandidateOutcomes(
-            outOfDomainGoogleResults.map((result) => ({
-              result,
-              outcome: {
-                accepted: false,
-                reason: "out_of_domain",
-              },
-            })),
-          );
-        }
-        batchResults.push(...domainFilteredGoogleResults);
-
-        updateDomainHitCounts(
-          domainHitCounts,
-          domainFilteredGoogleResults,
-          stillMissingAfterOpenAI.map((entry) => entry.normalized),
-        );
-      }
     }
 
-    // Check for still-missing domains after both tiers
+    // Check for domains still missing coverage after the OpenAI fallback
     const stillMissingEntries = normalizedDomainEntries.filter(
       (entry) => (domainHitCounts.get(entry.normalized) ?? 0) === 0,
     );
@@ -3058,42 +2773,14 @@ async function runOutletDiscoverySegment({
     batchResults = await dedupeWebResultsForProcessing(batchResults);
     scanned += batchResults.length;
 
-    const outcomeRecords: CandidateOutcomeRecord[] = [];
-    for (let i = 0; i < batchResults.length; i++) {
-      const result = batchResults[i];
-      if (inserted >= articleCap) {
-        await markUnprocessedCandidates(
-          batchResults.slice(i),
-          "article_cap_reached",
-        );
-        break;
-      }
-      const freshnessReason = freshnessCutoffMs
-        ? freshnessOutcomeReason(result, freshnessCutoffMs)
-        : null;
-      if (freshnessReason) {
-        console.log(
-          `- Skipped stale (${result.publishedDate ?? "unknown"}): ${result.title.substring(0, 80)}`,
-        );
-        outcomeRecords.push({
-          result,
-          outcome: {
-            accepted: false,
-            reason: freshnessReason,
-          },
-        });
-        continue;
-      }
-      const outcome = await tryInsertDiscoveredArticle(
-        result,
-        fallbackSourceId,
-      );
-      outcomeRecords.push({ result, outcome });
-      if (outcome.accepted) {
-        inserted++;
-      }
-    }
-    await recordDiscoveryCandidateOutcomes(outcomeRecords);
+    const batchInsert = await insertCollectedCandidates({
+      results: batchResults,
+      articleCap,
+      insertedSoFar: inserted,
+      freshnessCutoffMs,
+      fallbackSourceId,
+    });
+    inserted += batchInsert.inserted;
 
     if (inserted >= articleCap) break;
     await delay(DISCOVERY_PAUSE_MS);
@@ -3109,27 +2796,233 @@ async function runOutletDiscoverySegment({
   };
 }
 
-// Free outlet discovery: one Google News site: RSS query per curated domain.
-async function runGoogleNewsSiteOutletSegment({
+/**
+ * One Exa /search call over a domain group. Returns in-domain article
+ * candidates (title/url/publishedDate, no contents) with telemetry attached.
+ */
+async function searchViaExa(
+  domains: string[],
+  opts: { numResults: number; freshHours: number },
+): Promise<{ results: WebSearchResult[]; cost: number }> {
+  const segment: DiscoverySegment = "outlet";
+  const startPublishedDate = new Date(
+    Date.now() - opts.freshHours * 60 * 60 * 1000,
+  ).toISOString();
+  const searchQuery = EXA_QUERY;
+  const startedAt = Date.now();
+  const meta: SearchTelemetryMeta = {
+    provider: "exa",
+    segment,
+    searchQuery,
+    requestedDomains: domains,
+    searchDepth: EXA_SEARCH_TYPE,
+  };
+  try {
+    console.log(
+      `🔎 Exa search (${EXA_SEARCH_TYPE}${EXA_USE_NEWS_CATEGORY ? ", news" : ""}, ${opts.numResults} results, ${opts.freshHours}h): ${domains.join(", ")}`,
+    );
+    const response = await exaSearch(
+      {
+        query: searchQuery,
+        includeDomains: domains,
+        startPublishedDate,
+        numResults: opts.numResults,
+        type: EXA_SEARCH_TYPE,
+        category: EXA_USE_NEWS_CATEGORY ? "news" : null,
+      },
+      EXA_API_KEY,
+    );
+    runCounters.exaSpendUsd += response.costUsd;
+    const results: WebSearchResult[] = response.results.map((r) => ({
+      title: r.title,
+      url: r.url,
+      snippet: "",
+      publishedDate: r.publishedDate,
+      source: humanizeHost(r.host),
+      discovery: { raw: { exaRequestId: response.requestId } },
+    }));
+    console.log(
+      `  Exa returned ${results.length}/${response.rawCount} in-domain results ($${response.costUsd.toFixed(4)})`,
+    );
+    const searchId = await logSearchOutcome(meta, startedAt, {
+      status: "success",
+      resultCount: results.length,
+      costUsd: response.costUsd,
+    });
+    return {
+      results: await attachDiscoveryCandidates(results, {
+        provider: "exa",
+        searchId,
+        searchQuery,
+      }),
+      cost: response.costUsd,
+    };
+  } catch (error) {
+    console.error(`Exa search error for ${domains.join(", ")}:`, error);
+    await logSearchOutcome(meta, startedAt, { status: "error", error });
+    return { results: [], cost: 0 };
+  }
+}
+
+/**
+ * Primary paid outlet sweep (2026-08): Exa over the curated outlets that have
+ * no live feed. High-volume outlets get one call each; the rest are batched
+ * EXA_LOW_VOLUME_BATCH domains per call. Month-to-date spend + in-run spend
+ * must stay under EXA_MONTHLY_BUDGET_USD. Returns the domains that produced
+ * at least one candidate so the free GN `site:` tier only runs for the gaps.
+ */
+async function runExaOutletSegment({
   fallbackSourceId,
   articleCap,
   freshHours,
+  outlets,
 }: {
   fallbackSourceId: number;
   articleCap: number;
   freshHours: number;
+  outlets: ClimateOutlet[];
 }): Promise<DiscoverySegmentStats & { coveredDomains: Set<string> }> {
   const emptyStats = {
-    inserted: 0,
-    scanned: 0,
-    queriesRun: 0,
-    browseCost: 0,
+    ...emptySegmentStats(),
+    coveredDomains: new Set<string>(),
+  };
+  if (!EXA_ENABLED) {
+    console.log(
+      "Exa outlet sweep disabled (set WEB_SEARCH_EXA=1 and EXA_API_KEY to enable)",
+    );
+    return emptyStats;
+  }
+  if (outlets.length === 0 || articleCap <= 0) return emptyStats;
+  if (!WEB_SEARCH_FORCE && (await hasRecentSegmentSuccess("exa", "outlet"))) {
+    console.log(
+      `Skipping Exa outlet sweep — successful run within the last ${SEGMENT_SKIP_RECENT_HOURS}h (set WEB_SEARCH_FORCE=1 to override)`,
+    );
+    return emptyStats;
+  }
+
+  const segmentStart = Date.now();
+  const monthSpend = await exaMonthToDateSpendUsd();
+  const budgetLeft = EXA_MONTHLY_BUDGET_USD - monthSpend;
+  console.log(
+    `\n🔎 Exa outlet sweep (${outlets.length} outlets; month-to-date $${monthSpend.toFixed(3)} of $${EXA_MONTHLY_BUDGET_USD.toFixed(2)} budget)`,
+  );
+  if (EXA_MONTHLY_BUDGET_USD > 0 && budgetLeft <= 0) {
+    console.warn("⚠️  Exa monthly budget exhausted — skipping sweep");
+    return emptyStats;
+  }
+
+  // freshHours <= 0 means "no freshness cutoff" elsewhere in this file; for
+  // the Exa look-back that means the default window, not a 6h floor.
+  const windowHours =
+    freshHours > 0
+      ? Math.max(6, Math.min(freshHours, EXA_WINDOW_HOURS))
+      : EXA_WINDOW_HOURS;
+  const freshnessCutoffMs =
+    freshHours > 0 ? Date.now() - freshHours * 60 * 60 * 1000 : null;
+  const high = outlets.filter((o) => o.volume === "high");
+  const low = outlets.filter((o) => o.volume !== "high");
+  const groups: { domains: string[]; numResults: number }[] = [
+    ...high.map((o) => ({
+      domains: [o.domain],
+      numResults: EXA_RESULTS_HIGH_VOLUME,
+    })),
+    ...chunkArray(low, EXA_LOW_VOLUME_BATCH).map((batch) => ({
+      domains: batch.map((o) => o.domain),
+      numResults: EXA_RESULTS_LOW_VOLUME,
+    })),
+  ];
+
+  let collected: WebSearchResult[] = [];
+  let queriesRun = 0;
+  let browseCost = 0;
+
+  // Calls are independent and cheap; run a few concurrently (well under
+  // Exa's 10 QPS) and re-check the deadline/budget between batches.
+  const EXA_CONCURRENCY = 3;
+  for (let i = 0; i < groups.length; i += EXA_CONCURRENCY) {
+    if (!hasRunTime()) {
+      console.log("⏱️  Deadline reached — skipping remaining Exa groups");
+      break;
+    }
+    if (
+      EXA_MONTHLY_BUDGET_USD > 0 &&
+      monthSpend + runCounters.exaSpendUsd >= EXA_MONTHLY_BUDGET_USD
+    ) {
+      console.warn("⚠️  Exa monthly budget reached mid-sweep — stopping");
+      break;
+    }
+    const batch = groups.slice(i, i + EXA_CONCURRENCY);
+    const settled = await Promise.all(
+      batch.map((group) =>
+        searchViaExa(group.domains, {
+          numResults: group.numResults,
+          freshHours: windowHours,
+        }),
+      ),
+    );
+    for (const { results, cost } of settled) {
+      queriesRun++;
+      browseCost += cost;
+      collected.push(...results);
+    }
+  }
+
+  collected = await dedupeWebResultsForProcessing(collected);
+  const scanned = collected.length;
+
+  const { inserted, outcomes } = await insertCollectedCandidates({
+    results: collected,
+    articleCap,
+    freshnessCutoffMs,
+    fallbackSourceId,
+  });
+
+  // A domain is covered only when Exa produced something the river keeps
+  // (accepted, or already present as a duplicate) — not when every result
+  // was stale/non-climate/low-value — so the free GN tier still runs for gaps.
+  const coveredDomains = new Set<string>();
+  const outletDomains = outlets.map((o) => normalizeDomain(o.domain));
+  for (const { result, outcome } of outcomes) {
+    if (!outcome.accepted && !DUPLICATE_REASONS.has(outcome.reason)) continue;
+    const host = hostFromUrl(result.url);
+    if (!host) continue;
+    for (const domain of outletDomains) {
+      if (domainMatches(normalizeDomain(host), domain))
+        coveredDomains.add(domain);
+    }
+  }
+
+  console.log(
+    `  Exa sweep complete: ${inserted} articles from ${scanned} results, ${queriesRun} calls, $${browseCost.toFixed(4)}`,
+  );
+  return {
+    inserted,
+    scanned,
+    queriesRun,
+    browseCost,
     browseToolCalls: 0,
-    duration: 0,
+    duration: Math.round((Date.now() - segmentStart) / 1000),
+    coveredDomains,
+  };
+}
+
+async function runGoogleNewsSiteOutletSegment({
+  fallbackSourceId,
+  articleCap,
+  freshHours,
+  outlets,
+}: {
+  fallbackSourceId: number;
+  articleCap: number;
+  freshHours: number;
+  outlets: ClimateOutlet[];
+}): Promise<DiscoverySegmentStats & { coveredDomains: Set<string> }> {
+  const emptyStats = {
+    ...emptySegmentStats(),
     coveredDomains: new Set<string>(),
   };
 
-  if (DISCOVERY_OUTLETS.length === 0 || articleCap <= 0) {
+  if (outlets.length === 0 || articleCap <= 0) {
     return emptyStats;
   }
 
@@ -3150,16 +3043,16 @@ async function runGoogleNewsSiteOutletSegment({
   const coveredDomains = new Set<string>();
 
   console.log(
-    `\n📰 Google News site: discovery (${DISCOVERY_OUTLETS.length} domains, resolve cap ${WEB_SEARCH_GN_RESOLVE_CAP})`,
+    `\n📰 Google News site: discovery (${outlets.length} domains, resolve cap ${WEB_SEARCH_GN_RESOLVE_CAP})`,
   );
 
   let collected: WebSearchResult[] = [];
   let queriesRun = 0;
 
-  for (const outlet of DISCOVERY_OUTLETS) {
+  for (const outlet of outlets) {
     if (!hasRunTime()) {
       console.log(
-        `⏱️  Deadline reached — skipping remaining GN site: outlets (${queriesRun}/${DISCOVERY_OUTLETS.length} queried)`,
+        `⏱️  Deadline reached — skipping remaining GN site: outlets (${queriesRun}/${outlets.length} queried)`,
       );
       break;
     }
@@ -3197,40 +3090,12 @@ async function runGoogleNewsSiteOutletSegment({
   collected = await dedupeWebResultsForProcessing(collected);
   const scanned = collected.length;
 
-  let inserted = 0;
-  const outcomeRecords: CandidateOutcomeRecord[] = [];
-  for (let i = 0; i < collected.length; i++) {
-    const result = collected[i];
-    if (inserted >= articleCap) {
-      await markUnprocessedCandidates(
-        collected.slice(i),
-        "article_cap_reached",
-      );
-      break;
-    }
-    const freshnessReason = freshnessCutoffMs
-      ? freshnessOutcomeReason(result, freshnessCutoffMs)
-      : null;
-    if (freshnessReason) {
-      console.log(
-        `- Skipped stale (${result.publishedDate ?? "unknown"}): ${result.title.substring(0, 80)}`,
-      );
-      outcomeRecords.push({
-        result,
-        outcome: {
-          accepted: false,
-          reason: freshnessReason,
-        },
-      });
-      continue;
-    }
-    const outcome = await tryInsertDiscoveredArticle(result, fallbackSourceId);
-    outcomeRecords.push({ result, outcome });
-    if (outcome.accepted) {
-      inserted++;
-    }
-  }
-  await recordDiscoveryCandidateOutcomes(outcomeRecords);
+  const { inserted } = await insertCollectedCandidates({
+    results: collected,
+    articleCap,
+    freshnessCutoffMs,
+    fallbackSourceId,
+  });
 
   console.log(
     `  Google News site: discovery complete: ${inserted} articles from ${scanned} results (${resolveState.used} URL resolutions)`,
@@ -3247,215 +3112,9 @@ async function runGoogleNewsSiteOutletSegment({
   };
 }
 
-// Broad climate discovery - searches the web generally for high-quality climate content
-async function runBroadClimateDiscovery({
-  fallbackSourceId,
-  articleCap,
-  freshHours,
-}: {
-  fallbackSourceId: number;
-  articleCap: number;
-  freshHours: number;
-}): Promise<DiscoverySegmentStats> {
-  const emptyStats: DiscoverySegmentStats = {
-    inserted: 0,
-    scanned: 0,
-    queriesRun: 0,
-    browseCost: 0,
-    browseToolCalls: 0,
-    duration: 0,
-  };
-
-  if (!TAVILY_BROAD_ENABLED) {
-    console.log(
-      "Broad Tavily discovery disabled (set WEB_SEARCH_TAVILY_BROAD=1 and TAVILY_API_KEY to enable)",
-    );
-    return emptyStats;
-  }
-
-  if (articleCap <= 0) {
-    return emptyStats;
-  }
-
-  if (!WEB_SEARCH_FORCE && (await hasRecentSegmentSuccess("tavily", "broad"))) {
-    console.log(
-      `Skipping broad Tavily discovery — successful run within the last ${SEGMENT_SKIP_RECENT_HOURS}h (set WEB_SEARCH_FORCE=1 to override)`,
-    );
-    return emptyStats;
-  }
-
-  const segmentStart = Date.now();
-  const freshnessCutoffMs =
-    freshHours > 0 ? Date.now() - freshHours * 60 * 60 * 1000 : null;
-
-  let inserted = 0;
-  let scanned = 0;
-  let browseCost = 0;
-
-  // Broad climate search queries - varied to capture different types of content
-  const currentYear = new Date().getFullYear();
-  const broadQueries = [
-    `climate change policy legislation ${currentYear}`,
-    "renewable energy solar wind investment",
-    "carbon emissions reduction net zero",
-    "climate science research report",
-    "clean energy transition electric vehicles",
-  ];
-
-  // Domains to exclude (social media, aggregators, low-quality)
-  const excludeDomains = [
-    "twitter.com",
-    "x.com",
-    "facebook.com",
-    "reddit.com",
-    "linkedin.com",
-    "youtube.com",
-    "tiktok.com",
-    "instagram.com",
-    "news.google.com",
-    "news.yahoo.com",
-    "msn.com",
-    "pinterest.com",
-    "tumblr.com",
-    "medium.com",
-  ];
-
-  console.log(`\n🌍 Broad Climate Discovery (${broadQueries.length} queries)`);
-
-  for (const searchQuery of broadQueries) {
-    if (inserted >= articleCap) break;
-    if (!hasRunTime()) {
-      console.log("⏱️  Deadline reached — skipping remaining broad queries");
-      break;
-    }
-
-    const searchStartedAt = Date.now();
-    try {
-      console.log(`  → Searching: "${searchQuery}"`);
-
-      // tavilyClient guaranteed non-null (TAVILY_BROAD_ENABLED implies TAVILY_ENABLED)
-      const response = await tavilyClient!.search(searchQuery, {
-        searchDepth: TAVILY_SEARCH_DEPTH,
-        topic: "news",
-        days: 3, // Focus on very recent content
-        maxResults: 5,
-        excludeDomains,
-        includeAnswer: false,
-      });
-
-      browseCost += TAVILY_COST_PER_SEARCH;
-
-      const results: WebSearchResult[] = response.results
-        .filter((r) => {
-          // Filter out category pages, homepages
-          const path = new URL(r.url).pathname.toLowerCase();
-          if (path === "/" || path === "") return false;
-          if (
-            path.match(
-              /^\/(climate|energy|environment|news|about|contact|category|tag|topics?)?\/?$/,
-            )
-          )
-            return false;
-          return true;
-        })
-        .map((r) => ({
-          title: r.title,
-          url: r.url,
-          snippet: cleanSnippet(r.content),
-          publishedDate: r.publishedDate,
-          source: hostFromUrl(r.url) || "unknown",
-          discovery: { raw: r },
-        }));
-
-      const meta: SearchTelemetryMeta = {
-        provider: "tavily",
-        segment: "broad",
-        searchQuery,
-        searchDepth: TAVILY_SEARCH_DEPTH,
-      };
-      const searchId = await logSearchOutcome(meta, searchStartedAt, {
-        status: "success",
-        resultCount: results.length,
-        costUsd: TAVILY_COST_PER_SEARCH,
-      });
-      const annotatedResults = await attachDiscoveryCandidates(results, {
-        provider: "tavily",
-        searchId,
-        searchQuery,
-      });
-
-      scanned += annotatedResults.length;
-      console.log(`    Found ${annotatedResults.length} results`);
-
-      const outcomeRecords: CandidateOutcomeRecord[] = [];
-      for (let i = 0; i < annotatedResults.length; i++) {
-        const result = annotatedResults[i];
-        if (inserted >= articleCap) {
-          await markUnprocessedCandidates(
-            annotatedResults.slice(i),
-            "article_cap_reached",
-          );
-          break;
-        }
-        const freshnessReason = freshnessCutoffMs
-          ? freshnessOutcomeReason(result, freshnessCutoffMs)
-          : null;
-        if (freshnessReason) {
-          outcomeRecords.push({
-            result,
-            outcome: {
-              accepted: false,
-              reason: freshnessReason,
-            },
-          });
-          continue;
-        }
-        const outcome = await tryInsertDiscoveredArticle(
-          result,
-          fallbackSourceId,
-        );
-        outcomeRecords.push({ result, outcome });
-        if (outcome.accepted) {
-          inserted++;
-        }
-      }
-      await recordDiscoveryCandidateOutcomes(outcomeRecords);
-
-      // Small delay between queries
-      await delay(300);
-    } catch (error) {
-      console.error(`  Error in broad search "${searchQuery}":`, error);
-      await logSearchOutcome(
-        {
-          provider: "tavily",
-          segment: "broad",
-          searchQuery,
-          searchDepth: TAVILY_SEARCH_DEPTH,
-        },
-        searchStartedAt,
-        { status: "error", error },
-      );
-    }
-  }
-
-  console.log(
-    `  Broad discovery complete: ${inserted} articles from ${scanned} results`,
-  );
-
-  return {
-    inserted,
-    scanned,
-    queriesRun: broadQueries.length,
-    browseCost,
-    browseToolCalls: 0,
-    duration: Math.round((Date.now() - segmentStart) / 1000),
-  };
-}
-
 export async function run(
   opts: {
     closePool?: boolean;
-    broadArticleCap?: number;
     outletArticleCap?: number;
     outletLimitPerBatch?: number;
     outletBatchSize?: number;
@@ -3464,11 +3123,16 @@ export async function run(
     // outlets/batches/queries once it passes, so a time-budgeted cron can call
     // this without risking a hard kill at maxDuration.
     deadlineAt?: number;
+    // Paid outlet sweeps (Exa, OpenAI) run only when true — the full
+    // cron (3×/day) passes true, refresh passes false, so spend is bounded to
+    // ~24 Exa calls/day regardless of cron cadence. Free GN site: still runs.
+    paidOutletSweep?: boolean;
   } = {},
 ) {
   return discoveryTelemetryScope.run(new DiscoveryTelemetry(), async () => {
     const startTime = Date.now();
-    const broadArticleCap = opts.broadArticleCap ?? 15; // Broad discovery cap
+    runCounters.exaSpendUsd = 0;
+    const paidOutletSweep = opts.paidOutletSweep !== false;
     const outletArticleCap = opts.outletArticleCap ?? 70;
     const outletLimitPerBatch = Math.max(4, opts.outletLimitPerBatch ?? 12);
     const outletBatchSize = Math.max(2, opts.outletBatchSize ?? 4);
@@ -3478,65 +3142,86 @@ export async function run(
 
     console.log("Starting web discovery...");
     console.log(
-      `Search tiers: ${TAVILY_BROAD_ENABLED ? "0) Broad (Tavily) → " : ""}1) Google News site:${TAVILY_OUTLETS_ENABLED ? " → 1b) Tavily outlets" : ""} → 2) OpenAI → 3) Google News`,
+      `Search tiers: ${EXA_ENABLED && paidOutletSweep ? "1) Exa outlets → " : ""}${paidOutletSweep ? "" : "[paid sweeps off] "}2) Google News site:${WEB_SEARCH_ENABLED && paidOutletSweep ? " → 3) OpenAI" : ""}`,
     );
 
-    if (RSS_SKIPPED_OUTLETS.length > 0) {
-      console.log(
-        `Skipping ${RSS_SKIPPED_OUTLETS.length} RSS-backed outlets for OpenAI discovery: ${RSS_SKIPPED_OUTLETS.map((outlet) => outlet.name).join(", ")}`,
-      );
-    }
-
-    if (DISCOVERY_OUTLETS.length === 0) {
-      console.log(
-        "No eligible outlets remain for OpenAI discovery (all covered via RSS)",
-      );
-    }
+    // Outlets that still need a sweep = curated minus those with a live feed.
+    const resolved = await resolveDiscoveryOutlets();
+    const outlets = resolved.outlets;
+    console.log(
+      `Sweep universe (${resolved.source}): ${outlets.length} outlets without a live feed` +
+        (outlets.length > 0
+          ? ` — ${outlets.map((o) => o.domain).join(", ")}`
+          : ""),
+    );
 
     const fallbackSourceId = await getOrCreateWebDiscoverySource();
 
-    // Tier 0: Broad climate discovery (searches web generally)
-    const broadStats = await runBroadClimateDiscovery({
-      fallbackSourceId,
-      articleCap: broadArticleCap,
-      freshHours: outletFreshHours,
-    });
+    // Tier 1: Exa sweep over feedless outlets (paid, budget-capped)
+    const exaStats = paidOutletSweep
+      ? await runExaOutletSegment({
+          fallbackSourceId,
+          articleCap: outletArticleCap,
+          freshHours: outletFreshHours,
+          outlets,
+        })
+      : { ...emptySegmentStats(), coveredDomains: new Set<string>() };
 
-    // Tier 1: Free Google News site: queries across curated outlet domains
+    // Tier 2: Free Google News site: queries for outlets Exa didn't cover
+    // (free, so it keeps its own article cap rather than sharing Exa's)
+    const gnOutlets = outlets.filter(
+      (o) => !exaStats.coveredDomains.has(normalizeDomain(o.domain)),
+    );
     const gnSiteStats = await runGoogleNewsSiteOutletSegment({
       fallbackSourceId,
       articleCap: outletArticleCap,
       freshHours: outletFreshHours,
+      outlets: gnOutlets,
     });
 
-    // Tier 1b-3: Outlet-specific discovery for domains still missing coverage
-    const outletStats = await runOutletDiscoverySegment({
-      fallbackSourceId,
-      limitPerBatch: outletLimitPerBatch,
-      batchSize: outletBatchSize,
-      articleCap: Math.max(0, outletArticleCap - gnSiteStats.inserted),
-      freshHours: outletFreshHours,
-      coveredDomains: gnSiteStats.coveredDomains,
-    });
+    // Tier 3: OpenAI web search (opt-in) for domains still missing coverage
+    const coveredSoFar = new Set<string>([
+      ...exaStats.coveredDomains,
+      ...gnSiteStats.coveredDomains,
+    ]);
+    const outletStats = paidOutletSweep
+      ? await runOutletDiscoverySegment({
+          fallbackSourceId,
+          limitPerBatch: outletLimitPerBatch,
+          batchSize: outletBatchSize,
+          articleCap: Math.max(
+            0,
+            outletArticleCap - exaStats.inserted - gnSiteStats.inserted,
+          ),
+          freshHours: outletFreshHours,
+          coveredDomains: coveredSoFar,
+          outlets,
+        })
+      : emptySegmentStats();
 
     if (outletStats.queriesRun > 0) {
       console.log(
-        `Curated outlet tier complete: ${outletStats.inserted} new articles from ${outletStats.scanned} results`,
+        `OpenAI outlet fallback complete: ${outletStats.inserted} new articles from ${outletStats.scanned} results`,
       );
     } else {
-      console.log(
-        "Curated outlet tier skipped (no outlets configured or article cap set to 0)",
-      );
+      const why = !paidOutletSweep
+        ? "paid sweeps off for this run"
+        : !WEB_SEARCH_ENABLED
+          ? "WEB_SEARCH_ENABLED is off"
+          : outlets.length === 0
+            ? "no outlets need a sweep"
+            : "every outlet already covered or article cap reached";
+      console.log(`OpenAI outlet fallback skipped (${why})`);
     }
 
     const totalInserted =
-      broadStats.inserted + gnSiteStats.inserted + outletStats.inserted;
+      exaStats.inserted + gnSiteStats.inserted + outletStats.inserted;
     const totalScanned =
-      broadStats.scanned + gnSiteStats.scanned + outletStats.scanned;
-    const totalBrowseCost = broadStats.browseCost + outletStats.browseCost;
+      exaStats.scanned + gnSiteStats.scanned + outletStats.scanned;
+    const totalBrowseCost = exaStats.browseCost + outletStats.browseCost;
     const totalBrowseToolCalls = outletStats.browseToolCalls;
     const totalQueries =
-      broadStats.queriesRun + gnSiteStats.queriesRun + outletStats.queriesRun;
+      exaStats.queriesRun + gnSiteStats.queriesRun + outletStats.queriesRun;
 
     const duration = Math.round((Date.now() - startTime) / 1000);
     console.log(
@@ -3546,7 +3231,7 @@ export async function run(
     if (totalBrowseCost > 0) {
       console.log(
         `Estimated search spend: ~$${totalBrowseCost.toFixed(4)} ` +
-          `(${TAVILY_OUTLETS_ENABLED || TAVILY_BROAD_ENABLED ? "Tavily + " : ""}OpenAI${totalBrowseToolCalls > 0 ? `, ${totalBrowseToolCalls} tool calls` : ""})`,
+          `(${EXA_ENABLED ? "Exa + " : ""}OpenAI${totalBrowseToolCalls > 0 ? `, ${totalBrowseToolCalls} tool calls` : ""})`,
       );
     }
 

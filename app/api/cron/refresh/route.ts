@@ -80,11 +80,11 @@ export async function GET(req: Request) {
       try {
         console.log("🔎 Running light web discovery...");
         webDiscoverResult = await safeRun(import("@/scripts/discover-web"), {
-          broadArticleCap: 8,
           outletArticleCap: 15,
-          outletLimitPerBatch: 5,
-          outletBatchSize: 3,
           outletFreshHours: 48,
+          // Paid outlet sweeps (Exa/OpenAI) only run in the 3×/day
+          // full cron; refresh keeps the free Google News site: tier.
+          paidOutletSweep: false,
           // Leave ≥30s for discovered-prefetch + rescore + inline rewrite.
           deadlineAt: deadlineAt - 30_000,
           closePool: false,

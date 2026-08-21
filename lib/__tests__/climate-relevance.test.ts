@@ -177,3 +177,44 @@ describe("isClimateRelevant — recall restored after production scan", () => {
     });
   }
 });
+
+describe("isClimateRelevant — recall: policy / power-sector / data-center terms (2026-08-21 audit)", () => {
+  // Live feed items from Heatmap, Canary, Utility Dive, Grist that the gate
+  // dropped before the 2026-08-21 fix (plural "emissions" never matched).
+  const shouldPass = [
+    "Data Centers Could Spike U.S. Power Emissions by 20%",
+    "US emissions fell 3% last year, report finds",
+    "Trump administration moves to repeal endangerment finding",
+    "Google Launches ‘Operation Blue Skies’ to Tackle Contrails",
+    "Nvidia Backs OpenAI’s Plan to Build America’s Biggest Power Plant",
+    "Senate passes bill gutting clean energy tax credits",
+    "Pennsylvania dangles permitting carrot for data centers that bring their own power",
+    "Utilities race to decarbonize as demand surges",
+    "Court upholds NEPA review of gas pipeline expansion",
+    "Investment tax credit phase-out rattles developers",
+    "Northwest council proposes 11 GW of new generation, 5 GW storage by 2032",
+    "US to send military hospital ship to Peru for El Nino relief",
+    "Industry groups ask DC Circuit to fast-track lawsuit over HFC rollback",
+    "Firefighting resources are 'critically low' in record fire year",
+    "Breakingviews - Europe is underpricing its sweltering future",
+  ];
+  for (const title of shouldPass) {
+    it(`accepts: "${title.slice(0, 56)}..."`, () => {
+      assert.equal(isClimateRelevant({ title }), true);
+    });
+  }
+
+  // Guard the new terms against the obvious false positives.
+  const shouldFail = [
+    "Roth IRA contribution limits rise for 2027",
+    "Congress expands the child tax credit",
+    "Data center REIT beats earnings estimates",
+    "Nvidia unveils new GPU for gamers",
+    "Power Rangers reboot gets a release date",
+  ];
+  for (const title of shouldFail) {
+    it(`rejects: "${title.slice(0, 56)}..."`, () => {
+      assert.equal(isClimateRelevant({ title }), false);
+    });
+  }
+});

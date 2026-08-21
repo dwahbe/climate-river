@@ -1,7 +1,19 @@
 // scripts/schema.ts
 import { query, endPool } from "@/lib/db";
 import { visibleLanguagePredicate } from "@/lib/languagePolicy";
-import { serveTimeScoreSql } from "@/lib/scoring";
+import {
+  clusterAgeDampingSql,
+  publisherHostSql,
+  serveTimeScoreSql,
+  singletonDiscountSql,
+  sourceWeightSql,
+  strongSourceCountSql,
+  topGateSql,
+} from "@/lib/scoring";
+import {
+  AGGREGATOR_URL_SQL_REGEX,
+  LOW_VALUE_URL_SQL_REGEX,
+} from "@/lib/aggregators";
 
 /**
  * Idempotent schema guard.
@@ -241,6 +253,15 @@ export async function run() {
     `alter table cluster_scores add column if not exists latest_pub timestamptz;`,
   );
   await query(`alter table cluster_scores add column if not exists why text;`);
+  // 2026-08-21: first_pub drives read-time age damping; strong_sources drives
+  // the homepage Top gate (both written by rescore, with read-time fallbacks
+  // in get_river_clusters for rows not yet rescored).
+  await query(
+    `alter table cluster_scores add column if not exists first_pub timestamptz;`,
+  );
+  await query(
+    `alter table cluster_scores add column if not exists strong_sources int;`,
+  );
   await query(`
     create index if not exists idx_cluster_scores_score
       on cluster_scores(score desc, updated_at desc);
@@ -354,7 +375,7 @@ export async function run() {
   await query(`alter table pipeline_runs enable row level security;`);
 
   // --- discovery telemetry --------------------------------------------------
-  // Per-search and per-candidate records let us compare Tavily, OpenAI web
+  // Per-search and per-candidate records let us compare Exa, OpenAI web
   // search, and Google News by yield, rejection mode, cost, and latency.
   await query(`
     create table if not exists discovery_searches (
@@ -546,7 +567,7 @@ export async function run() {
     stable
     set search_path = 'public'
     as $$
-      with candidate_clusters as (
+      with candidate_base as (
         select
           cs.cluster_id,
           cs.size,
@@ -555,7 +576,27 @@ export async function run() {
           -- ranking is current at ISR granularity rather than frozen between
           -- rescore runs. Falls back to the stored score for any pre-migration
           -- row. Math shared with rescore via lib/scoring.ts — can't drift.
-          ${serveTimeScoreSql("cs.base_score", "cs.latest_pub", "cs.score")} as score,
+          ${serveTimeScoreSql("cs.base_score", "cs.latest_pub", "cs.score")} as score_raw,
+          -- Age damping / Top gate inputs: written by rescore; computed here
+          -- for rows that predate those columns so behaviour doesn't depend on
+          -- rescore having run the new code yet.
+          coalesce(
+            cs.first_pub,
+            (select min(a3.published_at)
+               from article_clusters ac3
+               join articles a3 on a3.id = ac3.article_id
+              where ac3.cluster_id = cs.cluster_id)
+          ) as first_pub,
+          coalesce(
+            cs.strong_sources,
+            (select ${strongSourceCountSql(publisherHostSql("a4.canonical_url"), sourceWeightSql("s4.weight", "a4.canonical_url"))}
+               from article_clusters ac4
+               join articles a4 on a4.id = ac4.article_id
+               left join sources s4 on s4.id = a4.source_id
+              where ac4.cluster_id = cs.cluster_id
+                and ${visibleLanguagePredicate("a4")})
+          )::int as strong_sources,
+          ${sourceWeightSql("s.weight", "a.canonical_url")} as lead_weight,
           cs.lead_article_id,
           coalesce(cs.latest_pub, a.published_at) as activity_at,
           a.published_at,
@@ -579,11 +620,28 @@ export async function run() {
           and ${visibleLanguagePredicate("a")}
           -- Lead eligibility (real publisher URL, trustworthy date) is enforced
           -- in rescore's lead selection; the only clusters whose lead is still
-          -- an aggregator are those with no eligible member, which have nothing
-          -- displayable — keep hiding just those.
-          and a.canonical_url not like 'https://news.google.com%'
-          and a.canonical_url not like 'https://news.yahoo.com%'
-          and a.canonical_url not like 'https://www.msn.com%'
+          -- an aggregator or low-value host are those with no eligible member,
+          -- which have nothing displayable — keep hiding just those (same host
+          -- lists as LEAD_INELIGIBLE_SQL, lib/aggregators.ts).
+          and not (
+            a.canonical_url ~* '${AGGREGATOR_URL_SQL_REGEX}'
+            or a.canonical_url ~* '${LOW_VALUE_URL_SQL_REGEX}'
+          )
+      ),
+      candidate_clusters as (
+        select
+          cb.*,
+          -- Age damping (cluster's first article is days old) and singleton
+          -- discount (no corroboration) — both ordering nudges, lib/scoring.ts.
+          cb.score_raw
+            * ${clusterAgeDampingSql("cb.first_pub")}
+            * ${singletonDiscountSql("cb.strong_sources")} as score
+        from candidate_base cb
+        -- Homepage Top gate: ≥2 strong sources OR a top-tier lead. Latest and
+        -- category views are ungated (lib/scoring.ts TOP_GATE).
+        where coalesce(p_is_latest, false)
+           or p_category is not null
+           or ${topGateSql("cb.strong_sources", "cb.lead_weight")}
       ),
       category_matches as (
         select

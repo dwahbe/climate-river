@@ -429,7 +429,7 @@ export function isClimateRelevant(article: ArticleLike): boolean {
 
   const climateTerms = [
     // Core climate terms
-    /\b(climate|carbon|carbon dioxide|co2|emission|greenhouse|warming|global warming)\b/i,
+    /\b(climate|carbon|carbon dioxide|co2|emissions?|greenhouse|warming|global warming)\b/i,
 
     // Energy & renewables (bare "wind"/"energy" are handled via the
     // ambiguous-term + climate-context gate below to avoid false positives like
@@ -459,8 +459,10 @@ export function isClimateRelevant(article: ArticleLike): boolean {
     /\b(drought|droughts|water shortage|water scarcity)\b/i,
     /\b(storm|storms|tropical storm|storm surge|hurricane|typhoon|cyclone|tornado|tornadoes)\b/i,
     /\b(atmospheric river|heavy rain|heavy rainfall|torrential rain|deluge)\b/i,
-    /\b(wildfire|wildfires|fire danger|fire weather|smoke plume|smoke plumes|bushfire)\b/i,
-    /\b(heatwave|heat wave|heatwaves|heat waves|heat dome|heat domes|heat index|extreme heat|hot weather)\b/i,
+    /\b(wildfire|wildfires|fire danger|fire weather|fire season|fire year|smoke plume|smoke plumes|bushfire)\b/i,
+    /\b(heatwave|heat wave|heatwaves|heat waves|heat dome|heat domes|heat index|extreme heat|hot weather|swelter\w*)\b/i,
+    /\b(el ni[nñ]o|la ni[nñ]a|enso)\b/i,
+    /\b(hfcs?|hydrofluorocarbons?|kigali amendment)\b/i,
     /\b(mudslide|mudslides|landslide|landslides|debris flow)\b/i,
     /\b(extreme weather|severe weather|climate crisis|climate emergency|climate disaster)\b/i,
 
@@ -491,6 +493,17 @@ export function isClimateRelevant(article: ArticleLike): boolean {
     /\b(epa|environmental protection|ferc|sec.*climate|climate policy|climate law)\b/i,
     /\b(carbon tax|carbon pricing|emissions? standard|emissions? trading|cap and trade)\b/i,
     /\b(paris agreement|cop\d+|ipcc|unfccc|net zero|net-zero)\b/i,
+    // Added 2026-08-21 after a live-feed audit: plural "emissions" (above),
+    // US rulemaking vocabulary, power-sector nouns, and the data-center /
+    // power-demand beat that Heatmap, Canary, Utility Dive now cover daily.
+    /\b(endangerment finding|inflation reduction act|nepa|permitting reform|clean air act|clean water act|methane (?:rule|fee|tax))\b/i,
+    /\b(power plants?|power stations?|coal plants?|gas[- ]fired plants?|peaker plants?|nuclear plants?)\b/i,
+    /\b(?:clean[- ]energy|ev|solar|wind|hydrogen|nuclear|production|investment|45[a-z])\s+tax credits?\b/i,
+    /\b(energy transition|decarboni[sz]\w*|low[- ]carbon|zero[- ]emissions?|contrails?|geoengineering|solar radiation management)\b/i,
+    /\bdata cent(?:er|re)s?\b.{0,80}\b(power|energy|electricity|emissions?|grid|gas|turbines?|nuclear|watts?|[gm]w)\b/i,
+    /\b(power|energy|electricity|emissions?|grid|gas|nuclear)\b.{0,80}\bdata cent(?:er|re)s?\b/i,
+    // Generation/storage capacity figures are unambiguously energy-sector
+    /\b\d+(?:[.,]\d+)?\s?(?:gw|mw|gwh|mwh|gigawatts?|megawatts?|terawatt-hours?)\b/i,
 
     // Activism & organizations
     /\b(climate strike|climate protest|climate march|climate rally|climate activist)\b/i,
@@ -552,12 +565,16 @@ export function isClimateRelevant(article: ArticleLike): boolean {
 /**
  * Categorize an article based on title and summary using rule-based scoring
  */
-export function categorizeArticle(article: ArticleLike): CategoryScore[] {
+export function categorizeArticle(
+  article: ArticleLike,
+  opts: { skipRelevanceGate?: boolean } = {},
+): CategoryScore[] {
   const normalized = normalizeArticleForCategorization(article);
 
   // CRITICAL: First check if article is climate-relevant
   // This prevents non-climate articles from being categorized and appearing in the river
-  if (!isClimateRelevant(normalized)) {
+  // (trusted climate-only sources opt out — see config/trustedClimateSources.ts)
+  if (!opts.skipRelevanceGate && !isClimateRelevant(normalized)) {
     console.log(
       `⚠️  Article filtered out (not climate-relevant): "${normalized.title.substring(0, 60)}..."`,
     );

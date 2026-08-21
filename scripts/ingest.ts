@@ -4,6 +4,7 @@ import dayjs from "dayjs";
 import { query, endPool } from "@/lib/db";
 import { categorizeAndStoreArticle } from "@/lib/categorizer";
 import { isClimateRelevant } from "@/lib/tagger";
+import { isTrustedClimateSource } from "@/config/trustedClimateSources";
 import { generateEmbedding, assignArticleToCluster } from "@/lib/clustering";
 import {
   classifyArticleLanguageForIngest,
@@ -340,7 +341,14 @@ async function updateSourceHealth(
 }
 
 // ---------- Ingest one feed ----------
-async function ingestFromFeed(feedUrl: string, sourceId: number, limit = 20) {
+async function ingestFromFeed(
+  feedUrl: string,
+  sourceId: number,
+  limit = 20,
+  // Climate-only outlets / section feeds (config/trustedClimateSources.ts)
+  // keep items the keyword gate would drop; general feeds stay gated.
+  trusted = false,
+) {
   let feed;
   try {
     feed = await parser.parseURL(feedUrl);
@@ -368,9 +376,17 @@ async function ingestFromFeed(feedUrl: string, sourceId: number, limit = 20) {
     const dek = bestDek(it);
 
     // Climate relevance check - skip non-climate articles before insertion
-    if (!isClimateRelevant({ title, summary: dek })) {
-      console.log(`⏭️  Skipped (not climate): "${title.substring(0, 60)}..."`);
-      continue;
+    const onTopic = isClimateRelevant({ title, summary: dek });
+    if (!onTopic) {
+      if (!trusted) {
+        console.log(
+          `⏭️  Skipped (not climate): "${title.substring(0, 60)}..."`,
+        );
+        continue;
+      }
+      console.log(
+        `🛡️  Trusted feed — keeping item the relevance gate would drop: "${title.substring(0, 60)}..."`,
+      );
     }
 
     const languageGate = classifyArticleLanguageForIngest(title, dek);
@@ -425,7 +441,9 @@ async function ingestFromFeed(feedUrl: string, sourceId: number, limit = 20) {
 
       // Categorize the article using hybrid approach
       try {
-        await categorizeAndStoreArticle(result.id, title, dek || undefined);
+        await categorizeAndStoreArticle(result.id, title, dek || undefined, {
+          trusted,
+        });
         console.log(`  📝 Categorized article: ${title.slice(0, 50)}...`);
       } catch (error) {
         console.error(
@@ -473,10 +491,15 @@ export async function run(opts: { limit?: number; closePool?: boolean } = {}) {
           inserted: 0,
           error: "source id missing",
         };
+      const trusted = isTrustedClimateSource({
+        feedUrl: s.feed,
+        homepageUrl: s.homepage,
+      });
       const { scanned, inserted } = await ingestFromFeed(
         s.feed,
         sid,
         perFeedLimit,
+        trusted,
       );
       return { name: s.name, scanned, inserted };
     } catch (e: unknown) {

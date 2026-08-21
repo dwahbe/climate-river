@@ -3,6 +3,7 @@
 // (`bun run health`) or via the daily health cron. Read-only.
 
 import { query, endPool } from "@/lib/db";
+import { EXA_MONTH_TO_DATE_SPEND_SQL } from "@/lib/exa";
 import { AGGREGATOR_URL_SQL_REGEX } from "@/lib/aggregators";
 
 export interface HealthMetrics {
@@ -24,7 +25,12 @@ export interface HealthMetrics {
     searches: number;
     successes: number;
     successShare: number | null;
+    candidates: number;
+    accepted: number;
+    acceptShare: number | null;
+    exaSpendMonthUsd: number;
   };
+  unresolvedGnShare24h: number | null;
   scoresStaleMinutes: number | null;
   unrewrittenLeads7d: number;
   hiddenAggregatorLeadShare72h: number | null;
@@ -44,6 +50,11 @@ const THRESHOLDS = {
   rewriteLlmErrorShareMax: 0.1, // min 20 attempts
   prefetchSuccessShareMin: 0.3, // among attempted, min 50
   discoverySuccessShareMin: 0.5, // min 10 searches
+  // 2026-08-21: the GN site: tier ran for months at 2.5% acceptance and nobody
+  // noticed; paid discovery silently stopped for weeks. Guard yield and spend.
+  discoveryAcceptShareMin: 0.05, // accepted/candidates, min 50 candidates
+  unresolvedGnShareMax: 0.25, // of articles ingested in 24h, min 100
+  exaSpendWarnUsd: 8, // month-to-date; free credit is $10
   scoresStaleMinutesMax: 600,
 };
 
@@ -99,6 +110,31 @@ export async function run(
   );
   const ds = dsRows[0];
 
+  const { rows: dcRows } = await query<{
+    candidates: number;
+    accepted: number;
+  }>(
+    `SELECT count(*)::int AS candidates,
+            count(*) FILTER (WHERE accepted)::int AS accepted
+     FROM discovery_candidates
+     WHERE created_at > now() - make_interval(hours => $1)`,
+    [windowHours],
+  );
+  const dc = dcRows[0];
+
+  const { rows: exaRows } = await query<{ usd: number }>(
+    EXA_MONTH_TO_DATE_SPEND_SQL,
+  );
+  const exaSpendMonthUsd = Number(exaRows[0]?.usd ?? 0);
+
+  const { rows: gnRows } = await query<{ total: number; unresolved: number }>(
+    `SELECT count(*)::int AS total,
+            count(*) FILTER (WHERE canonical_url ~ 'news\\.google\\.com')::int AS unresolved
+     FROM articles
+     WHERE fetched_at > now() - interval '24 hours'`,
+  );
+  const gn = gnRows[0];
+
   const { rows: staleRows } = await query<{ minutes: number | null }>(
     `SELECT round(extract(epoch FROM (now() - max(updated_at))) / 60)::int AS minutes
      FROM cluster_scores`,
@@ -148,7 +184,12 @@ export async function run(
       searches: ds.searches,
       successes: ds.successes,
       successShare: share(ds.successes, ds.searches),
+      candidates: dc.candidates,
+      accepted: dc.accepted,
+      acceptShare: share(dc.accepted, dc.candidates),
+      exaSpendMonthUsd: Number(exaSpendMonthUsd.toFixed(4)),
     },
+    unresolvedGnShare24h: share(gn.unresolved, gn.total),
     scoresStaleMinutes,
     unrewrittenLeads7d: backlogRows[0].n,
     hiddenAggregatorLeadShare72h: share(
@@ -190,6 +231,25 @@ export async function run(
     scoresStaleMinutes > THRESHOLDS.scoresStaleMinutesMax
   ) {
     breaches.push(`cluster_scores_stale_minutes:${scoresStaleMinutes}`);
+  }
+  if (
+    dc.candidates >= 50 &&
+    (metrics.discovery.acceptShare ?? 1) < THRESHOLDS.discoveryAcceptShareMin
+  ) {
+    breaches.push(
+      `discovery_accept_share:${metrics.discovery.acceptShare?.toFixed(3)}`,
+    );
+  }
+  if (
+    gn.total >= 100 &&
+    (metrics.unresolvedGnShare24h ?? 0) > THRESHOLDS.unresolvedGnShareMax
+  ) {
+    breaches.push(
+      `unresolved_gn_share_24h:${metrics.unresolvedGnShare24h?.toFixed(2)}`,
+    );
+  }
+  if (exaSpendMonthUsd >= THRESHOLDS.exaSpendWarnUsd) {
+    breaches.push(`exa_spend_month_usd:${exaSpendMonthUsd.toFixed(2)}`);
   }
 
   const report: HealthReport = {

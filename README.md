@@ -61,7 +61,7 @@ flowchart TB
     subgraph Sources["📡 Content Sources"]
         RSS[RSS Feeds]
         GN[Google News]
-        WEB[Web Discovery<br/>Tavily + OpenAI]
+        WEB[Web Discovery<br/>Exa + Google News site:]
     end
 
     subgraph Ingest["📥 Ingestion Layer"]
@@ -223,12 +223,12 @@ sequenceDiagram
 
 | Script                | Purpose                 | AI Model                 | Clustering              | Categorization | Key Features                                                 |
 | --------------------- | ----------------------- | ------------------------ | ----------------------- | -------------- | ------------------------------------------------------------ |
-| `discover.ts`         | Google News RSS         | —                        | Keyword                 | ❌             | 14 climate queries, relevance filtering                      |
+| `discover.ts`         | Google News RSS         | —                        | Keyword                 | ❌             | 20 climate queries, relevance filtering                      |
 | `ingest.ts`           | RSS feed processing     | `text-embedding-3-small` | **Semantic** (pgvector) | ✅ Inline      | Full pipeline: dedup, embeddings, clustering, categorization |
-| `discover-web.ts`     | AI web discovery        | `gpt-4o-mini` + Tavily   | Keyword                 | ✅ Inline      | Multi-tier search, 60+ curated outlets                       |
+| `discover-web.ts`     | Outlet discovery sweep  | Exa search + GN `site:`  | Keyword                 | ✅ Inline      | Curated outlets without a live feed; OpenAI opt-in           |
 | `categorize.ts`       | Backfill categorization | Hybrid rules + AI        | —                       | ✅             | Catches uncategorized articles (e.g., from discover.ts)      |
 | `prefetch-content.ts` | Reader mode cache       | —                        | —                       | —              | Content extraction, paywall detection                        |
-| `rescore.ts`          | Cluster scoring         | —                        | —                       | —              | Freshness decay (6h/9h half-life), velocity, coverage        |
+| `rescore.ts`          | Cluster scoring         | —                        | —                       | —              | Freshness decay (6h/12h half-life), velocity, coverage       |
 | `rewrite.ts`          | Headline enhancement    | `gpt-4o-mini`            | —                       | —              | Techmeme-style, fact validation, no hallucinated numbers     |
 
 **Clustering Methods:**
@@ -289,21 +289,22 @@ flowchart TB
 
     subgraph WebDiscoverScript["scripts/discover-web.ts"]
         web_run["run()"]
-        web_broadDiscovery["runBroadClimateDiscovery()"]
+        web_exa["runExaOutletSegment()"]
+        web_gn["runGoogleNewsSiteOutletSegment()"]
         web_outletDiscovery["runOutletDiscoverySegment()"]
-        web_tavily["searchViaTavily()"]
-        web_tavilyBatch["searchViaTavilyBatch()"]
+        web_exaSearch["lib/exa.ts exaSearch()"]
         web_openai["callOpenAIWebSearch()"]
         web_tryInsert["tryInsertDiscoveredArticle()"]
         web_insertArticle["insertWebDiscoveredArticle()"]
         web_ensureCluster["ensureClusterForArticle()"]
 
-        web_run --> web_broadDiscovery
+        web_run --> web_exa
+        web_run --> web_gn
         web_run --> web_outletDiscovery
-        web_broadDiscovery --> web_tavily
-        web_outletDiscovery --> web_tavilyBatch
+        web_exa --> web_exaSearch
         web_outletDiscovery --> web_openai
-        web_broadDiscovery --> web_tryInsert
+        web_exa --> web_tryInsert
+        web_gn --> web_tryInsert
         web_outletDiscovery --> web_tryInsert
         web_tryInsert --> web_insertArticle
         web_tryInsert --> web_ensureCluster
@@ -422,7 +423,7 @@ flowchart LR
 
     subgraph External
         OPENAI[OpenAI API]
-        TAVILY[Tavily API]
+        EXA[Exa API]
         PG[(PostgreSQL)]
     end
 
@@ -450,7 +451,7 @@ flowchart LR
     WD --> TAG
     WD --> CAT
     WD --> OPENAI
-    WD --> TAVILY
+    WD --> EXA
 
     CAT --> TAG
     CAT --> OPENAI
@@ -535,8 +536,8 @@ Where:
 
 - **Freshness**: Exponential decay with configurable half-lives
   - Articles: 6-hour half-life (lose 50% score every 6 hours)
-  - Clusters: 9-hour half-life (25% faster decay for fresher homepage)
-- **Velocity**: Articles added in last 4 hours
+  - Clusters: 12-hour half-life (applied at read time in the RPC)
+- **Velocity**: trust-weighted distinct outlets publishing in the last 24 hours
 - **Coverage**: Source diversity + total weighted coverage (using log scaling)
 - **Weight**: Source editorial weight (1-5 scale)
 - **Pool Strength**: Aggregate article quality within cluster
@@ -555,28 +556,23 @@ Editorial quality includes:
 
 ### Web Discovery Tiers
 
-The `discover-web.ts` script uses a multi-tier approach:
+The `discover-web.ts` script sweeps the curated outlets that have no live RSS feed (resolved from `sources` at run time) in tiers:
 
 ```mermaid
 flowchart LR
-    subgraph "Tier 0: Broad"
-        T0[Tavily Broad Search<br/>5 climate queries]
+    subgraph "Tier 1: Exa (full cron only)"
+        T1[Exa search<br/>feedless outlets, 72h window<br/>search-only, monthly $ cap]
     end
 
-    subgraph "Tier 1: Site-Specific"
-        T1[Tavily Site Search<br/>60+ outlets]
+    subgraph "Tier 2: Free"
+        T2[Google News site: RSS<br/>outlets Exa didn't cover]
     end
 
-    subgraph "Tier 2: Fallback"
-        T2[OpenAI Web Search<br/>Missing domains]
+    subgraph "Tier 3: Opt-in"
+        T3[OpenAI Web Search<br/>WEB_SEARCH_ENABLED=1]
     end
 
-    subgraph "Tier 3: RSS"
-        T3[Google News RSS<br/>AI-suggested queries]
-    end
-
-    T0 --> T1
-    T1 -->|"Missing domains"| T2
+    T1 -->|"Uncovered domains"| T2
     T2 -->|"Still missing"| T3
 ```
 

@@ -3,6 +3,7 @@
 export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
+import { DISABLED_FEED_PREFIX } from "@/lib/utils";
 import { authorized } from "@/lib/cron";
 import { query } from "@/lib/db";
 
@@ -118,6 +119,7 @@ export async function GET(req: Request) {
       WHERE feed_url NOT LIKE 'discover://%'
         AND feed_url NOT LIKE 'web://%'
         AND feed_url NOT LIKE 'web-discovery://%'
+        AND feed_url NOT LIKE '${DISABLED_FEED_PREFIX}%'
     `);
 
     const overallHealthy = jobHealths.every(

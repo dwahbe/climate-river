@@ -152,11 +152,11 @@ function makeDescriptor(domain: string): string {
 
 /**
  * Scenarios mirror the per-batch shape of the production OpenAI fallback:
- * a small group of outlets that Tavily often misses, asked to return
+ * a small group of outlets that the outlet sweep often misses, asked to return
  * combined articles. Each scenario is run once per profile.
  */
 function buildScenarios(): Scenario[] {
-  const tavilyOftenMisses: Scenario[] = [
+  const sweepOftenMisses: Scenario[] = [
     {
       id: "single-iea",
       domains: ["iea.org"],
@@ -173,11 +173,11 @@ function buildScenarios(): Scenario[] {
     },
     {
       id: "batch-thinktanks",
-      domains: ["iea.org", "wri.org", "ember-climate.org"],
+      domains: ["iea.org", "wri.org", "ember-energy.org"],
       descriptors: [
         makeDescriptor("iea.org"),
         makeDescriptor("wri.org"),
-        makeDescriptor("ember-climate.org"),
+        makeDescriptor("ember-energy.org"),
       ],
       freshHours: 72,
       resultLimit: 6,
@@ -212,7 +212,7 @@ function buildScenarios(): Scenario[] {
     },
   ];
 
-  return tavilyOftenMisses;
+  return sweepOftenMisses;
 }
 
 function urlIsInAllowlist(url: string, allowed: Set<string>): boolean {

@@ -234,14 +234,19 @@ export async function categorizeArticleHybrid(
   title: string,
   summary?: string,
   articleId?: number,
+  opts: { trusted?: boolean } = {},
 ): Promise<CategoryScore[]> {
   const normalized = normalizeArticleForCategorization({ title, summary });
 
-  if (!isClimateRelevant(normalized)) {
+  // Trusted climate-only sources (config/trustedClimateSources.ts) bypass the
+  // keyword gate; the rule + semantic scoring below still runs for them.
+  if (!opts.trusted && !isClimateRelevant(normalized)) {
     return [];
   }
   // Start with rule-based categorization
-  const ruleBasedScores = categorizeArticle(normalized);
+  const ruleBasedScores = categorizeArticle(normalized, {
+    skipRelevanceGate: opts.trusted === true,
+  });
 
   // Try to reuse stored embedding from DB before generating a new one
   let articleEmbedding: number[] | null = null;
@@ -371,16 +376,14 @@ export async function categorizeArticleHybrid(
     rankHybridCategoryScores(hybridScores),
   );
 
-  return sorted.map(
-    (item): CategoryScore => ({
-      slug: item.slug,
-      confidence: item.confidence,
-      reasons: item.reasons,
-      ruleConfidence: item.ruleConfidence,
-      semanticConfidence: item.semanticConfidence,
-      confidenceSource: item.confidenceSource,
-    }),
-  );
+  return sorted.map((item): CategoryScore => ({
+    slug: item.slug,
+    confidence: item.confidence,
+    reasons: item.reasons,
+    ruleConfidence: item.ruleConfidence,
+    semanticConfidence: item.semanticConfidence,
+    confidenceSource: item.confidenceSource,
+  }));
 }
 
 /**
@@ -499,9 +502,15 @@ export async function categorizeAndStoreArticle(
   articleId: number,
   title: string,
   summary?: string,
+  opts: { trusted?: boolean } = {},
 ): Promise<number> {
   try {
-    const scores = await categorizeArticleHybrid(title, summary, articleId);
+    const scores = await categorizeArticleHybrid(
+      title,
+      summary,
+      articleId,
+      opts,
+    );
     return await storeArticleCategories(articleId, scores);
   } catch (error) {
     console.error(`Error categorizing article ${articleId}:`, error);

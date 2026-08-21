@@ -179,11 +179,9 @@ async function generateWithOpenAI(
     // unified shape, but we also peek at providerMetadata.gateway as a fallback
     // in case it surfaces cached counts there.
     const openaiMeta = result.providerMetadata?.openai as
-      | { cachedPromptTokens?: number }
-      | undefined;
+      { cachedPromptTokens?: number } | undefined;
     const gatewayMeta = result.providerMetadata?.gateway as
-      | { cachedPromptTokens?: number; cachedInputTokens?: number }
-      | undefined;
+      { cachedPromptTokens?: number; cachedInputTokens?: number } | undefined;
     const cachedTokens =
       usage?.inputTokenDetails?.cacheReadTokens ??
       usage?.cachedInputTokens ??

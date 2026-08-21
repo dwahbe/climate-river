@@ -47,9 +47,11 @@ Long-running scripts accept `deadlineMs`/`deadlineAt` and stop starting new work
 
 Change the owning module, not call sites — several are pinned by parity tests:
 
-- **Scoring**: `lib/scoring.ts` owns blend weights + freshness decay, imported by BOTH `scripts/rescore.ts` (writes `base_score`, `latest_pub`, `why`) and the `get_river_clusters` DDL in `scripts/schema.ts` (recomputes freshness at read time, windows on cluster activity rather than lead age). Velocity = distinct sources in the last 4h; novelty = small additive boost (≤ +0.03) by centroid distance from the current top clusters.
+- **Scoring**: `lib/scoring.ts` owns blend weights + freshness decay + age damping + Top gate, imported by BOTH `scripts/rescore.ts` (writes `base_score`, `latest_pub`, `first_pub`, `strong_sources`, `why`) and the `get_river_clusters` DDL in `scripts/schema.ts` (recomputes freshness/damping at read time, windows on cluster activity rather than lead age). Velocity = Σ weight/10 of distinct sources in the last 24h (`VELOCITY_WINDOW_H`); novelty = small additive boost (≤ +0.03) by centroid distance from the current top clusters.
 - **Headline gate**: `validateHeadline` in `lib/rewriteShared.ts`, imported by production rewrite AND the eval harness; failure reasons land in `rewrite_attempts.validation_failures`. Per-article cap: 4 validation failures (transport errors don't count); a content refetch re-opens the article.
-- **Lead eligibility**: `LEAD_INELIGIBLE_SQL` in `lib/clustering.ts` — aggregator URL or suspect date (published ≈ fetched) never becomes the displayed lead. The RPC hides a cluster only when it has no eligible lead at all.
+- **Lead eligibility**: `LEAD_INELIGIBLE_SQL` in `lib/clustering.ts` — aggregator URL, low-value host (`LOW_VALUE_HOSTS` in `lib/aggregators.ts`: PR wires, stock-tip sites, content farms like thecooldown.com) or suspect date (published ≈ fetched) never becomes the displayed lead. The RPC hides a cluster only when it has no eligible lead at all.
+- **Top gate + age damping**: `TOP_GATE` / `clusterAgeDampingSql` in `lib/scoring.ts` — the homepage Top view only shows clusters with ≥2 strong sources (weight ≥4) OR a lead from a weight-≥8 source; Latest and category views are ungated. Scores are multiplied by a floored half-life on the cluster's _first_ article (168h, floor 0.7) so weeks-old topic buckets can't hold #1 on a trickle, and uncorroborated clusters get a flat 0.85 ordering discount (`SINGLETON_DISCOUNT`). Corroboration (`strong_sources`, velocity) counts distinct publisher hosts, not `sources` rows. Velocity is trust-weighted (Σ distinct-source weight/10 over 24h); "authority" = best source covering the story. Weights: freshness .30 / velocity .35 / coverage .15 / authority .15 / pool .05 (+ novelty ≤ .03), cluster half-life 12h.
+- **Trusted climate sources**: `config/trustedClimateSources.ts` — climate-only hosts (Grist, Heatmap, Canary, Carbon Brief, Volts…) and climate _section_ feeds of general outlets bypass `isClimateRelevant` at ingest, web discovery, and backfill categorization (the keyword gate dropped ~20% of Grist items). Broad environment desks (Guardian us/environment, NYT Climate.xml) stay gated.
 - **Dedup**: `lib/articleDedupe.ts` (same URL, or same title within 7 days), used by ingest + discover; `isExisting` hits skip re-clustering/re-categorization.
 - **Aggregator hosts**: `lib/aggregators.ts` (dependency-free list + SQL regex).
 - **Paywall domains**: `lib/paywalls.ts` (dependency-free list + host matcher + SQL regex), used by `lib/readerAvailability.ts` (reader/Preview gating + prev/next skip) and the prefetch SQL filter.
@@ -62,7 +64,7 @@ Change the owning module, not call sites — several are pinned by parity tests:
 ## Discovery, content, categorization
 
 - **Google News**: `resolveGoogleNewsUrl` in `lib/googleNews.ts` (`?url=` param → legacy token → batchexecute API), SSRF-guarded via `safeFetch`. `discover.ts` resolves at insert (capped + deadline-aware); unresolved articles stay clusterable but are lead-ineligible and skipped by prefetch.
-- **discover-web**: free Google News `site:` queries per outlet by default; paid OpenAI web search (`WEB_SEARCH_ENABLED=1`) and Tavily (`WEB_SEARCH_TAVILY_OUTLETS/BROAD=1`) are opt-in.
+- **discover-web**: sweep universe = `config/climateOutlets.ts` minus outlets with a live RSS feed (resolved from `sources` at run time). Tier 1 is **Exa** (`WEB_SEARCH_EXA=1` + `EXA_API_KEY`, `lib/exa.ts`, search-only/no contents, ~$0.007/call, month-to-date cap `EXA_MONTHLY_BUDGET_USD` from `discovery_searches.cost_usd`, runs only when `paidOutletSweep` — the full cron; refresh passes false); tier 2 free Google News `site:` for uncovered outlets; OpenAI web search (`WEB_SEARCH_ENABLED=1`) is an opt-in gap-filler. (Tavily was removed 2026-08-21.) PR-wire/stock/content-farm hosts are rejected (`low_value_host`).
 - **Categorize**: keyword rules (`lib/tagger.ts`) + embeddings (`lib/categorizer.ts`). `articles.pipeline_state` caps the stage at 3 attempts; `no_category` articles only retry after a content refetch; generated embeddings are persisted, not regenerated.
 - **Language**: `franc-min`; confident non-English skipped at ingest or hidden via `language_code` (NULL stays visible).
 - **Search**: hybrid full-text + semantic with Reciprocal Rank Fusion.
@@ -73,7 +75,7 @@ Change the owning module, not call sites — several are pinned by parity tests:
 - **jsdom pinned to 22.1.0**: 23+ pulls ESM-only transitives that throw `ERR_REQUIRE_ESM` on Vercel's Lambda runtime (it disables `require(esm)`), breaking every prefetch/reader call. Don't bump without verifying production prefetch.
 - **jsdom selector shim required for Defuddle**: jsdom's selector engine (nwsapi) can't parse some Defuddle cleanup selectors (`header:not(:has(p + p))…`); an unshimmed throw makes Defuddle return the whole `<body>` (site chrome) as "content". `installSelectorCompat` from `lib/domSelectorCompat.ts` must be applied to every JSDOM instance handed to Defuddle; the reader's link-density gate (`blocked` over 50% link text) is the backstop.
 - Build must use webpack (see Commands); dev Turbopack is fine.
-- Source weights are integer 1–10 (`config/sourceTiers.ts`); `UNKNOWN_SOURCE_WEIGHT = 2` is the only fallback for unknown sources.
+- Source weights are integer 1–10 (`config/sourceTiers.ts`); `UNKNOWN_SOURCE_WEIGHT = 2` is the only fallback for unknown sources (web-discovered sources too — the old flat 4 let "Trend Hunter" lead clusters). Feeds are disabled by prefixing `feed_url` with `disabled://` (ingest only fetches `http%`), not deleted.
 - Homepage freshness comes from the RPC's read-time decay (ISR 5min), not rescore cadence — don't "fix" staleness by adding rescore runs.
 
 ## Conventions
@@ -90,4 +92,4 @@ Change the owning module, not call sites — several are pinned by parity tests:
 
 See `.env.example` for the full annotated list.
 **Required**: `DATABASE_URL`, `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `OPENAI_API_KEY`, `ADMIN_TOKEN`
-**Optional**: `CRON_SECRET` (recommended), `HEALTH_ALERT_WEBHOOK_URL`, `TAVILY_API_KEY`, `WEB_SEARCH_*`, `DISCOVER_*` (GN localization + resolve cap), `SCHEMA_ENSURE`, `SEARCH_VECTOR_BACKFILL_*`
+**Optional**: `CRON_SECRET` (recommended), `HEALTH_ALERT_WEBHOOK_URL`, `EXA_API_KEY` + `WEB_SEARCH_EXA=1` (+ `EXA_*` tuning), `WEB_SEARCH_*`, `DISCOVER_*` (GN localization + resolve cap), `SCHEMA_ENSURE`, `SEARCH_VECTOR_BACKFILL_*`

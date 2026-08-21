@@ -48,7 +48,6 @@ export const SOURCE_TIERS: Record<string, number> = {
   "theverge.com": 6,
   "wired.com": 6,
   "yaleclimateconnections.org": 6,
-  "phys.org": 6,
   "news.un.org": 6,
   "iea.org": 6,
   "wri.org": 6,
@@ -63,14 +62,81 @@ export const SOURCE_TIERS: Record<string, number> = {
   "weforum.org": 6,
   "project-syndicate.org": 6,
 
-  // Tier 4 — blogs and niche aggregators (still useful, lower trust)
+  // Tier 6 (cont.) — climate newsletters, trackers, policy primaries, journals
+  // (added 2026-08-21 source audit)
+  "volts.wtf": 6,
+  "theclimatebrink.com": 6,
+  "sustainabilitybynumbers.com": 6,
+  "latitudemedia.com": 6,
+  "floodlightnews.org": 6,
+  "desmog.com": 6,
+  "dialogue.earth": 6,
+  "ieefa.org": 6,
+  "carbontracker.org": 6,
+  "ember-energy.org": 6,
+  "climate.copernicus.eu": 6,
+  "climate.law.columbia.edu": 6,
+  "ncei.noaa.gov": 6,
+  "eos.org": 6,
+  "semafor.com": 6,
+  "whitehouse.gov": 6,
+  "federalregister.gov": 5,
+  "utilitydive.com": 5,
+  "reneweconomy.com.au": 5,
+  "heated.world": 5,
+  "distilled.earth": 5,
+  "billmckibben.substack.com": 5,
+  "drilled.media": 5,
+
+  // Tier 4 — blogs, trade press and press-release rewrites (still useful,
+  // lower trust)
   "cleantechnica.com": 4,
   "electrek.co": 4,
   "treehugger.com": 4,
+  "phys.org": 4,
+
+  // Tier 1 — content farms / rewrite sites kept only for corroboration; also
+  // lead-ineligible via lib/aggregators.ts LOW_VALUE_HOSTS
+  "thecooldown.com": 1,
+  "energiesmedia.com": 1,
+  "autonocion.com": 1,
 };
 
-/** Normalize a host string for tier lookup. */
-function normalizeHost(host: string): string {
+// Per-feed overrides for hosts whose feeds differ in kind: journal paper
+// feeds (Nature Climate Change / Nature Energy) publish paper titles, not
+// news — a paper becomes Top-worthy when outlets cover it (then it clusters),
+// so the raw feed sits below the Top gate's lead threshold while the
+// nature.com news desk keeps tier 8. Keyed by a feed_url substring; applied by
+// scripts/set-source-tiers.ts before the host tier.
+export const FEED_WEIGHT_OVERRIDES: Record<string, number> = {
+  "nature.com/nclimate.rss": 6,
+  "nature.com/nenergy.rss": 6,
+  // The Nature "climate change" subject feed mixes news with NCC papers.
+  "nature.com/subjects/climate-change.rss": 6,
+};
+
+// Journal papers reach the DB through every channel (the RSS rows above, the
+// discover://nature.com Google News pseudo-source, Exa), so the same cap is
+// applied by URL at scoring time (lib/scoring.ts sourceWeightSql) — a paper's
+// weight is min(source weight, JOURNAL_WEIGHT_CAP) regardless of which source
+// row it attached to. Case-insensitive POSIX regex for SQL `~*`.
+export const JOURNAL_URL_SQL_REGEX =
+  "nature\\.com/articles/s415(58|60)-|nature\\.com/articles/s41558|nature\\.com/articles/s41560";
+export const JOURNAL_WEIGHT_CAP = 6;
+
+export function resolveFeedOverride(
+  feedUrl: string | null | undefined,
+): number | null {
+  if (!feedUrl) return null;
+  const lower = feedUrl.toLowerCase();
+  for (const [needle, weight] of Object.entries(FEED_WEIGHT_OVERRIDES)) {
+    if (lower.includes(needle)) return weight;
+  }
+  return null;
+}
+
+/** Normalize a host string for tier lookup (shared with trustedClimateSources). */
+export function normalizeHost(host: string): string {
   return host
     .toLowerCase()
     .replace(/^https?:\/\//, "")

@@ -87,7 +87,7 @@ const OUTLET_GROUPS: OutletGroup[] = [
       "rmi.org",
       "wri.org",
       "iea.org",
-      "ember-climate.org",
+      "ember-energy.org",
       "weforum.org",
       "amnesty.org",
       "news.un.org",

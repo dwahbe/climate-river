@@ -2,12 +2,13 @@
 // Re-tier existing rows in `sources` based on config/sourceTiers.ts.
 //
 // Sources whose host appears in the tier map get their weight set to the
-// configured value. Sources not in the map are left untouched, which preserves
-// any manual adjustments and the discover-web.ts defaults (2 or 4).
+// configured value (per-feed overrides in FEED_WEIGHT_OVERRIDES win). Sources
+// not in the map are left untouched, which preserves any manual adjustments
+// and the UNKNOWN_SOURCE_WEIGHT (2) default for discovered sources.
 //
 // Default is dry-run. Pass --apply to actually mutate.
 import { query, endPool } from "@/lib/db";
-import { resolveTier } from "@/config/sourceTiers";
+import { resolveFeedOverride, resolveTier } from "@/config/sourceTiers";
 
 const DRY_RUN = !process.argv.includes("--apply");
 
@@ -27,6 +28,7 @@ async function run() {
   const updates: { id: number; from: number; to: number; host: string }[] = [];
   for (const row of rows) {
     const target =
+      resolveFeedOverride(row.feed_url) ??
       resolveTier(row.homepage_url || "") ??
       resolveTier(row.feed_url) ??
       resolveTier(row.name);

@@ -6,14 +6,19 @@ import { openai } from "@ai-sdk/openai";
 import { query } from "@/lib/db";
 import { visibleLanguagePredicate } from "@/lib/languagePolicy";
 import { UNKNOWN_SOURCE_WEIGHT } from "@/config/sourceTiers";
-import { AGGREGATOR_URL_SQL_REGEX } from "@/lib/aggregators";
+import {
+  AGGREGATOR_URL_SQL_REGEX,
+  LOW_VALUE_URL_SQL_REGEX,
+} from "@/lib/aggregators";
 
 // Articles that should never be a cluster's displayed lead (aggregator
-// interstitials, or suspect dates where published ≈ fetched). Imported by
-// rescore, cluster-maintenance, and ingest-time metadata so the rule can't
-// drift between selectors. Expects the articles table aliased as `a`.
+// interstitials, press-release wires / content farms, or suspect dates where
+// published ≈ fetched). Imported by rescore, cluster-maintenance, and
+// ingest-time metadata so the rule can't drift between selectors. Expects the
+// articles table aliased as `a`.
 export const LEAD_INELIGIBLE_SQL = `(
   a.canonical_url ~* '${AGGREGATOR_URL_SQL_REGEX}'
+  OR a.canonical_url ~* '${LOW_VALUE_URL_SQL_REGEX}'
   OR a.published_at IS NULL
   OR abs(extract(epoch from (a.published_at - a.fetched_at))) <= 60
 )`;

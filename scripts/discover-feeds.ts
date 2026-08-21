@@ -11,6 +11,8 @@
 //   bun scripts/discover-feeds.ts --apply --limit 30
 
 import { query, endPool } from "@/lib/db";
+import { isLowValueHost } from "@/lib/aggregators";
+import { DISABLED_FEED_PREFIX } from "@/lib/utils";
 import { safeFetch } from "@/lib/urlSafety";
 
 const FETCH_TIMEOUT_MS = 8_000;
@@ -184,10 +186,19 @@ export async function run(
   let upgraded = 0;
   let noFeed = 0;
   let duplicate = 0;
+  let lowValue = 0;
 
   for (const source of candidates) {
     const host = source.feed_url.replace(/^discover:\/\//, "");
     const homepage = source.homepage_url || `https://${host}`;
+
+    // Content farms / PR wires / stock-tip sites are skipped at discovery and
+    // lead-ineligible; promoting them to an RSS feed would re-ingest them.
+    if (isLowValueHost(host)) {
+      lowValue++;
+      console.log(`  ⏭️  ${host}: low-value host, not promoted`);
+      continue;
+    }
 
     const feedUrl = await findValidFeed(homepage);
     if (!feedUrl) {
@@ -198,15 +209,20 @@ export async function run(
       continue;
     }
 
-    // Another source row may already own this feed (e.g. a curated entry).
-    const { rows: owner } = await query<{ id: number }>(
-      `SELECT id FROM sources WHERE feed_url = $1 AND id <> $2 LIMIT 1`,
-      [feedUrl, source.id],
+    // Another source row may already own this feed (e.g. a curated entry) —
+    // including one that was deliberately disabled (`disabled://` prefix);
+    // re-discovering that URL must not silently re-enable it.
+    const { rows: owner } = await query<{ id: number; feed_url: string }>(
+      `SELECT id, feed_url FROM sources
+        WHERE (feed_url = $1 OR feed_url = $3) AND id <> $2
+        LIMIT 1`,
+      [feedUrl, source.id, `${DISABLED_FEED_PREFIX}${feedUrl}`],
     );
     if (owner.length > 0) {
       duplicate++;
+      const disabled = owner[0].feed_url.startsWith(DISABLED_FEED_PREFIX);
       console.log(
-        `  ⏭️  ${host}: feed ${feedUrl} already owned by source ${owner[0].id}`,
+        `  ⏭️  ${host}: feed ${feedUrl} already owned by source ${owner[0].id}${disabled ? " (disabled — leaving it off)" : ""}`,
       );
       continue;
     }
@@ -228,6 +244,7 @@ export async function run(
     upgraded,
     noFeed,
     duplicate,
+    lowValue,
     apply,
   };
   console.log(`\n📊 Feed autodiscovery summary:`, summary);

@@ -45,7 +45,6 @@
     "@ai-sdk/openai": "^4",
     "@supabase/supabase-js": "2.90.0",
     "@tailwindcss/typography": "^0.5.20",
-    "@tavily/core": "^0.7.7",
     "@types/sanitize-html": "^2.16.1",
     "@vercel/analytics": "^2.0.1",
     "@vercel/oidc": "^3.8.4",
