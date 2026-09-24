@@ -42,20 +42,18 @@
     "feeds:discover:apply": "bun --env-file=.env.local scripts/discover-feeds.ts --apply"
   },
   "dependencies": {
-    "@ai-sdk/openai": "^4",
+    "@ai-sdk/openai": "^4.0.74",
     "@supabase/supabase-js": "2.90.0",
     "@tailwindcss/typography": "^0.5.20",
-    "@types/sanitize-html": "^2.16.1",
     "@vercel/analytics": "^2.0.1",
-    "@vercel/oidc": "^3.8.4",
-    "ai": "^7",
+    "ai": "^7.0.113",
     "clsx": "^2.1.1",
     "dayjs": "^1.11.21",
-    "defuddle": "^0.19.2",
+    "defuddle": "^0.19.4",
     "franc-min": "^6.2.0",
     "jsdom": "22.1.0",
     "lucide-react": "^1.31.0",
-    "next": "^16.3.1",
+    "next": "^16.3.6",
     "pg": "^8.23.0",
     "pg-types": "^4.1.0",
     "postgres-array": "^3.0.4",
@@ -70,14 +68,14 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.39.5",
-    "@next/eslint-plugin-next": "^16.3.1",
+    "@next/eslint-plugin-next": "^16.3.6",
     "@tailwindcss/postcss": "^4.3.3",
     "@types/jsdom": "^21.1.7",
-    "@types/node": "^20.19.43",
+    "@types/node": "^24",
     "@types/pg": "^8.21.0",
     "@types/react": "19.2.14",
     "@types/react-dom": "19.2.3",
-    "autoprefixer": "^10.5.4",
+    "@types/sanitize-html": "^2.16.1",
     "eslint": "^9.39.5",
     "eslint-plugin-react": "^7.37.5",
     "eslint-plugin-react-hooks": "^7.1.1",
@@ -92,7 +90,6 @@
   "overrides": {
     "@supabase/realtime-js": "2.90.0",
     "@types/react": "19.2.14",
-    "@types/react-dom": "19.2.3",
-    "@xmldom/xmldom": "^0.8.12"
+    "@types/react-dom": "19.2.3"
   }
 }

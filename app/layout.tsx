@@ -64,7 +64,9 @@ export const metadata = {
     description:
       "Climate news aggregated from The Guardian, NYT, Reuters, and more. Organized by story, ranked for trust.",
     creator: "@dylanwahbe",
-    images: ["/api/og"],
+    images: [
+      { url: "/api/og", alt: "Climate River - Top climate news headlines" },
+    ],
   },
   robots: {
     index: true,

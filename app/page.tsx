@@ -31,7 +31,12 @@ export const metadata: Metadata = {
     title: "Climate News Today | Climate River",
     description:
       "Today's top climate news from 40+ trusted outlets. Stories clustered by topic, ranked for credibility, updated continuously.",
-    images: ["/api/og"],
+    images: [
+      {
+        url: "/api/og",
+        alt: "Climate River - Today's top climate news headlines",
+      },
+    ],
   },
   alternates: {
     canonical: "https://climateriver.org",

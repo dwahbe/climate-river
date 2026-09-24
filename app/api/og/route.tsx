@@ -5,11 +5,39 @@ import { getRiverData } from "@/lib/services/riverService";
 // Cache for 5 minutes
 export const revalidate = 300;
 
+// Same date format and time zone as the site's LocalTime component
+const dateFormatter = new Intl.DateTimeFormat("en-US", {
+  month: "short",
+  day: "numeric",
+  timeZone: "America/Los_Angeles",
+});
+
+// Static Inclusive Sans instances (satori can't read variable fonts), one per weight used below
+const INCLUSIVE_SANS = [
+  {
+    weight: 400,
+    url: "https://fonts.gstatic.com/s/inclusivesans/v5/0nk8C9biPuwflXcJ46P4PGWE08T-gfZusL0kQqtfcBtN7g.ttf",
+  },
+  {
+    weight: 600,
+    url: "https://fonts.gstatic.com/s/inclusivesans/v5/0nk8C9biPuwflXcJ46P4PGWE08T-gfZusL0kQqtfrhxN7g.ttf",
+  },
+  {
+    weight: 700,
+    url: "https://fonts.gstatic.com/s/inclusivesans/v5/0nk8C9biPuwflXcJ46P4PGWE08T-gfZusL0kQqtflxxN7g.ttf",
+  },
+] as const;
+
 export async function GET(request: NextRequest) {
-  // Fetch Inclusive Sans font from Google Fonts
-  const fontData = await fetch(
-    "https://fonts.gstatic.com/s/inclusivesans/v4/0nk8C9biPuwflXcJ46P4PGWE08T-gfZusL0kQqtfcBtN7g.ttf",
-  ).then((res) => res.arrayBuffer());
+  // Fetch Inclusive Sans fonts from Google Fonts
+  const fonts = await Promise.all(
+    INCLUSIVE_SANS.map(async ({ weight, url }) => ({
+      name: "Inclusive Sans",
+      data: await fetch(url).then((res) => res.arrayBuffer()),
+      style: "normal" as const,
+      weight,
+    })),
+  );
 
   try {
     // Fetch top 3 clusters
@@ -39,68 +67,111 @@ export async function GET(request: NextRequest) {
           display: "flex",
           flexDirection: "column",
           backgroundColor: "#fafaf9",
-          padding: "64px 80px",
+          padding: "56px 80px",
           fontFamily: "Inclusive Sans",
-          justifyContent: "space-between",
+          color: "#18181b",
         }}
       >
-        {/* Headlines */}
+        {/* Brand top-left, section label top-right */}
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: "14px" }}>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={`data:image/png;base64,${logoBase64}`}
+              width={40}
+              height={40}
+            />
+            <div
+              style={{
+                display: "flex",
+                fontSize: 30,
+                fontWeight: 600,
+                letterSpacing: "-0.01em",
+              }}
+            >
+              Climate River
+            </div>
+          </div>
+          <div
+            style={{
+              display: "flex",
+              fontSize: 22,
+              fontWeight: 600,
+              color: "#71717a",
+              textTransform: "uppercase",
+              letterSpacing: "0.08em",
+            }}
+          >
+            {`Top stories · ${dateFormatter.format(new Date())}`}
+          </div>
+        </div>
+
+        {/* Headlines, vertically centered in the remaining space */}
         <div
           style={{
             display: "flex",
             flexDirection: "column",
-            gap: "40px",
-            width: "100%",
+            justifyContent: "center",
+            flexGrow: 1,
+            gap: "22px",
+            marginTop: "28px",
           }}
         >
           {headlines.slice(0, 3).map((headline, index) => (
             <div
               key={index}
-              style={{
-                display: "flex",
-                gap: "24px",
-                alignItems: "flex-start",
-              }}
+              style={{ display: "flex", gap: "20px", alignItems: "flex-start" }}
             >
               <div
                 style={{
                   display: "flex",
+                  width: "44px",
+                  flexShrink: 0,
                   fontSize: 42,
                   fontWeight: 700,
-                  color: "#3b82f6",
-                  flexShrink: 0,
-                  lineHeight: 1.2,
+                  lineHeight: 1.15,
+                  color: "#2563eb",
                 }}
               >
-                {index + 1}.
+                {index + 1}
               </div>
+              {/* Satori defaults flexShrink to 0; without it the column overflows the right padding */}
               <div
                 style={{
                   display: "flex",
                   flexDirection: "column",
-                  gap: "8px",
+                  flexGrow: 1,
+                  flexShrink: 1,
+                  minWidth: 0,
+                  gap: "6px",
                 }}
               >
                 <div
                   style={{
-                    display: "flex",
+                    display: "block",
                     fontSize: 42,
-                    lineHeight: 1.2,
-                    color: "#18181b",
                     fontWeight: 600,
+                    lineHeight: 1.15,
+                    letterSpacing: "-0.02em",
+                    lineClamp: 2,
+                    wordBreak: "break-word",
                   }}
                 >
-                  {headline.title.length > 90
-                    ? headline.title.substring(0, 90) + "..."
-                    : headline.title}
+                  {headline.title}
                 </div>
                 {headline.source && (
                   <div
                     style={{
-                      display: "flex",
-                      fontSize: 20,
-                      color: "#71717a",
-                      fontWeight: 400,
+                      display: "block",
+                      fontSize: 26,
+                      color: "#52525b",
+                      lineClamp: 1,
                     }}
                   >
                     {headline.source}
@@ -110,46 +181,11 @@ export async function GET(request: NextRequest) {
             </div>
           ))}
         </div>
-
-        {/* Logo and name in bottom right */}
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: "16px",
-            justifyContent: "flex-end",
-          }}
-        >
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img
-            src={`data:image/png;base64,${logoBase64}`}
-            width="32"
-            height="32"
-            style={{ flexShrink: 0 }}
-          />
-          <div
-            style={{
-              display: "flex",
-              fontSize: 20,
-              fontWeight: 600,
-              color: "#52525b",
-            }}
-          >
-            Climate River
-          </div>
-        </div>
       </div>,
       {
         width: 1200,
         height: 630,
-        fonts: [
-          {
-            name: "Inclusive Sans",
-            data: fontData,
-            style: "normal",
-            weight: 400,
-          },
-        ],
+        fonts,
       },
     );
   } catch (error) {
@@ -193,14 +229,7 @@ export async function GET(request: NextRequest) {
       {
         width: 1200,
         height: 630,
-        fonts: [
-          {
-            name: "Inclusive Sans",
-            data: fontData,
-            style: "normal",
-            weight: 400,
-          },
-        ],
+        fonts,
       },
     );
   }
