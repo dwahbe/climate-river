@@ -6,11 +6,10 @@ import {
 import { query } from "@/lib/db";
 import { resolveModel } from "@/lib/evalProviders";
 import {
-  buildSourceQuantContext,
+  buildRewriteInputs,
   buildSystemPrompt,
   buildRetrySystemPrompt,
   buildUserPrompt,
-  extractContentSnippet,
   sanitizeHeadline,
   validateHeadline,
   type HeadlineFailureReason,
@@ -172,26 +171,6 @@ export function validateDraft(
   return failValidation(code, `Rejected (${result.reason})`, draft);
 }
 
-function buildSourceText(
-  row: Row,
-  contentSnippet: string | null,
-  previewExcerpt: string | null,
-) {
-  return [
-    row.title,
-    row.dek,
-    contentSnippet,
-    previewExcerpt,
-    row.content_text,
-    row.content_html,
-  ]
-    .filter(
-      (part): part is string =>
-        typeof part === "string" && part.trim().length > 0,
-    )
-    .join(" ");
-}
-
 export async function fetchRewriteCandidates(
   opts: {
     limit?: number;
@@ -248,71 +227,17 @@ export async function fetchRewriteCandidates(
 }
 
 export function prepareRewriteCandidate(r: Row): PreparedRewriteCandidate {
-  const contentSnippet =
-    r.content_status === "success"
-      ? extractContentSnippet(r.content_text, r.content_html, 1200, r.id)
-      : null;
-
-  const previewExcerpt =
-    r.content_status === "success" &&
-    typeof r.content_html === "string" &&
-    r.content_html.trim().length > 0
-      ? extractContentSnippet(null, r.content_html, 2500, r.id)
-      : null;
-
-  let contentNote = "";
-  if (!r.content_status) {
-    contentNote = ":no_content";
-  } else if (r.content_status !== "success") {
-    contentNote = `:${r.content_status}`;
-  } else if (!contentSnippet) {
-    contentNote = ":content_rejected";
-  }
-
-  const sourceQuant = buildSourceQuantContext([
-    r.title,
-    r.dek,
-    contentSnippet,
-    previewExcerpt,
-    r.content_text,
-    r.content_html,
-  ]);
-
-  const climateSummaryParts = [
-    r.dek,
-    contentSnippet,
-    previewExcerpt,
-    r.content_text,
-    r.content_html,
-  ].filter(
-    (part): part is string =>
-      typeof part === "string" && part.trim().length > 0,
-  );
-
-  const isClimate = isClimateRelevant({
-    title: r.title,
-    summary:
-      climateSummaryParts.length > 0
-        ? climateSummaryParts.join(" ")
-        : undefined,
-  });
+  // Same builder as production (lib/rewriteShared.ts), so the bakeoff judges
+  // drafts against the context production would use.
+  const { promptInput, validationContext, contentNote, climateSummary } =
+    buildRewriteInputs(r);
 
   return {
     row: r,
-    promptInput: {
-      title: r.title,
-      dek: r.dek,
-      contentSnippet,
-      previewExcerpt,
-      publishedAt: r.published_at,
-    },
-    validationContext: {
-      hasContent: !!contentSnippet,
-      sourceQuant,
-      sourceText: buildSourceText(r, contentSnippet, previewExcerpt),
-    },
+    promptInput,
+    validationContext,
     contentNote,
-    isClimate,
+    isClimate: isClimateRelevant({ title: r.title, summary: climateSummary }),
   };
 }
 

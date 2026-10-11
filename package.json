@@ -22,6 +22,13 @@
     "rewrite:eval:report": "bun --env-file=.env.local scripts/rewrite-bakeoff.ts --mode report",
     "websearch:eval": "bun --env-file=.env.local scripts/web-search-eval.ts",
     "categorize": "bun --env-file=.env.local scripts/categorize.ts",
+    "judge": "bun --env-file=.env.local scripts/judge.ts",
+    "judge:dry": "bun --env-file=.env.local scripts/judge.ts --dry-run",
+    "judge:report": "bun --env-file=.env.local scripts/judge-report.ts",
+    "headline:check": "bun --env-file=.env.local scripts/headline-check.ts",
+    "headline:check:apply": "bun --env-file=.env.local scripts/headline-check.ts --apply",
+    "categorize:eval": "bun --env-file=.env.local scripts/categorize-bakeoff.ts",
+    "categorize:eval:report": "bun --env-file=.env.local scripts/categorize-bakeoff.ts --mode report",
     "prefetch": "bun --env-file=.env.local scripts/prefetch-content.ts",
     "cleanup": "bun --env-file=.env.local scripts/cleanup.ts",
     "cleanup:dry": "bun --env-file=.env.local scripts/cleanup.ts --dry-run",
@@ -42,6 +49,7 @@
     "feeds:discover:apply": "bun --env-file=.env.local scripts/discover-feeds.ts --apply"
   },
   "dependencies": {
+    "@ai-sdk/anthropic": "^4.0.78",
     "@ai-sdk/openai": "^4.0.74",
     "@supabase/supabase-js": "2.90.0",
     "@tailwindcss/typography": "^0.5.20",

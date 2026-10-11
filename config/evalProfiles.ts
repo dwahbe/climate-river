@@ -1,4 +1,7 @@
 import type { JSONObject } from "@ai-sdk/provider";
+import { REWRITE_MAX_OUTPUT_TOKENS, REWRITE_MODELS } from "@/lib/rewriteShared";
+
+const [REWRITE_PRIMARY, REWRITE_FALLBACK] = REWRITE_MODELS;
 
 export type PromptVariant = "legacy" | "structured";
 
@@ -10,7 +13,8 @@ export type EvalProfile = {
   modelId: string;
   promptVariant: PromptVariant;
   retryPromptVariant: PromptVariant;
-  temperature: number;
+  /** Omit for models that reject non-default sampling (Claude Haiku 5.5 and newer) */
+  temperature?: number;
   maxOutputTokens: number;
   /** Provider-keyed options passed through to generateText() */
   providerOptions?: Record<string, JSONObject>;
@@ -32,8 +36,11 @@ export const MODEL_PRICING: Record<string, ModelPricing> = {
   "gpt-5.4-nano": { inputPerMillion: 0.2, outputPerMillion: 1.25 },
   "claude-sonnet-4-20250514": { inputPerMillion: 3.0, outputPerMillion: 15.0 },
   "claude-haiku-3-5-20241022": { inputPerMillion: 0.8, outputPerMillion: 4.0 },
+  "claude-haiku-4-5": { inputPerMillion: 1.0, outputPerMillion: 5.0 },
+  // Prompts ≤100K tokens; longer prompts bill $0.50 / $2.50.
+  "claude-haiku-5-5": { inputPerMillion: 0.1, outputPerMillion: 0.5 },
+  "claude-sonnet-5-5": { inputPerMillion: 2.0, outputPerMillion: 10.0 },
   // Gateway-routed: pricing is provider's published rate (no Vercel markup).
-  "anthropic/claude-haiku-4-5": { inputPerMillion: 1.0, outputPerMillion: 5.0 },
   "google/gemini-2.5-flash-lite": {
     inputPerMillion: 0.1,
     outputPerMillion: 0.4,
@@ -52,6 +59,9 @@ export const MODEL_PRICING: Record<string, ModelPricing> = {
   "zai/glm-4.7-flash": { inputPerMillion: 0.07, outputPerMillion: 0.4 },
   "google/gemma-4-31b-it": { inputPerMillion: 0.14, outputPerMillion: 0.4 },
   "minimax/minimax-m2.7": { inputPerMillion: 0.3, outputPerMillion: 1.2 },
+  // Categorization eval arms (rates from the gateway /v1/models catalog, 2026-09).
+  "openai/gpt-4.1-mini": { inputPerMillion: 0.4, outputPerMillion: 1.6 },
+  "typesafe-ai/jev": { inputPerMillion: 0.042, outputPerMillion: 0 },
 };
 
 /**
@@ -106,16 +116,43 @@ export const DEFAULT_EVAL_PROFILES: EvalProfile[] = [
     temperature: 0.15,
     maxOutputTokens: 80,
   },
-  // Gateway-routed candidates (no per-provider SDK needed; uses AI_GATEWAY_API_KEY).
+  // Anthropic models call the API directly with ANTHROPIC_API_KEY, never the
+  // gateway, so they bill Anthropic credits rather than AI Gateway credits.
   {
     id: "legacy-claude-haiku-4-5",
-    provider: "gateway",
-    modelId: "anthropic/claude-haiku-4-5",
+    provider: "anthropic",
+    modelId: "claude-haiku-4-5",
     promptVariant: "legacy",
     retryPromptVariant: "legacy",
     temperature: 0.15,
     maxOutputTokens: 80,
   },
+  // The production pair, derived from REWRITE_MODELS (ids, thinking mode,
+  // output cap) so the bakeoff measures what production runs. No temperature:
+  // both models reject non-default sampling.
+  {
+    id: `legacy-${REWRITE_PRIMARY.id}`,
+    provider: "anthropic",
+    modelId: REWRITE_PRIMARY.id,
+    promptVariant: "legacy",
+    retryPromptVariant: "legacy",
+    maxOutputTokens: REWRITE_MAX_OUTPUT_TOKENS,
+    providerOptions: {
+      anthropic: { thinking: { ...REWRITE_PRIMARY.thinking } },
+    },
+  },
+  {
+    id: `legacy-${REWRITE_FALLBACK.id}`,
+    provider: "anthropic",
+    modelId: REWRITE_FALLBACK.id,
+    promptVariant: "legacy",
+    retryPromptVariant: "legacy",
+    maxOutputTokens: REWRITE_MAX_OUTPUT_TOKENS,
+    providerOptions: {
+      anthropic: { thinking: { ...REWRITE_FALLBACK.thinking } },
+    },
+  },
+  // Gateway-routed candidates (no per-provider SDK needed; uses AI_GATEWAY_API_KEY).
   {
     id: "legacy-gemini-2.5-flash-lite",
     provider: "gateway",

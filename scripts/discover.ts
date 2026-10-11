@@ -3,6 +3,7 @@ import Parser from "rss-parser";
 import dayjs from "dayjs";
 import { query, endPool } from "@/lib/db";
 import { isClimateRelevant } from "@/lib/tagger";
+import { recordGateRejection } from "@/lib/gateRejections";
 import { generateEmbedding, assignArticleToCluster } from "@/lib/clustering";
 import {
   classifyArticleLanguageForIngest,
@@ -288,6 +289,7 @@ async function ingestQuery(
     // Climate relevance check - skip non-climate articles before insertion
     if (!isClimateRelevant({ title, summary: undefined })) {
       console.log(`⏭️  Skipped (not climate): "${title.substring(0, 60)}..."`);
+      await recordGateRejection({ stage: "discover", url: raw, title });
       continue;
     }
 

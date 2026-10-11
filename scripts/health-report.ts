@@ -5,6 +5,7 @@
 import { query, endPool } from "@/lib/db";
 import { EXA_MONTH_TO_DATE_SPEND_SQL } from "@/lib/exa";
 import { AGGREGATOR_URL_SQL_REGEX } from "@/lib/aggregators";
+import { REWRITE_MODELS } from "@/lib/rewriteShared";
 
 export interface HealthMetrics {
   articlesIngested24h: number;
@@ -13,8 +14,11 @@ export interface HealthMetrics {
     attempts: number;
     llmErrors: number;
     accepted: number;
+    /** Attempts answered by the fallback model after the primary errored. */
+    fallbackAttempts: number;
     llmErrorShare: number | null;
     acceptShare: number | null;
+    fallbackShare: number | null;
   };
   prefetch: {
     attempted: number;
@@ -30,7 +34,16 @@ export interface HealthMetrics {
     acceptShare: number | null;
     exaSpendMonthUsd: number;
   };
+  /** Shadow judge stage; all zero/null until ARTICLE_JUDGE_ENABLED=1. */
+  judge: {
+    enabled: boolean;
+    judged24h: number;
+    errors24h: number;
+    errorShare: number | null;
+  };
   unresolvedGnShare24h: number | null;
+  /** Ingested in 24h and still missing an embedding (never clustered). */
+  unembeddedShare24h: number | null;
   scoresStaleMinutes: number | null;
   unrewrittenLeads7d: number;
   hiddenAggregatorLeadShare72h: number | null;
@@ -48,6 +61,12 @@ export interface HealthReport {
 // them as the pipeline improves (see tmp/improvement-plan-2026-06.md).
 const THRESHOLDS = {
   rewriteLlmErrorShareMax: 0.1, // min 20 attempts
+  // The primary model failing over to the fallback is silent per attempt:
+  // the batch succeeds, only the model column changes.
+  rewriteFallbackShareMax: 0.25, // min 20 attempts
+  // Embeddings go through the AI Gateway; a failed call leaves the row with a
+  // null embedding that categorize may backfill. Baseline is 0% (2026-10).
+  unembeddedShareMax: 0.05, // of articles ingested in 24h, min 20
   prefetchSuccessShareMin: 0.3, // among attempted, min 50
   discoverySuccessShareMin: 0.5, // min 10 searches
   // 2026-08-21: the GN site: tier ran for months at 2.5% acceptance and nobody
@@ -55,6 +74,9 @@ const THRESHOLDS = {
   discoveryAcceptShareMin: 0.05, // accepted/candidates, min 50 candidates
   unresolvedGnShareMax: 0.25, // of articles ingested in 24h, min 100
   exaSpendWarnUsd: 8, // month-to-date; free credit is $10
+  // Judge runs on an unversioned model through an experimental SDK call, and
+  // the gateway refuses it on the free tier: guard against silent failure.
+  judgeErrorShareMax: 0.2, // min 20 judgments in 24h
   scoresStaleMinutesMax: 600,
 };
 
@@ -62,15 +84,101 @@ function share(num: number, den: number): number | null {
   return den > 0 ? num / den : null;
 }
 
+/** Threshold checks, kept apart from the queries so they can be unit-tested. */
+export function computeBreaches(m: HealthMetrics): string[] {
+  const breaches: string[] = [];
+  const ingested = m.articlesIngested24h;
+  if (ingested === 0) breaches.push("no_articles_ingested_24h");
+  if (m.cronErrors24h > 0) breaches.push(`cron_errors_24h:${m.cronErrors24h}`);
+  if (
+    m.rewrite.attempts >= 20 &&
+    (m.rewrite.llmErrorShare ?? 0) > THRESHOLDS.rewriteLlmErrorShareMax
+  ) {
+    breaches.push(
+      `rewrite_llm_error_share:${m.rewrite.llmErrorShare?.toFixed(2)}`,
+    );
+  }
+  if (
+    m.rewrite.attempts >= 20 &&
+    (m.rewrite.fallbackShare ?? 0) > THRESHOLDS.rewriteFallbackShareMax
+  ) {
+    breaches.push(
+      `rewrite_fallback_share:${m.rewrite.fallbackShare?.toFixed(2)}`,
+    );
+  }
+  if (
+    ingested >= 20 &&
+    (m.unembeddedShare24h ?? 0) > THRESHOLDS.unembeddedShareMax
+  ) {
+    breaches.push(`unembedded_share_24h:${m.unembeddedShare24h?.toFixed(2)}`);
+  }
+  if (
+    m.prefetch.attempted >= 50 &&
+    (m.prefetch.successShare ?? 1) < THRESHOLDS.prefetchSuccessShareMin
+  ) {
+    breaches.push(
+      `prefetch_success_share:${m.prefetch.successShare?.toFixed(2)}`,
+    );
+  }
+  if (
+    m.discovery.searches >= 10 &&
+    (m.discovery.successShare ?? 1) < THRESHOLDS.discoverySuccessShareMin
+  ) {
+    breaches.push(
+      `discovery_success_share:${m.discovery.successShare?.toFixed(2)}`,
+    );
+  }
+  if (
+    m.scoresStaleMinutes !== null &&
+    m.scoresStaleMinutes > THRESHOLDS.scoresStaleMinutesMax
+  ) {
+    breaches.push(`cluster_scores_stale_minutes:${m.scoresStaleMinutes}`);
+  }
+  if (
+    m.discovery.candidates >= 50 &&
+    (m.discovery.acceptShare ?? 1) < THRESHOLDS.discoveryAcceptShareMin
+  ) {
+    breaches.push(
+      `discovery_accept_share:${m.discovery.acceptShare?.toFixed(3)}`,
+    );
+  }
+  if (
+    ingested >= 100 &&
+    (m.unresolvedGnShare24h ?? 0) > THRESHOLDS.unresolvedGnShareMax
+  ) {
+    breaches.push(
+      `unresolved_gn_share_24h:${m.unresolvedGnShare24h?.toFixed(2)}`,
+    );
+  }
+  if (m.discovery.exaSpendMonthUsd >= THRESHOLDS.exaSpendWarnUsd) {
+    breaches.push(
+      `exa_spend_month_usd:${m.discovery.exaSpendMonthUsd.toFixed(2)}`,
+    );
+  }
+  if (m.judge.enabled && ingested >= 20 && m.judge.judged24h === 0) {
+    breaches.push("judge_enabled_but_no_judgments_24h");
+  }
+  if (
+    m.judge.judged24h >= 20 &&
+    (m.judge.errorShare ?? 0) > THRESHOLDS.judgeErrorShareMax
+  ) {
+    breaches.push(`judge_error_share:${m.judge.errorShare?.toFixed(2)}`);
+  }
+  return breaches;
+}
+
 export async function run(
   opts: { windowHours?: number; closePool?: boolean } = {},
 ): Promise<HealthReport> {
   const windowHours = opts.windowHours ?? 48;
 
-  const { rows: ingestRows } = await query<{ n: number }>(
-    `SELECT count(*)::int AS n FROM articles WHERE fetched_at > now() - interval '24 hours'`,
+  const { rows: ingestRows } = await query<{ n: number; unembedded: number }>(
+    `SELECT count(*)::int AS n,
+            count(*) FILTER (WHERE embedding IS NULL)::int AS unembedded
+     FROM articles WHERE fetched_at > now() - interval '24 hours'`,
   );
   const articlesIngested24h = ingestRows[0].n;
+  const unembedded24h = ingestRows[0].unembedded;
 
   const { rows: cronRows } = await query<{ n: number }>(
     `SELECT count(*)::int AS n FROM pipeline_runs
@@ -82,13 +190,15 @@ export async function run(
     attempts: number;
     llm_errors: number;
     accepted: number;
+    fallback_attempts: number;
   }>(
     `SELECT count(*)::int AS attempts,
             count(*) FILTER (WHERE validation_failures->>'reason' = 'llm_error')::int AS llm_errors,
-            count(*) FILTER (WHERE accepted)::int AS accepted
+            count(*) FILTER (WHERE accepted)::int AS accepted,
+            count(*) FILTER (WHERE model = $2)::int AS fallback_attempts
      FROM rewrite_attempts
      WHERE created_at > now() - make_interval(hours => $1)`,
-    [windowHours],
+    [windowHours, REWRITE_MODELS[1].id],
   );
   const rw = rwRows[0];
 
@@ -165,6 +275,21 @@ export async function run(
      FROM cluster_scores`,
   );
 
+  // The judgments table is absent until `bun run schema` has been applied.
+  const judgeEnabled = process.env.ARTICLE_JUDGE_ENABLED === "1";
+  let judge = { judged: 0, errors: 0 };
+  try {
+    const { rows: judgeRows } = await query<{ judged: number; errors: number }>(
+      `SELECT count(*)::int AS judged,
+              count(*) FILTER (WHERE status = 'error')::int AS errors
+       FROM article_judgments
+       WHERE judged_at > now() - interval '24 hours'`,
+    );
+    judge = judgeRows[0];
+  } catch {
+    // leave zeros
+  }
+
   const metrics: HealthMetrics = {
     articlesIngested24h,
     cronErrors24h,
@@ -172,8 +297,10 @@ export async function run(
       attempts: rw.attempts,
       llmErrors: rw.llm_errors,
       accepted: rw.accepted,
+      fallbackAttempts: rw.fallback_attempts,
       llmErrorShare: share(rw.llm_errors, rw.attempts),
       acceptShare: share(rw.accepted, rw.attempts),
+      fallbackShare: share(rw.fallback_attempts, rw.attempts),
     },
     prefetch: {
       attempted: pf.attempted,
@@ -189,7 +316,14 @@ export async function run(
       acceptShare: share(dc.accepted, dc.candidates),
       exaSpendMonthUsd: Number(exaSpendMonthUsd.toFixed(4)),
     },
+    judge: {
+      enabled: judgeEnabled,
+      judged24h: judge.judged,
+      errors24h: judge.errors,
+      errorShare: share(judge.errors, judge.judged),
+    },
     unresolvedGnShare24h: share(gn.unresolved, gn.total),
+    unembeddedShare24h: share(unembedded24h, articlesIngested24h),
     scoresStaleMinutes,
     unrewrittenLeads7d: backlogRows[0].n,
     hiddenAggregatorLeadShare72h: share(
@@ -199,58 +333,7 @@ export async function run(
     singletonShare: share(singletonRows[0].singles, singletonRows[0].total),
   };
 
-  const breaches: string[] = [];
-  if (articlesIngested24h === 0) breaches.push("no_articles_ingested_24h");
-  if (cronErrors24h > 0) breaches.push(`cron_errors_24h:${cronErrors24h}`);
-  if (
-    rw.attempts >= 20 &&
-    (metrics.rewrite.llmErrorShare ?? 0) > THRESHOLDS.rewriteLlmErrorShareMax
-  ) {
-    breaches.push(
-      `rewrite_llm_error_share:${metrics.rewrite.llmErrorShare?.toFixed(2)}`,
-    );
-  }
-  if (
-    pf.attempted >= 50 &&
-    (metrics.prefetch.successShare ?? 1) < THRESHOLDS.prefetchSuccessShareMin
-  ) {
-    breaches.push(
-      `prefetch_success_share:${metrics.prefetch.successShare?.toFixed(2)}`,
-    );
-  }
-  if (
-    ds.searches >= 10 &&
-    (metrics.discovery.successShare ?? 1) < THRESHOLDS.discoverySuccessShareMin
-  ) {
-    breaches.push(
-      `discovery_success_share:${metrics.discovery.successShare?.toFixed(2)}`,
-    );
-  }
-  if (
-    scoresStaleMinutes !== null &&
-    scoresStaleMinutes > THRESHOLDS.scoresStaleMinutesMax
-  ) {
-    breaches.push(`cluster_scores_stale_minutes:${scoresStaleMinutes}`);
-  }
-  if (
-    dc.candidates >= 50 &&
-    (metrics.discovery.acceptShare ?? 1) < THRESHOLDS.discoveryAcceptShareMin
-  ) {
-    breaches.push(
-      `discovery_accept_share:${metrics.discovery.acceptShare?.toFixed(3)}`,
-    );
-  }
-  if (
-    gn.total >= 100 &&
-    (metrics.unresolvedGnShare24h ?? 0) > THRESHOLDS.unresolvedGnShareMax
-  ) {
-    breaches.push(
-      `unresolved_gn_share_24h:${metrics.unresolvedGnShare24h?.toFixed(2)}`,
-    );
-  }
-  if (exaSpendMonthUsd >= THRESHOLDS.exaSpendWarnUsd) {
-    breaches.push(`exa_spend_month_usd:${exaSpendMonthUsd.toFixed(2)}`);
-  }
+  const breaches = computeBreaches(metrics);
 
   const report: HealthReport = {
     ok: breaches.length === 0,
@@ -270,16 +353,21 @@ function printHuman(report: HealthReport) {
   console.log("🩺 Pipeline health");
   console.log("═".repeat(50));
   console.log(`  Window:               ${report.windowHours}h`);
-  console.log(`  Ingested (24h):       ${m.articlesIngested24h}`);
+  console.log(
+    `  Ingested (24h):       ${m.articlesIngested24h}, unembedded ${pct(m.unembeddedShare24h)}`,
+  );
   console.log(`  Cron errors (24h):    ${m.cronErrors24h}`);
   console.log(
-    `  Rewrite:              ${m.rewrite.attempts} attempts, llm_error ${pct(m.rewrite.llmErrorShare)}, accepted ${pct(m.rewrite.acceptShare)}`,
+    `  Rewrite:              ${m.rewrite.attempts} attempts, llm_error ${pct(m.rewrite.llmErrorShare)}, fallback ${pct(m.rewrite.fallbackShare)}, accepted ${pct(m.rewrite.acceptShare)}`,
   );
   console.log(
     `  Prefetch:             ${m.prefetch.attempted} attempted, success ${pct(m.prefetch.successShare)}`,
   );
   console.log(
     `  Discovery:            ${m.discovery.searches} searches, success ${pct(m.discovery.successShare)}`,
+  );
+  console.log(
+    `  Judge (24h):          ${m.judge.enabled ? "on" : "off"}, ${m.judge.judged24h} judged, errors ${pct(m.judge.errorShare)}`,
   );
   console.log(`  Scores stale:         ${m.scoresStaleMinutes ?? "n/a"} min`);
   console.log(`  Unrewritten leads 7d: ${m.unrewrittenLeads7d}`);

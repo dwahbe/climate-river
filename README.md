@@ -214,7 +214,7 @@ sequenceDiagram
     RW->>DB: Fetch unrewritten articles (prioritized by score)
     RW->>RW: Validate climate relevance
     RW->>RW: Extract content snippets + cluster context
-    RW->>RW: Generate Techmeme-style headlines (gpt-4o-mini)
+    RW->>RW: Generate Techmeme-style headlines (Claude Sonnet 5.5, Haiku 5.5 fallback)
     RW->>RW: Validate: no hallucinated numbers, length, quality
     RW->>DB: Store rewrites with metadata
 ```
@@ -229,7 +229,7 @@ sequenceDiagram
 | `categorize.ts`       | Backfill categorization | Hybrid rules + AI        | —                       | ✅             | Catches uncategorized articles (e.g., from discover.ts)      |
 | `prefetch-content.ts` | Reader mode cache       | —                        | —                       | —              | Content extraction, paywall detection                        |
 | `rescore.ts`          | Cluster scoring         | —                        | —                       | —              | Freshness decay (6h/12h half-life), velocity, coverage       |
-| `rewrite.ts`          | Headline enhancement    | `gpt-4o-mini`            | —                       | —              | Techmeme-style, fact validation, no hallucinated numbers     |
+| `rewrite.ts`          | Headline enhancement    | Claude Sonnet 5.5        | —                       | —              | Techmeme-style, fact validation, no hallucinated numbers     |
 
 **Clustering Methods:**
 
@@ -318,7 +318,7 @@ flowchart TB
         rew_run["run()"]
         rew_batch["batch()"]
         rew_processOne["processOne()"]
-        rew_generateOpenAI["generateWithOpenAI()"]
+        rew_generateOpenAI["generateHeadline()"]
         rew_passesChecks["passesChecks()"]
         rew_buildPrompt["buildPrompt()"]
 
@@ -422,7 +422,9 @@ flowchart LR
     end
 
     subgraph External
-        OPENAI[OpenAI API]
+        GATEWAY[Vercel AI Gateway<br/>embeddings + Jev]
+        ANTHROPIC[Anthropic API<br/>headline rewrites]
+        OPENAI[OpenAI API<br/>opt-in web search]
         EXA[Exa API]
         PG[(PostgreSQL)]
     end
@@ -433,7 +435,7 @@ flowchart LR
     I --> DB
     I --> TAG
     I --> CAT
-    I --> OPENAI
+    I --> GATEWAY
 
     C --> DB
     C --> CAT
@@ -445,16 +447,17 @@ flowchart LR
 
     W --> DB
     W --> TAG
-    W --> OPENAI
+    W --> ANTHROPIC
 
     WD --> DB
     WD --> TAG
     WD --> CAT
+    WD --> GATEWAY
     WD --> OPENAI
     WD --> EXA
 
     CAT --> TAG
-    CAT --> OPENAI
+    CAT --> GATEWAY
     CAT --> DB
 
     DB --> PG

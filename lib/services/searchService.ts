@@ -1,6 +1,5 @@
 import { query } from "@/lib/db";
-import { embed } from "ai";
-import { openai } from "@ai-sdk/openai";
+import { embedText } from "@/lib/clustering";
 import type { SearchResult } from "@/lib/models/search";
 import { visibleLanguagePredicate } from "@/lib/languagePolicy";
 
@@ -28,11 +27,7 @@ const EXCLUDE_AGGREGATORS = `
 const ENGLISH_OR_UNKNOWN = `AND ${visibleLanguagePredicate("a")}`;
 
 async function embedQuery(text: string): Promise<number[]> {
-  const { embedding } = await embed({
-    model: openai.embedding("text-embedding-3-small"),
-    value: text,
-  });
-  return embedding;
+  return await embedText(text);
 }
 
 async function keywordSearch(

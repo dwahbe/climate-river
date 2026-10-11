@@ -1,6 +1,6 @@
 # Climate River
 
-Climate news aggregator (https://climateriver.org): AI-assisted discovery, semantic clustering, Techmeme-style headline rewriting. Next.js 16 (App Router, ISR) · TypeScript strict · Tailwind 4 · PostgreSQL/Supabase (direct `pg`, no ORM; pgvector) · OpenAI via Vercel AI SDK · Vercel crons. Bun is the package manager; tests use the Node test runner via tsx.
+Climate news aggregator (https://climateriver.org): AI-assisted discovery, semantic clustering, Techmeme-style headline rewriting. Next.js 16 (App Router, ISR) · TypeScript strict · Tailwind 4 · PostgreSQL/Supabase (direct `pg`, no ORM; pgvector) · Claude (headline rewrites, direct Anthropic API) + AI Gateway (embeddings, Jev) via Vercel AI SDK · Vercel crons. Bun is the package manager; tests use the Node test runner via tsx.
 
 ## Commands
 
@@ -14,6 +14,8 @@ bun run snapshot         # Top/latest homepage clusters → tmp/snapshots/ (diff
 
 # Pipeline stages (what the crons run)
 bun run ingest / categorize / prefetch / rescore / rewrite / discover-web / cleanup
+bun run judge            # Model judgments, shadow mode (judge:dry = no writes; judge:report = compare with production)
+bun run headline:check   # Fact-check live rewritten headlines against their source (preview; headline:check:apply stores)
 
 # Maintenance scripts default to preview; add :apply to write (cleanup:dry is the preview)
 bun run gn:backfill[:apply]        # Resolve stored news.google.com URLs → publisher URLs
@@ -26,6 +28,7 @@ bun scripts/rewrite.ts --dry-run --limit 10   # Exercise LLM + validator with no
 
 bun run rewrite:eval     # Rewrite-model bakeoff (config/evalProfiles.ts); rewrite:eval:report for the report
 bun run websearch:eval   # Web-search prompt/model comparison (config/webSearchProfiles.ts)
+bun run categorize:eval  # Categorization bakeoff, read-only (config/categorizeEvalProfiles.ts, rubric in docs/categorization.md); label review.csv, then categorize:eval:report; --sample-from <run dir> reuses a labelled sample
 ```
 
 ## Layout
@@ -36,8 +39,9 @@ bun run websearch:eval   # Web-search prompt/model comparison (config/webSearchP
 
 1. **full** (3×/day): discover → ingest → categorize → prefetch → cluster maintenance → web discovery → rescore → inline rewrite. Rescore runs late so new/merged clusters are scored same-run; the inline rewrite gives fresh leads headlines immediately.
 2. **refresh** (6×/day): lighter full with a 105s budget.
-3. **rewrite** (16×/day): sweeper for headlines the inline passes didn't reach (gpt-4.1-mini via AI Gateway, direct-OpenAI fallback on gateway errors, circuit breaker, 45s budget).
-4. **cleanup** (daily) · **health** (daily; logs a `health` row, POSTs `HEALTH_ALERT_WEBHOOK_URL` on breach) · **feeds** (weekly; `discover-feeds.ts` upgrades `discover://` hosts with ≥3 articles/30d to real RSS).
+3. **rewrite** (16×/day): sweeper for headlines the inline passes didn't reach (`REWRITE_MODELS` in `lib/rewriteShared.ts`: Claude Sonnet 5.5 called directly with `ANTHROPIC_API_KEY`, never via the gateway, so it bills Anthropic credits; Haiku 5.5 fallback on API errors, which `bun run health` flags above 25% of attempts; system prompt cached; circuit breaker; 45s budget). Sonnet 5.5 rejects `thinking: disabled` (use `between_tools`) and both reject non-default `temperature`.
+4. **judge** (opt-in step inside full and refresh, after prefetch; `ARTICLE_JUDGE_ENABLED=1`): shadow mode. One Jev call per article via AI Gateway writes relevance, category, language and article type to `article_judgments`; nothing reads them for display. The same flag samples items the keyword gate rejects into `gate_rejections` so the gate's misses can be measured.
+5. **cleanup** (daily) · **health** (daily; logs a `health` row, POSTs `HEALTH_ALERT_WEBHOOK_URL` on breach; also guards embedding coverage, since a failed gateway embedding call leaves `articles.embedding` null and the article unclustered) · **feeds** (weekly; `discover-feeds.ts` upgrades `discover://` hosts with ≥3 articles/30d to real RSS).
 
 Long-running scripts accept `deadlineMs`/`deadlineAt` and stop starting new work past it — cron functions must log `pipeline_runs` (status `partial` if budget ran out) rather than die at maxDuration. Preserve this when adding steps.
 
@@ -48,9 +52,11 @@ Long-running scripts accept `deadlineMs`/`deadlineAt` and stop starting new work
 Change the owning module, not call sites — several are pinned by parity tests:
 
 - **Scoring**: `lib/scoring.ts` owns blend weights + freshness decay + age damping + Top gate, imported by BOTH `scripts/rescore.ts` (writes `base_score`, `latest_pub`, `first_pub`, `strong_sources`, `why`) and the `get_river_clusters` DDL in `scripts/schema.ts` (recomputes freshness/damping at read time, windows on cluster activity rather than lead age). Velocity = Σ weight/10 of distinct sources in the last 24h (`VELOCITY_WINDOW_H`); novelty = small additive boost (≤ +0.03) by centroid distance from the current top clusters.
-- **Headline gate**: `validateHeadline` in `lib/rewriteShared.ts`, imported by production rewrite AND the eval harness; failure reasons land in `rewrite_attempts.validation_failures`. Per-article cap: 4 validation failures (transport errors don't count); a content refetch re-opens the article.
+- **Headline gate**: `validateHeadline` in `lib/rewriteShared.ts`, imported by production rewrite AND the eval harness; `buildRewriteInputs` (same file) builds the prompt input and the validator's context for production, `--dry-run`, and the eval harness alike (they drifted once: only production told the validator the publication date, so the other two over-rejected); failure reasons land in `rewrite_attempts.validation_failures`. Per-article cap: 4 validation failures (transport errors don't count); a content refetch re-opens the article.
 - **Lead eligibility**: `LEAD_INELIGIBLE_SQL` in `lib/clustering.ts` — aggregator URL, low-value host (`LOW_VALUE_HOSTS` in `lib/aggregators.ts`: PR wires, stock-tip sites, content farms like thecooldown.com) or suspect date (published ≈ fetched) never becomes the displayed lead. The RPC hides a cluster only when it has no eligible lead at all.
 - **Top gate + age damping**: `TOP_GATE` / `clusterAgeDampingSql` in `lib/scoring.ts` — the homepage Top view only shows clusters with ≥2 strong sources (weight ≥4) OR a lead from a weight-≥8 source; Latest and category views are ungated. Scores are multiplied by a floored half-life on the cluster's _first_ article (168h, floor 0.7) so weeks-old topic buckets can't hold #1 on a trickle, and uncorroborated clusters get a flat 0.85 ordering discount (`SINGLETON_DISCOUNT`). Corroboration (`strong_sources`, velocity) counts distinct publisher hosts, not `sources` rows. Velocity is trust-weighted (Σ distinct-source weight/10 over 24h); "authority" = best source covering the story. Weights: freshness .30 / velocity .35 / coverage .15 / authority .15 / pool .05 (+ novelty ≤ .03), cluster half-life 12h.
+- **Article judgment**: `lib/articleJudgment.ts` owns the model questions (relevance, pick-one category, language, article type) and `RUBRIC_VERSION`, imported by BOTH `scripts/judge.ts` and the `jev-production` arm of `categorize:eval`, so the bakeoff measures what production asks. It restates `docs/categorization.md`; change both together and bump the version (judge re-judges rows from an older version). The model ID is unversioned on AI Gateway and `experimental_evaluate` is an experimental SDK call: re-run `categorize:eval` after an AI SDK upgrade or when results drift.
+- **Headline fact-check**: `lib/headlineCheck.ts` asks Jev whether a rewritten headline is supported by what the rewrite model was shown (it checks against the article, not the world). Shadow only: with `HEADLINE_CHECK_ENABLED=1`, `scripts/rewrite.ts` records the answer for accepted headlines in `headline_checks` and never blocks one; `validateHeadline` stays the gate. All Jev calls go through `lib/jev.ts`.
 - **Trusted climate sources**: `config/trustedClimateSources.ts` — climate-only hosts (Grist, Heatmap, Canary, Carbon Brief, Volts…) and climate _section_ feeds of general outlets bypass `isClimateRelevant` at ingest, web discovery, and backfill categorization (the keyword gate dropped ~20% of Grist items). Broad environment desks (Guardian us/environment, NYT Climate.xml) stay gated.
 - **Dedup**: `lib/articleDedupe.ts` (same URL, or same title within 7 days), used by ingest + discover; `isExisting` hits skip re-clustering/re-categorization.
 - **Aggregator hosts**: `lib/aggregators.ts` (dependency-free list + SQL regex).
@@ -59,7 +65,7 @@ Change the owning module, not call sites — several are pinned by parity tests:
 
 ## Clustering
 
-`clusters` persists `centroid`/`member_count`/`last_member_at`, refreshed incrementally (`refreshClusterCentroid`) on every assignment/merge/split and self-healed by cluster-maintenance. `findBestCluster` is one HNSW lookup plus app-side threshold/size/recency filters. Maintenance merges similar clusters (re-checking sizes per merge against `MAX_CLUSTER_SIZE`) and splits size≥20 clusters via `agglomerativeCluster`. Thresholds live in `CLUSTER_CONFIG`.
+Embeddings come from `EMBEDDING_MODEL_ID` in `lib/clustering.ts` (`openai/text-embedding-3-small` via AI Gateway with a direct-OpenAI fallback when `OPENAI_API_KEY` is set, 1536-d; `embedText` is the one call site) for articles, centroids, categories and search queries; changing it means re-embedding, the `vector(1536)` columns, and retuning `CLUSTER_CONFIG`. `clusters` persists `centroid`/`member_count`/`last_member_at`, refreshed incrementally (`refreshClusterCentroid`) on every assignment/merge/split and self-healed by cluster-maintenance. `findBestCluster` is one HNSW lookup plus app-side threshold/size/recency filters. Maintenance merges similar clusters (re-checking sizes per merge against `MAX_CLUSTER_SIZE`) and splits size≥20 clusters via `agglomerativeCluster`. Thresholds live in `CLUSTER_CONFIG`.
 
 ## Discovery, content, categorization
 
@@ -91,5 +97,5 @@ Change the owning module, not call sites — several are pinned by parity tests:
 ## Environment
 
 See `.env.example` for the full annotated list.
-**Required**: `DATABASE_URL`, `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `OPENAI_API_KEY`, `ADMIN_TOKEN`
-**Optional**: `CRON_SECRET` (recommended), `HEALTH_ALERT_WEBHOOK_URL`, `EXA_API_KEY` + `WEB_SEARCH_EXA=1` (+ `EXA_*` tuning), `WEB_SEARCH_*`, `DISCOVER_*` (GN localization + resolve cap), `SCHEMA_ENSURE`, `SEARCH_VECTOR_BACKFILL_*`
+**Required**: `DATABASE_URL`, `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `AI_GATEWAY_API_KEY` (local only; Vercel uses OIDC), `ANTHROPIC_API_KEY` (Vercel env var, not gateway BYOK), `ADMIN_TOKEN`
+**Optional**: `CRON_SECRET` (recommended), `OPENAI_API_KEY` (embedding fallback, OpenAI web search, OpenAI eval profiles), `HEALTH_ALERT_WEBHOOK_URL`, `EXA_API_KEY` + `WEB_SEARCH_EXA=1` (+ `EXA_*` tuning), `ARTICLE_JUDGE_ENABLED=1` (+ `JUDGE_REJECTION_*` sampling), `HEADLINE_CHECK_ENABLED=1`, `WEB_SEARCH_*`, `DISCOVER_*` (GN localization + resolve cap), `SCHEMA_ENSURE`, `SEARCH_VECTOR_BACKFILL_*`

@@ -1,7 +1,7 @@
 // lib/clustering.ts
 // Shared clustering constants and utilities used by ingest, discover, maintenance, and split scripts.
 
-import { embed } from "ai";
+import { embed, gateway } from "ai";
 import { openai } from "@ai-sdk/openai";
 import { query } from "@/lib/db";
 import { visibleLanguagePredicate } from "@/lib/languagePolicy";
@@ -23,6 +23,40 @@ export const LEAD_INELIGIBLE_SQL = `(
   OR abs(extract(epoch from (a.published_at - a.fetched_at))) <= 60
 )`;
 
+// Every stored vector (articles, cluster centroids, categories, search queries)
+// comes from this model, routed through the AI Gateway. Changing it means
+// re-embedding everything, changing the vector(1536) columns in schema.ts, and
+// retuning CLUSTER_CONFIG thresholds.
+const EMBEDDING_MODEL = "text-embedding-3-small";
+export const EMBEDDING_MODEL_ID = `openai/${EMBEDDING_MODEL}`;
+
+/**
+ * The one embedding call for every caller. The gateway is primary; when it
+ * fails and OPENAI_API_KEY is set, the same model is called directly (the
+ * vectors are identical), so a gateway outage doesn't leave articles
+ * unclustered. Throws when both fail.
+ */
+export async function embedText(value: string): Promise<number[]> {
+  try {
+    const { embedding } = await embed({
+      model: gateway.embeddingModel(EMBEDDING_MODEL_ID),
+      value,
+    });
+    return embedding;
+  } catch (error: unknown) {
+    if (!process.env.OPENAI_API_KEY) throw error;
+    const message = error instanceof Error ? error.message : "unknown_error";
+    console.warn(
+      `⚠️  Gateway embedding failed (${message.slice(0, 120)}); retrying via direct OpenAI`,
+    );
+    const { embedding } = await embed({
+      model: openai.embeddingModel(EMBEDDING_MODEL),
+      value,
+    });
+    return embedding;
+  }
+}
+
 export const CLUSTER_CONFIG = {
   /** Cosine similarity threshold for adding articles to clusters */
   SIMILARITY_THRESHOLD: 0.68,
@@ -35,7 +69,7 @@ export const CLUSTER_CONFIG = {
 } as const;
 
 /**
- * Generate an embedding for article text using OpenAI text-embedding-3-small.
+ * Generate an embedding for article text (EMBEDDING_MODEL_ID).
  * Returns empty array on failure (callers should handle gracefully).
  */
 export async function generateEmbedding(
@@ -44,12 +78,7 @@ export async function generateEmbedding(
 ): Promise<number[]> {
   try {
     const text = description ? `${title}\n\n${description}` : title;
-    const truncatedText = text.substring(0, 8000);
-    const { embedding } = await embed({
-      model: openai.embeddingModel("text-embedding-3-small"),
-      value: truncatedText,
-    });
-    return embedding;
+    return await embedText(text.substring(0, 8000));
   } catch (error) {
     console.error("Error generating embedding:", error);
     return [];

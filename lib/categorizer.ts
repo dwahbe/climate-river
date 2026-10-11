@@ -10,9 +10,7 @@ import {
   type CategoryScore,
   type CategorySlug,
 } from "./tagger";
-import { embed } from "ai";
-import { openai } from "@ai-sdk/openai";
-import { cosineSimilarity } from "./clustering";
+import { cosineSimilarity, embedText } from "./clustering";
 
 // In-memory cache for category embeddings (survives within a warm instance)
 const categoryEmbeddingsCache = new Map<string, number[]>();
@@ -48,7 +46,7 @@ async function getCategoryEmbedding(
     // DB read failed — fall through to generate
   }
 
-  // Tier 3: generate via OpenAI and persist
+  // Tier 3: generate and persist
   const category = CATEGORIES.find((c) => c.slug === categorySlug);
   if (!category) return null;
 
@@ -59,10 +57,7 @@ async function getCategoryEmbedding(
       ...category.keywords.slice(0, 10),
     ].join(" ");
 
-    const { embedding } = await embed({
-      model: openai.embeddingModel("text-embedding-3-small"),
-      value: representativeText,
-    });
+    const embedding = await embedText(representativeText);
 
     // Store in memory
     categoryEmbeddingsCache.set(categorySlug, embedding);
@@ -97,12 +92,7 @@ async function generateArticleEmbedding(
   try {
     const text = [title, summary].filter(Boolean).join(" ").slice(0, 1200);
 
-    const { embedding } = await embed({
-      model: openai.embeddingModel("text-embedding-3-small"),
-      value: text,
-    });
-
-    return embedding;
+    return await embedText(text);
   } catch (error) {
     console.error("Error generating article embedding:", error);
     return null;

@@ -6,7 +6,10 @@ import {
   normalizeNumericToken,
   containsQuantifier,
   hasAttribution,
+  buildRewriteInputs,
   buildSourceQuantContext,
+  buildUserPrompt,
+  validateHeadline,
   parseMeasurements,
   measurementsMatch,
   numbersClose,
@@ -332,5 +335,114 @@ describe("VAGUE_PATTERNS", () => {
 
   it("does not flag concrete action phrasing", () => {
     assert.equal(vague("EU cuts truck CO2 limits by 45% by 2030"), false);
+  });
+});
+
+/* ================================================================== */
+/*  buildRewriteInputs                                                  */
+/* ================================================================== */
+
+describe("buildRewriteInputs", () => {
+  const body =
+    "The Environmental Protection Agency finalized a rule on Monday that repeals limits on carbon emissions from coal and gas power plants. " +
+    "The agency said the change would save utilities 1.2 billion dollars a year, while health groups warned of more asthma attacks.";
+  const row = {
+    id: 1,
+    title: "EPA repeals power plant emission limits",
+    dek: "The rule covered coal and gas plants.",
+    content_text: body,
+    content_html: `<p>${body}</p>`,
+    content_status: "success",
+    published_at: "2026-09-24T12:00:00Z",
+  };
+
+  it("tells the validator the publication date the model was shown", () => {
+    const { validationContext } = buildRewriteInputs(row);
+    assert.match(validationContext.sourceText, /September 24, 2026/);
+    const values = validationContext.sourceQuant.measurements.map(
+      (m) => m.value,
+    );
+    assert.ok(values.includes(24));
+    assert.ok(values.includes(2026));
+  });
+
+  it("accepts a headline that carries the publication date", () => {
+    const { validationContext } = buildRewriteInputs(row);
+    const check = validateHeadline(
+      row.title,
+      "EPA finalizes repeal of carbon emission limits for coal and gas power plants on September 24, 2026",
+      validationContext,
+    );
+    assert.deepEqual(check, { ok: true, reason: null });
+  });
+
+  it("still rejects a date that is not the publication date", () => {
+    const { validationContext } = buildRewriteInputs(row);
+    const check = validateHeadline(
+      row.title,
+      "EPA finalizes repeal of carbon emission limits for coal and gas power plants on September 29, 2026",
+      validationContext,
+    );
+    assert.equal(check.ok, false);
+    assert.equal(check.reason, "numeric_mismatch");
+  });
+
+  it("ignores content from a failed prefetch", () => {
+    const inputs = buildRewriteInputs({
+      ...row,
+      content_status: "blocked",
+      content_text: "Subscribe now for 99 dollars. " + body,
+    });
+    assert.equal(inputs.contentSnippet, null);
+    assert.equal(inputs.contentNote, ":blocked");
+    assert.equal(inputs.validationContext.hasContent, false);
+    assert.doesNotMatch(inputs.validationContext.sourceText, /Subscribe now/);
+    assert.equal(inputs.climateSummary, row.dek);
+  });
+
+  it("notes missing content and drops a preview that repeats the snippet", () => {
+    const none = buildRewriteInputs({
+      ...row,
+      content_status: null,
+      content_text: null,
+      content_html: null,
+    });
+    assert.equal(none.contentNote, ":no_content");
+    assert.equal(none.promptInput.contentSnippet, null);
+
+    const same = buildRewriteInputs(row);
+    assert.ok(same.contentSnippet);
+    assert.equal(same.previewExcerpt, null);
+    assert.equal(same.promptInput.publishedAt, row.published_at);
+  });
+});
+
+/* ================================================================== */
+/*  buildUserPrompt                                                     */
+/* ================================================================== */
+
+describe("buildUserPrompt", () => {
+  it("says so when there is no article text of any kind", () => {
+    const prompt = buildUserPrompt(
+      {
+        title: "EPA repeals power plant emission limits",
+        dek: "Short summary.",
+      },
+      "legacy",
+    );
+    assert.match(prompt, /No article text available\./);
+  });
+
+  it("omits the line when either excerpt is present", () => {
+    const snippet = buildUserPrompt(
+      { title: "t", contentSnippet: "body text" },
+      "legacy",
+    );
+    assert.doesNotMatch(snippet, /No article text available/);
+    const previewOnly = buildUserPrompt(
+      { title: "t", previewExcerpt: "body text" },
+      "legacy",
+    );
+    assert.doesNotMatch(previewOnly, /No article text available/);
   });
 });

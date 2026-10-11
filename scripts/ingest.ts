@@ -4,6 +4,7 @@ import dayjs from "dayjs";
 import { query, endPool } from "@/lib/db";
 import { categorizeAndStoreArticle } from "@/lib/categorizer";
 import { isClimateRelevant } from "@/lib/tagger";
+import { recordGateRejection } from "@/lib/gateRejections";
 import { isTrustedClimateSource } from "@/config/trustedClimateSources";
 import { generateEmbedding, assignArticleToCluster } from "@/lib/clustering";
 import {
@@ -382,6 +383,13 @@ async function ingestFromFeed(
         console.log(
           `⏭️  Skipped (not climate): "${title.substring(0, 60)}..."`,
         );
+        await recordGateRejection({
+          stage: "ingest",
+          url: link,
+          title,
+          dek,
+          sourceId,
+        });
         continue;
       }
       console.log(

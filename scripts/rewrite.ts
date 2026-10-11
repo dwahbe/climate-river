@@ -1,19 +1,19 @@
 // scripts/rewrite.ts
 import { query, endPool } from "@/lib/db";
+import { HeadlineCheckBreaker, shadowCheckHeadline } from "@/lib/headlineCheck";
 import {
   buildRetrySystemPrompt,
-  buildSourceQuantContext,
+  buildRewriteInputs,
   buildSystemPrompt,
   buildUserPrompt,
-  extractContentSnippet,
-  formatPublishedDate,
   sanitizeHeadline,
   validateHeadline,
   passesChecks,
+  REWRITE_MAX_OUTPUT_TOKENS,
+  REWRITE_MODELS,
   type HeadlineCheck,
   type HeadlineFailureReason,
   type PromptInput,
-  type ValidationContext,
 } from "@/lib/rewriteShared";
 
 // Re-export the validator (now living in lib/rewriteShared.ts as the single
@@ -27,8 +27,8 @@ export {
 };
 import { isClimateRelevant } from "@/lib/tagger";
 import { mapLimit } from "@/lib/utils";
-import { openai } from "@ai-sdk/openai";
-import { gateway, generateText } from "ai";
+import { anthropic } from "@ai-sdk/anthropic";
+import { APICallError, generateText } from "ai";
 
 type Row = {
   id: number;
@@ -41,15 +41,7 @@ type Row = {
   published_at: string | null;
 };
 
-const MAX_SOURCE_SEGMENT = 12_000;
-
 /* ------------------------- LLM Generation ------------------------- */
-
-// OpenAI prompt-cache routing keys. Stable per logical workload — bump the
-// suffix when the system prompt changes materially. Each key stays well
-// under OpenAI's 15 req/min/prefix-key cache-overflow guidance.
-const CACHE_KEY_FIRST_ATTEMPT = "climate-river-rewrite-legacy-v1";
-const CACHE_KEY_RETRY = "climate-river-rewrite-legacy-retry-v1";
 
 type GenerateResult = {
   text: string | null;
@@ -64,7 +56,7 @@ type GenerateResult = {
 
 /**
  * Batch-level circuit breaker: after `threshold` consecutive LLM transport
- * failures (gateway AND direct fallback both down), stop sending the rest of
+ * failures (Sonnet AND the Haiku fallback both down), stop sending the rest of
  * the batch into a dead provider. Any successful call resets the counter.
  */
 export class LlmCircuitBreaker {
@@ -98,55 +90,90 @@ export function buildFailedNotes(
   return `failed_validation:${reason}${contentNote}`;
 }
 
-async function generateWithOpenAI(
+// Below this much budget a call can't complete, so it isn't started.
+const MIN_CALL_MS = 1500;
+// Below this much budget the retry prompt is skipped; the article is picked
+// up again next run with its first failure recorded.
+const RETRY_MIN_MS = 10_000;
+
+/**
+ * Whether a failed primary call is worth repeating on the fallback model.
+ * Auth, bad-request and unknown-model errors would fail identically there.
+ */
+export function shouldFallback(error: unknown): boolean {
+  if (!APICallError.isInstance(error)) return true;
+  const status = error.statusCode ?? 0;
+  return status !== 400 && status !== 401 && status !== 403 && status !== 404;
+}
+
+function describeError(error: unknown): string {
+  return error instanceof Error ? error.message : "unknown_error";
+}
+
+export async function generateHeadline(
   input: PromptInput,
   opts: {
     systemPrompt?: string;
-    cacheKey?: string;
     abortMs?: number;
     retries?: number;
+    /** Epoch ms; each call's timeout is clamped to the time left. */
+    deadlineAt?: number;
+    /** Test seam. */
+    generate?: typeof generateText;
   } = {},
 ): Promise<GenerateResult> {
   const system = opts.systemPrompt ?? buildSystemPrompt("legacy");
   const prompt = buildUserPrompt(input, "legacy");
   const abortMs = opts.abortMs ?? 20000;
   const retries = opts.retries ?? 2;
-  const cacheKey = opts.cacheKey ?? CACHE_KEY_FIRST_ATTEMPT;
-  const model = "gpt-4.1-mini";
+  const deadlineAt = opts.deadlineAt ?? Infinity;
+  const generate = opts.generate ?? generateText;
+  const [primary, fallback] = REWRITE_MODELS;
   const startedAt = Date.now();
+  const timeLeft = () => Math.min(abortMs, deadlineAt - Date.now());
 
-  const attempt = (direct: boolean) =>
-    generateText({
-      // Primary route is the Vercel AI Gateway (forwards providerOptions.openai
-      // incl. promptCacheKey; OIDC-auths on Vercel, AI_GATEWAY_API_KEY locally).
-      // On gateway failure (free-tier 429s killed ~90% of attempts for a month)
-      // we fall back to direct OpenAI when OPENAI_API_KEY is configured.
-      model: direct ? openai(model) : gateway(`openai/${model}`),
-      instructions: system,
-      prompt,
-      temperature: 0.15,
-      maxOutputTokens: 80,
-      maxRetries: direct ? 1 : retries,
-      abortSignal: AbortSignal.timeout(abortMs),
-      providerOptions: {
-        openai: { promptCacheKey: cacheKey },
+  const attempt = (m: (typeof REWRITE_MODELS)[number], maxRetries: number) =>
+    generate({
+      model: anthropic(m.id),
+      // The system prompt only changes daily, so a cache breakpoint after it
+      // lets every later article in a run read it at 0.1x input price.
+      instructions: {
+        role: "system",
+        content: system,
+        providerOptions: { anthropic: { cacheControl: { type: "ephemeral" } } },
       },
+      prompt,
+      maxOutputTokens: REWRITE_MAX_OUTPUT_TOKENS,
+      maxRetries,
+      abortSignal: AbortSignal.timeout(Math.max(MIN_CALL_MS, timeLeft())),
+      providerOptions: { anthropic: { thinking: m.thinking } },
     });
 
+  // Stays the primary unless the fallback actually answered, so a double
+  // failure is attributed to the model that failed first.
+  let model: string = primary.id;
   try {
     let result: Awaited<ReturnType<typeof attempt>>;
-    let viaDirect = false;
+    let viaFallback = false;
     try {
-      result = await attempt(false);
-    } catch (gatewayError: unknown) {
-      if (!process.env.OPENAI_API_KEY) throw gatewayError;
-      const msg =
-        gatewayError instanceof Error ? gatewayError.message : "unknown_error";
+      result = await attempt(primary, retries);
+    } catch (primaryError: unknown) {
+      const primaryMsg = describeError(primaryError);
+      if (!shouldFallback(primaryError) || timeLeft() < MIN_CALL_MS) {
+        throw primaryError;
+      }
       console.warn(
-        `⚠️  Gateway generation failed (${msg.slice(0, 120)}); retrying via direct OpenAI`,
+        `⚠️  ${primary.id} failed (${primaryMsg.slice(0, 120)}); retrying with ${fallback.id}`,
       );
-      result = await attempt(true);
-      viaDirect = true;
+      try {
+        result = await attempt(fallback, 1);
+      } catch (fallbackError: unknown) {
+        throw new Error(
+          `${primary.id}: ${primaryMsg} | ${fallback.id}: ${describeError(fallbackError)}`,
+        );
+      }
+      model = fallback.id;
+      viaFallback = true;
     }
 
     const sanitized = sanitizeHeadline(result.text);
@@ -155,7 +182,7 @@ async function generateWithOpenAI(
         ? `with_content:${input.contentSnippet.length}chars`
         : "title_only",
     ];
-    if (viaDirect) notesParts.push("via_direct");
+    if (viaFallback) notesParts.push("via_fallback");
 
     if (input.previewExcerpt) {
       notesParts.push(`with_preview:${input.previewExcerpt.length}chars`);
@@ -163,41 +190,17 @@ async function generateWithOpenAI(
       notesParts.push("no_preview");
     }
 
-    const usage = result.usage as
-      | {
-          inputTokens?: number;
-          outputTokens?: number;
-          promptTokens?: number;
-          completionTokens?: number;
-          cachedInputTokens?: number;
-          inputTokenDetails?: { cacheReadTokens?: number };
-        }
-      | undefined;
-    // AI SDK v7 exposes cached tokens at usage.inputTokenDetails.cacheReadTokens.
-    // Older shapes (usage.cachedInputTokens, providerMetadata.openai.cachedPromptTokens)
-    // are kept as fallbacks for forward/back compat. Gateway preserves the
-    // unified shape, but we also peek at providerMetadata.gateway as a fallback
-    // in case it surfaces cached counts there.
-    const openaiMeta = result.providerMetadata?.openai as
-      { cachedPromptTokens?: number } | undefined;
-    const gatewayMeta = result.providerMetadata?.gateway as
-      { cachedPromptTokens?: number; cachedInputTokens?: number } | undefined;
-    const cachedTokens =
-      usage?.inputTokenDetails?.cacheReadTokens ??
-      usage?.cachedInputTokens ??
-      openaiMeta?.cachedPromptTokens ??
-      gatewayMeta?.cachedInputTokens ??
-      gatewayMeta?.cachedPromptTokens ??
-      null;
+    const { usage } = result;
 
     return {
       text: sanitized,
       model,
       notes: `success:${notesParts.join(":")}`,
       latencyMs: Date.now() - startedAt,
-      promptTokens: usage?.inputTokens ?? usage?.promptTokens ?? null,
-      outputTokens: usage?.outputTokens ?? usage?.completionTokens ?? null,
-      cachedTokens: typeof cachedTokens === "number" ? cachedTokens : null,
+      promptTokens: usage.inputTokens ?? null,
+      outputTokens: usage.outputTokens ?? null,
+      // Cache reads of the system prompt (every call after a run's first).
+      cachedTokens: usage.inputTokenDetails?.cacheReadTokens ?? null,
       // A "length" finish means the model was cut off at maxOutputTokens —
       // the headline is very likely mid-sentence even if it happens to fit
       // the char limit. Treat as a validation failure (retry may fit).
@@ -318,96 +321,36 @@ async function fetchBatch(limit = 40) {
 
 type ProcessOutcome = { ok: number; failed: number; skipped: number };
 
+async function recordFailure(articleId: number, model: string, notes: string) {
+  await query(
+    `update articles
+       set rewrite_model = $1,
+           rewrite_notes = $2
+     where id = $3`,
+    [model, notes, articleId],
+  );
+}
+
 async function processOne(
   r: Row,
   breaker: LlmCircuitBreaker,
+  headlineBreaker: HeadlineCheckBreaker,
+  deadlineAt = Infinity,
 ): Promise<ProcessOutcome> {
   if (breaker.tripped) {
     return { ok: 0, failed: 0, skipped: 1 };
   }
 
-  // SAFETY LAYER 1: Only use content if status is explicitly 'success'
-  const contentSnippet =
-    r.content_status === "success"
-      ? extractContentSnippet(r.content_text, r.content_html, 1200, r.id)
-      : null;
-
-  const previewExcerptRaw =
-    r.content_status === "success" &&
-    typeof r.content_html === "string" &&
-    r.content_html.trim().length > 0
-      ? extractContentSnippet(null, r.content_html, 2500, r.id)
-      : null;
-  // Snippet and preview are both extracted from the start of the same content;
-  // when they're the same text the preview adds tokens without information.
-  const previewExcerpt =
-    previewExcerptRaw &&
-    contentSnippet &&
-    previewExcerptRaw.slice(0, 200) === contentSnippet.slice(0, 200)
-      ? null
-      : previewExcerptRaw;
-
-  // Track what happened with content
-  let contentNote = "";
-  if (!r.content_status) {
-    contentNote = ":no_content";
-  } else if (r.content_status !== "success") {
-    contentNote = `:${r.content_status}`; // :paywall, :blocked, :timeout, etc.
-  } else if (!contentSnippet) {
-    contentNote = ":content_rejected"; // Had content but failed quality checks
-  }
-
-  // Raw content_text/content_html are only trustworthy as "source" when the
-  // prefetch succeeded — otherwise they may hold nav/boilerplate from a blocked
-  // or error page, which would wrongly "support" a hallucinated number/entity.
-  const trustedContentText =
-    r.content_status === "success" ? r.content_text : null;
-  const trustedContentHtml =
-    r.content_status === "success" ? r.content_html : null;
-
-  // Include the formatted publish date so a legitimate "in 2026" isn't rejected
-  // as a number missing from source.
-  const publishedDateText = formatPublishedDate(r.published_at);
-
-  // For validating numbers exist: check only this article's own content
-  const sourceQuant = buildSourceQuantContext([
-    r.title,
-    r.dek,
-    publishedDateText,
-    contentSnippet,
-    previewExcerpt,
-    trustedContentText,
-    trustedContentHtml,
-  ]);
-
-  const climateSummaryParts = [
-    r.dek,
-    contentSnippet,
-    previewExcerpt,
-    trustedContentText,
-    trustedContentHtml,
-  ].filter(
-    (part): part is string =>
-      typeof part === "string" && part.trim().length > 0,
-  );
+  const { promptInput, validationContext, contentNote, climateSummary } =
+    buildRewriteInputs(r);
 
   const isClimate = isClimateRelevant({
     title: r.title,
-    summary:
-      climateSummaryParts.length > 0
-        ? climateSummaryParts.join(" ")
-        : undefined,
+    summary: climateSummary,
   });
 
   if (!isClimate) {
-    const notes = "skipped:not_climate";
-    await query(
-      `update articles
-         set rewrite_model = $1,
-             rewrite_notes = $2
-       where id = $3`,
-      ["skipped", notes, r.id],
-    );
+    await recordFailure(r.id, "skipped", "skipped:not_climate");
     console.log(
       `🚫 [${r.id}] Skipped rewrite (non-climate detected): "${r.title.slice(
         0,
@@ -417,45 +360,19 @@ async function processOne(
     return { ok: 0, failed: 1, skipped: 0 };
   }
 
-  const promptInput: PromptInput = {
-    title: r.title,
-    dek: r.dek,
-    contentSnippet,
-    previewExcerpt,
-    publishedAt: r.published_at,
-  };
-
-  const sourceText = [
-    r.title,
-    r.dek,
-    publishedDateText,
-    contentSnippet,
-    previewExcerpt,
-    trustedContentText,
-    trustedContentHtml,
-  ]
-    .filter((p): p is string => typeof p === "string" && p.trim().length > 0)
-    .map((s) =>
-      s.length > MAX_SOURCE_SEGMENT ? s.slice(0, MAX_SOURCE_SEGMENT) : s,
-    )
-    .join(" ");
-
-  const validationContext: ValidationContext = {
-    hasContent: !!contentSnippet,
-    sourceQuant,
-    sourceText,
-  };
-
   // First attempt
-  const llm = await generateWithOpenAI(promptInput);
+  const llm = await generateHeadline(promptInput, { deadlineAt });
   if (llm.text === null) breaker.recordError();
   else breaker.recordSuccess();
   const draft = llm.text || "";
-  const firstCheck: HeadlineCheck = !llm.text
-    ? { ok: false, reason: "llm_error" }
-    : llm.truncated
-      ? { ok: false, reason: "truncated" }
-      : validateHeadline(r.title, draft, validationContext);
+  // Only a transport failure is llm_error; an empty answer (e.g. a refusal)
+  // is a validation failure, so it counts toward the per-article cap.
+  const firstCheck: HeadlineCheck =
+    llm.text === null
+      ? { ok: false, reason: "llm_error" }
+      : llm.truncated
+        ? { ok: false, reason: "truncated" }
+        : validateHeadline(r.title, draft, validationContext);
 
   await logAttempt({
     articleId: r.id,
@@ -485,6 +402,12 @@ async function processOne(
     console.log(
       `✅ [${r.id}] "${r.title.slice(0, 40)}..." → "${draft.slice(0, 60)}..."`,
     );
+    await shadowCheckHeadline({
+      articleId: r.id,
+      input: promptInput,
+      headline: draft,
+      breaker: headlineBreaker,
+    });
     return { ok: 1, failed: 0, skipped: 0 };
   }
 
@@ -492,35 +415,41 @@ async function processOne(
   // too vague" retry prompt makes no sense and just doubles load on a
   // rate-limited provider. Record the failure and move on.
   if (firstCheck.reason === "llm_error") {
-    await query(
-      `update articles
-         set rewrite_model = $1,
-             rewrite_notes = $2
-       where id = $3`,
-      [
-        llm.model || "none",
-        buildFailedNotes("llm_error", llm.notes, contentNote),
-        r.id,
-      ],
+    await recordFailure(
+      r.id,
+      llm.model || "none",
+      buildFailedNotes("llm_error", llm.notes, contentNote),
     );
     console.log(`⚠️  [${r.id}] LLM transport error; skipping retry prompt`);
     return { ok: 0, failed: 1, skipped: 0 };
   }
 
-  // Retry once with a more direct prompt — different system prompt means a
-  // different stable prefix, so route it under its own cache key.
-  const retryLlm = await generateWithOpenAI(promptInput, {
+  // Near the deadline the retry can't finish inside the function budget;
+  // the first failure stands and the article is re-selected next run.
+  if (deadlineAt - Date.now() < RETRY_MIN_MS) {
+    await recordFailure(
+      r.id,
+      llm.model || "none",
+      buildFailedNotes(firstCheck.reason, llm.notes, contentNote),
+    );
+    console.log(`⏱️  [${r.id}] Run budget nearly spent; skipping retry prompt`);
+    return { ok: 0, failed: 1, skipped: 0 };
+  }
+
+  // Retry once with a more direct prompt.
+  const retryLlm = await generateHeadline(promptInput, {
     systemPrompt: buildRetrySystemPrompt("legacy"),
-    cacheKey: CACHE_KEY_RETRY,
+    deadlineAt,
   });
   if (retryLlm.text === null) breaker.recordError();
   else breaker.recordSuccess();
   const retryDraft = retryLlm.text || "";
-  const retryCheck: HeadlineCheck = !retryLlm.text
-    ? { ok: false, reason: "llm_error" }
-    : retryLlm.truncated
-      ? { ok: false, reason: "truncated" }
-      : validateHeadline(r.title, retryDraft, validationContext);
+  const retryCheck: HeadlineCheck =
+    retryLlm.text === null
+      ? { ok: false, reason: "llm_error" }
+      : retryLlm.truncated
+        ? { ok: false, reason: "truncated" }
+        : validateHeadline(r.title, retryDraft, validationContext);
 
   await logAttempt({
     articleId: r.id,
@@ -551,21 +480,20 @@ async function processOne(
     console.log(
       `✅ [${r.id}] (retry) "${r.title.slice(0, 40)}..." → "${retryDraft.slice(0, 60)}..."`,
     );
+    await shadowCheckHeadline({
+      articleId: r.id,
+      input: promptInput,
+      headline: retryDraft,
+      breaker: headlineBreaker,
+    });
     return { ok: 1, failed: 0, skipped: 0 };
   }
 
   // Both attempts failed — record the final validation reason honestly
-  const failReason = retryCheck.reason ?? "empty";
-  await query(
-    `update articles
-       set rewrite_model = $1,
-           rewrite_notes = $2
-     where id = $3`,
-    [
-      retryLlm.model || llm.model || "none",
-      buildFailedNotes(failReason, retryLlm.notes, contentNote),
-      r.id,
-    ],
+  await recordFailure(
+    r.id,
+    retryLlm.model || llm.model || "none",
+    buildFailedNotes(retryCheck.reason ?? "empty", retryLlm.notes, contentNote),
   );
   console.log(
     `⚠️  [${r.id}] Failed validation (incl. retry): "${r.title.slice(0, 50)}..."`,
@@ -578,6 +506,9 @@ async function batch(limit = 40, concurrency = 4, deadlineAt = Infinity) {
   console.log(`📝 Processing ${rows.length} articles...`);
 
   const breaker = new LlmCircuitBreaker();
+  // Shadow fact-check of accepted headlines (lib/headlineCheck.ts); records
+  // only, and is a no-op unless HEADLINE_CHECK_ENABLED=1.
+  const headlineBreaker = new HeadlineCheckBreaker();
   let ok = 0;
   let failed = 0;
   let skipped = 0;
@@ -589,7 +520,7 @@ async function batch(limit = 40, concurrency = 4, deadlineAt = Infinity) {
       skipped += 1;
       return;
     }
-    const res = await processOne(r, breaker);
+    const res = await processOne(r, breaker, headlineBreaker, deadlineAt);
     ok += res.ok;
     failed += res.failed;
     skipped += res.skipped;
@@ -713,62 +644,17 @@ async function dryRun(limit = 10) {
   let retried = 0;
 
   for (const r of rows) {
-    const contentSnippet =
-      r.content_status === "success"
-        ? extractContentSnippet(r.content_text, r.content_html, 1200, r.id)
-        : null;
+    const { promptInput, validationContext, contentSnippet } =
+      buildRewriteInputs(r);
 
-    const previewExcerpt =
-      r.content_status === "success" &&
-      typeof r.content_html === "string" &&
-      r.content_html.trim().length > 0
-        ? extractContentSnippet(null, r.content_html, 2500, r.id)
-        : null;
-
-    const sourceQuant = buildSourceQuantContext([
-      r.title,
-      r.dek,
-      contentSnippet,
-      previewExcerpt,
-      r.content_text,
-      r.content_html,
-    ]);
-
-    const promptInput: PromptInput = {
-      title: r.title,
-      dek: r.dek,
-      contentSnippet,
-      previewExcerpt,
-      publishedAt: r.published_at,
-    };
-
-    const sourceText = [
-      r.title,
-      r.dek,
-      contentSnippet,
-      previewExcerpt,
-      r.content_text,
-      r.content_html,
-    ]
-      .filter((p): p is string => typeof p === "string" && p.trim().length > 0)
-      .map((s) =>
-        s.length > MAX_SOURCE_SEGMENT ? s.slice(0, MAX_SOURCE_SEGMENT) : s,
-      )
-      .join(" ");
-
-    const validationContext: ValidationContext = {
-      hasContent: !!contentSnippet,
-      sourceQuant,
-      sourceText,
-    };
-
-    const llm = await generateWithOpenAI(promptInput);
+    const llm = await generateHeadline(promptInput);
     const draft = llm.text || "";
     // Mirror production retry semantics exactly: retry only on validation
     // failure, never on transport error.
-    const check: HeadlineCheck = llm.text
-      ? validateHeadline(r.title, draft, validationContext)
-      : { ok: false, reason: "llm_error" };
+    const check: HeadlineCheck =
+      llm.text !== null
+        ? validateHeadline(r.title, draft, validationContext)
+        : { ok: false, reason: "llm_error" };
     const pass1 = check.ok;
 
     let finalDraft = draft;
@@ -776,7 +662,7 @@ async function dryRun(limit = 10) {
     let wasRetry = false;
 
     if (!pass1 && check.reason !== "llm_error") {
-      const retryLlm = await generateWithOpenAI(promptInput, {
+      const retryLlm = await generateHeadline(promptInput, {
         systemPrompt: buildRetrySystemPrompt("legacy"),
       });
       const retryDraft = retryLlm.text || "";

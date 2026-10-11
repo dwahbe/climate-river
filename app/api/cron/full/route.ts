@@ -85,6 +85,23 @@ export async function GET(req: Request) {
       recategorizeResult,
     );
 
+    // 4c) Judge (shadow mode, opt-in): model judgments stored for comparison,
+    // nothing reads them for display. After prefetch so it sees the content.
+    let judgeResult: unknown = { skipped: "disabled" };
+    if (process.env.ARTICLE_JUDGE_ENABLED === "1") {
+      if (hasTime()) {
+        console.log("⚖️  Running judge (shadow)...");
+        judgeResult = await safeRun(import("@/scripts/judge"), {
+          limit: 80,
+          deadlineMs: 20_000,
+          closePool: false,
+        });
+        console.log(`✅ Judge completed (${elapsed()}s):`, judgeResult);
+      } else {
+        judgeResult = { skipped: "timeout" };
+      }
+    }
+
     // 5) Cluster maintenance - fix orphaned articles and merge similar clusters
     let clusterMaintenanceResult: unknown = { skipped: "timeout" };
     if (hasTime()) {
@@ -181,6 +198,7 @@ export async function GET(req: Request) {
       categorize: categorizeResult,
       prefetch: prefetchResult,
       recategorize: recategorizeResult,
+      judge: judgeResult,
       clusterMaintenance: clusterMaintenanceResult,
       webDiscover: webDiscoverResult,
       prefetchDiscovered: prefetchDiscoveredResult,

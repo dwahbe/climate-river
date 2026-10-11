@@ -6,6 +6,9 @@
 import { query, endPool } from "@/lib/db";
 
 const DEFAULT_RETENTION_DAYS = 45;
+// Sampled keyword-gate rejections (lib/gateRejections.ts). Their judgments
+// cascade. Short-lived: they exist to measure the gate, not to be kept.
+const GATE_REJECTION_RETENTION_DAYS = 30;
 
 interface CleanupResult {
   ok: true;
@@ -90,6 +93,28 @@ export async function run(
     orphanedClustersDeleted = orphanedClusters;
     if (orphanedClusters > 0) {
       console.log(`  🗑️  Deleted ${orphanedClusters} orphaned clusters`);
+    }
+
+    // --- Trim sampled gate rejections (table is absent until `bun run schema`) ---
+    try {
+      const { rows: present } = await query<{ name: string | null }>(
+        `SELECT to_regclass('public.gate_rejections')::text AS name`,
+      );
+      if (present[0]?.name) {
+        const { rowCount: rejections } = await query(
+          `DELETE FROM gate_rejections
+           WHERE rejected_at < now() - make_interval(days => $1)`,
+          [GATE_REJECTION_RETENTION_DAYS],
+        );
+        if (rejections > 0) {
+          console.log(`  🗑️  Deleted ${rejections} old gate rejections`);
+        }
+      }
+    } catch (error) {
+      console.warn(
+        "  ⚠️  Could not trim gate rejections:",
+        error instanceof Error ? error.message : error,
+      );
     }
   }
 

@@ -513,6 +513,101 @@ export async function run() {
   // RLS: internal-only, block PostgREST access
   await query(`alter table rewrite_attempts enable row level security;`);
 
+  // --- gate_rejections (sampled items the keyword gate dropped) -------------
+  // Rejected items are never stored as articles, so the gate's misses were
+  // unmeasurable. lib/gateRejections.ts keeps a capped sample for the judge
+  // stage to score. Cleanup trims it (scripts/cleanup.ts).
+  await query(`
+    create table if not exists gate_rejections (
+      id            bigserial primary key,
+      canonical_url text not null unique,
+      title         text not null,
+      dek           text,
+      source_id     bigint references sources(id) on delete set null,
+      stage         text not null,
+      rejected_at   timestamptz not null default now()
+    );
+  `);
+  await query(`
+    create index if not exists idx_gate_rejections_recent
+      on gate_rejections(rejected_at desc);
+  `);
+  await query(`alter table gate_rejections enable row level security;`);
+
+  // --- article_judgments (model judgments, shadow mode) ---------------------
+  // One row per article or per sampled rejection: relevance, category,
+  // language and article type from lib/articleJudgment.ts. Nothing reads these
+  // for display yet; scripts/judge-report.ts compares them with production.
+  await query(`
+    create table if not exists article_judgments (
+      id               bigserial primary key,
+      article_id       bigint references articles(id) on delete cascade,
+      rejection_id     bigint references gate_rejections(id) on delete cascade,
+      model            text not null,
+      rubric_version   text not null,
+      status           text not null default 'ok',
+      error_msg        text,
+      attempts         int not null default 1,
+      climate_p        real,
+      english_p        real,
+      primary_category text,
+      primary_p        jsonb,
+      category_p       jsonb,
+      article_type     text,
+      article_type_p   jsonb,
+      used_fallback    boolean not null default false,
+      input_tokens     int,
+      latency_ms       int,
+      judged_at        timestamptz not null default now(),
+      constraint article_judgments_one_subject
+        check ((article_id is null) <> (rejection_id is null))
+    );
+  `);
+  await query(`
+    create unique index if not exists idx_article_judgments_article
+      on article_judgments(article_id) where article_id is not null;
+  `);
+  await query(`
+    create unique index if not exists idx_article_judgments_rejection
+      on article_judgments(rejection_id) where rejection_id is not null;
+  `);
+  await query(`
+    create index if not exists idx_article_judgments_recent
+      on article_judgments(judged_at desc);
+  `);
+  await query(`alter table article_judgments enable row level security;`);
+
+  // --- headline_checks (shadow fact-check of rewritten headlines) -----------
+  // One row per accepted headline checked by lib/headlineCheck.ts. The
+  // headline text is kept because rewritten_title can be overwritten later.
+  await query(`
+    create table if not exists headline_checks (
+      id                     bigserial primary key,
+      article_id             bigint not null references articles(id) on delete cascade,
+      headline               text not null,
+      has_content            boolean not null default false,
+      model                  text not null,
+      check_version          text not null,
+      status                 text not null default 'ok',
+      error_msg              text,
+      supported_p            real,
+      invented_attribution_p real,
+      publishable_p          real,
+      input_tokens           int,
+      latency_ms             int,
+      checked_at             timestamptz not null default now()
+    );
+  `);
+  await query(`
+    create index if not exists idx_headline_checks_article
+      on headline_checks(article_id, checked_at desc);
+  `);
+  await query(`
+    create index if not exists idx_headline_checks_recent
+      on headline_checks(checked_at desc);
+  `);
+  await query(`alter table headline_checks enable row level security;`);
+
   // --- source feed health columns -------------------------------------------
   await query(
     `alter table if exists sources add column if not exists last_fetched_at timestamptz;`,

@@ -40,7 +40,9 @@ describe("eval profiles", () => {
         p.promptVariant === "legacy" || p.promptVariant === "structured",
         "promptVariant must be legacy or structured",
       );
-      assert.ok(typeof p.temperature === "number");
+      assert.ok(
+        p.temperature === undefined || typeof p.temperature === "number",
+      );
       assert.ok(typeof p.maxOutputTokens === "number");
     }
   });

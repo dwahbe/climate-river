@@ -68,6 +68,23 @@ export async function GET(req: Request) {
     });
     console.log("✅ Re-categorize completed:", recategorizeResult);
 
+    // 3c) Judge (shadow mode, opt-in): model judgments stored for comparison,
+    // nothing reads them for display. After prefetch so it sees the content.
+    let judgeResult: unknown = { skipped: "disabled" };
+    if (process.env.ARTICLE_JUDGE_ENABLED === "1") {
+      if (hasTime()) {
+        console.log("⚖️  Running judge (shadow)...");
+        judgeResult = await safeRun(import("@/scripts/judge"), {
+          limit: 40,
+          deadlineMs: 12_000,
+          closePool: false,
+        });
+        console.log("✅ Judge completed:", judgeResult);
+      } else {
+        judgeResult = { skipped: "timeout" };
+      }
+    }
+
     // 4) Light web discovery - only during business hours to control costs
     let webDiscoverResult: unknown = { skipped: "off_hours" };
     const currentHour = new Date().getUTCHours();
@@ -152,6 +169,7 @@ export async function GET(req: Request) {
       categorize: categorizeResult,
       prefetch: prefetchResult,
       recategorize: recategorizeResult,
+      judge: judgeResult,
       webDiscover: webDiscoverResult,
       prefetchDiscovered: prefetchDiscoveredResult,
       rescore: rescoreResult,

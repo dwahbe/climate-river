@@ -3,6 +3,20 @@
 
 import type { PromptVariant } from "@/config/evalProfiles";
 
+// Sonnet 5.5 writes headlines; Haiku 5.5 takes over when a Sonnet call fails
+// (API/transport errors, not validation). Both call Anthropic directly with
+// ANTHROPIC_API_KEY, so they bill Anthropic credits, never AI Gateway credits.
+// Neither accepts a non-default temperature, and thinking stays off: Sonnet 5.5
+// rejects "disabled" and only turns it off via "between_tools". Shared with
+// the health report, which counts attempts answered by the fallback.
+export const REWRITE_MODELS = [
+  { id: "claude-sonnet-5-5", thinking: { type: "between_tools" } },
+  { id: "claude-haiku-5-5", thinking: { type: "disabled" } },
+] as const;
+
+/** A 200-char headline is ~75 Sonnet tokens; 80 risked truncation. */
+export const REWRITE_MAX_OUTPUT_TOKENS = 120;
+
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
 /* ------------------------------------------------------------------ */
@@ -416,6 +430,135 @@ export function buildSourceQuantContext(
     hasQuantEvidence: containsQuantifier(combined),
     numbers,
     measurements,
+  };
+}
+
+/* ------------------------------------------------------------------ */
+/*  Rewrite inputs (single source of truth)                            */
+/* ------------------------------------------------------------------ */
+
+export type RewriteSourceRow = {
+  id: number;
+  title: string;
+  dek: string | null;
+  content_text: string | null;
+  content_html: string | null;
+  content_status: string | null;
+  published_at: string | null;
+};
+
+export type RewriteInputs = {
+  promptInput: PromptInput;
+  validationContext: ValidationContext;
+  contentSnippet: string | null;
+  previewExcerpt: string | null;
+  /** "" when content was used, else ":no_content", ":paywall", ":content_rejected"… */
+  contentNote: string;
+  /** Text for the climate-relevance check; undefined when there is none. */
+  climateSummary: string | undefined;
+};
+
+const MAX_SOURCE_SEGMENT = 12_000;
+
+/**
+ * What the model is shown and what the validator checks against, built one
+ * way for production, the dry run, and the eval harness. They used to build
+ * these separately and drifted: only production told the validator the
+ * publication date, so the other two rejected every headline that carried it.
+ */
+export function buildRewriteInputs(r: RewriteSourceRow): RewriteInputs {
+  // SAFETY LAYER 1: only use content when the prefetch explicitly succeeded.
+  const contentOk = r.content_status === "success";
+  const contentSnippet = contentOk
+    ? extractContentSnippet(r.content_text, r.content_html, 1200, r.id)
+    : null;
+
+  const previewExcerptRaw =
+    contentOk &&
+    typeof r.content_html === "string" &&
+    r.content_html.trim().length > 0
+      ? extractContentSnippet(null, r.content_html, 2500, r.id)
+      : null;
+  // Snippet and preview are both extracted from the start of the same content;
+  // when they're the same text the preview adds tokens without information.
+  const previewExcerpt =
+    previewExcerptRaw &&
+    contentSnippet &&
+    previewExcerptRaw.slice(0, 200) === contentSnippet.slice(0, 200)
+      ? null
+      : previewExcerptRaw;
+
+  let contentNote = "";
+  if (!r.content_status) {
+    contentNote = ":no_content";
+  } else if (!contentOk) {
+    contentNote = `:${r.content_status}`; // :paywall, :blocked, :timeout, etc.
+  } else if (!contentSnippet) {
+    contentNote = ":content_rejected"; // Had content but failed quality checks
+  }
+
+  // Raw content_text/content_html are only trustworthy as "source" when the
+  // prefetch succeeded — otherwise they may hold nav/boilerplate from a blocked
+  // or error page, which would wrongly "support" a hallucinated number/entity.
+  const trustedContentText = contentOk ? r.content_text : null;
+  const trustedContentHtml = contentOk ? r.content_html : null;
+
+  // The prompt shows the model the publication date, so the validator must
+  // accept it too, or a legitimate "in 2026" is rejected as an invented number.
+  const publishedDateText = formatPublishedDate(r.published_at);
+
+  const sourceParts = [
+    r.title,
+    r.dek,
+    publishedDateText,
+    contentSnippet,
+    previewExcerpt,
+    trustedContentText,
+    trustedContentHtml,
+  ];
+
+  const climateSummaryParts = [
+    r.dek,
+    contentSnippet,
+    previewExcerpt,
+    trustedContentText,
+    trustedContentHtml,
+  ].filter(
+    (part): part is string =>
+      typeof part === "string" && part.trim().length > 0,
+  );
+
+  return {
+    promptInput: {
+      title: r.title,
+      dek: r.dek,
+      contentSnippet,
+      previewExcerpt,
+      publishedAt: r.published_at,
+    },
+    validationContext: {
+      hasContent: !!contentSnippet,
+      // For validating numbers exist: check only this article's own content
+      sourceQuant: buildSourceQuantContext(sourceParts),
+      sourceText: sourceParts
+        .filter(
+          (part): part is string =>
+            typeof part === "string" && part.trim().length > 0,
+        )
+        .map((part) =>
+          part.length > MAX_SOURCE_SEGMENT
+            ? part.slice(0, MAX_SOURCE_SEGMENT)
+            : part,
+        )
+        .join(" "),
+    },
+    contentSnippet,
+    previewExcerpt,
+    contentNote,
+    climateSummary:
+      climateSummaryParts.length > 0
+        ? climateSummaryParts.join(" ")
+        : undefined,
   };
 }
 
@@ -869,15 +1012,27 @@ export function passesChecks(
 /*  Prompt builders                                                    */
 /* ------------------------------------------------------------------ */
 
+// Emitted by buildUserPrompt when there is no excerpt of any kind, so the
+// rules below key on an explicit line rather than on a missing label.
+const NO_ARTICLE_TEXT_LINE = "No article text available.";
+
+// Shared by the first-attempt and retry prompts: both models invent entities,
+// consequences and certainty when the source is thin (2026-10 blind review).
+const SOURCE_ONLY_RULES = `SOURCE ONLY — every fact must come from the input, never from your own knowledge:
+- Don't add names, companies, agencies, places, dates or numbers the source doesn't state, even if you believe they're true (source says "Chinese battery makers" → don't name CATL or BYD)
+- Don't add consequences, reactions or attributions the source doesn't state ("evacuation orders", "NOAA says", "experts warn")
+- Keep the source's conditions: a plan, proposal, hope or "if" stays one; never report it as done
+- When the input says "${NO_ARTICLE_TEXT_LINE}", don't expand the story: tighten the original headline (front-load the actor, clarify) using only the headline and summary, even if the result is short`;
+
 function buildLegacySystemPrompt() {
   return `Today is ${todayLabel()}.
 
 You rewrite climate news headlines in the style of Techmeme: dense, factual, scannable.
 
 RULES:
-- Lead with WHO (named entity from the source: "EPA", "Ørsted", "9th Circuit") + strong action verb
+- Lead with WHO (a named entity that appears in the source: "EPA", "Ørsted", "9th Circuit") + strong action verb
 - Present tense, active voice, no period at end
-- 140-200 characters ideal; use commas and semicolons to pack detail
+- 140-200 characters when the source has that much detail; use commas and semicolons to pack it. A shorter accurate headline beats a padded one
 - Only include numbers/dates/measurements that appear in the source material; do not convert relative time ("last year", "this year") into specific years
 - NEVER add, replace, or change names of people, politicians, or political figures — use exactly the names and attributions from the source material
 - If no numbers exist, stay concrete and qualitative — never pad with filler
@@ -885,6 +1040,8 @@ RULES:
 - The headline IS the news, not a description of an article about the news
 - Match the certainty of the source: facts as facts, projections with "may"/"could"
 - Never phrase the headline as a question; state the finding directly
+
+${SOURCE_ONLY_RULES}
 
 NEVER USE these vague filler patterns (they will be rejected):
 - "aiming to", "impacting", "reflecting", "amid concerns/issues/challenges"
@@ -924,7 +1081,9 @@ function buildLegacyRetrySystemPrompt() {
 
 You rewrite climate news headlines. Your previous attempt was too vague.
 
-This time: state EXACTLY what happened, who did it per the source material, and include any specific numbers or names from the source. Do not introduce names, people, or organizations not mentioned in the source. Do not use filler phrases like "aiming to", "impacting", "amid concerns", or "addressing challenges". Every clause must add a concrete fact.
+This time: state EXACTLY what happened, who did it per the source material, and include any specific numbers or names from the source. Do not use filler phrases like "aiming to", "impacting", "amid concerns", or "addressing challenges". Every clause must add a concrete fact from the source.
+
+${SOURCE_ONLY_RULES}
 
 Output ONLY the rewritten headline — no quotes, no explanation, no preamble.`;
 }
@@ -1026,6 +1185,10 @@ export function buildUserPrompt(
 
   if (input.previewExcerpt) {
     lines.push(`Full article excerpt: ${input.previewExcerpt}`);
+  }
+
+  if (!input.contentSnippet && !input.previewExcerpt) {
+    lines.push(NO_ARTICLE_TEXT_LINE);
   }
 
   lines.push("");

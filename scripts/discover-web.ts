@@ -4,6 +4,7 @@ import { generateText } from "ai";
 import { openai } from "@ai-sdk/openai";
 import { categorizeAndStoreArticle } from "@/lib/categorizer";
 import { isClimateRelevant } from "@/lib/tagger";
+import { recordGateRejection } from "@/lib/gateRejections";
 import { isTrustedClimateSource } from "@/config/trustedClimateSources";
 import { isLowValueUrl } from "@/lib/aggregators";
 import { resolveTier, UNKNOWN_SOURCE_WEIGHT } from "@/config/sourceTiers";
@@ -2475,6 +2476,12 @@ async function tryInsertDiscoveredArticle(
     console.log(
       `- Skipped non-climate result from ${host}: ${result.title.substring(0, 80)}`,
     );
+    await recordGateRejection({
+      stage: "discover-web",
+      url: result.url,
+      title: result.title,
+      dek: result.snippet,
+    });
     return { accepted: false, reason: "non_climate" };
   }
 
