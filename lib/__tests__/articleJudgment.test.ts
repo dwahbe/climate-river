@@ -73,6 +73,7 @@ describe("buildJudgmentQuestions", () => {
       [...CATEGORY_SLUGS, "none"].sort(),
     );
     const type = questions.article_type;
+    assert.equal(type.type, "choice");
     assert.deepEqual(
       Object.keys(type.criteria as Record<string, unknown>),
       ARTICLE_TYPE_KEYS,

@@ -5,7 +5,7 @@
   "type": "module",
   "license": "Apache-2.0",
   "engines": {
-    "node": "24.x"
+    "node": "26.x"
   },
   "scripts": {
     "dev": "next dev",
@@ -49,19 +49,19 @@
     "feeds:discover:apply": "bun --env-file=.env.local scripts/discover-feeds.ts --apply"
   },
   "dependencies": {
-    "@ai-sdk/anthropic": "^4.0.78",
-    "@ai-sdk/openai": "^4.0.74",
+    "@ai-sdk/anthropic": "^4.0.102",
+    "@ai-sdk/openai": "^4.0.115",
     "@supabase/supabase-js": "2.90.0",
     "@tailwindcss/typography": "^0.5.20",
     "@vercel/analytics": "^2.0.1",
-    "ai": "^7.0.113",
+    "ai": "^7.0.170",
     "clsx": "^2.1.1",
     "dayjs": "^1.11.21",
-    "defuddle": "^0.19.4",
+    "defuddle": "^0.19.6",
     "franc-min": "^6.2.0",
     "jsdom": "22.1.0",
     "lucide-react": "^1.31.0",
-    "next": "^16.3.6",
+    "next": "^16.4.6",
     "pg": "^8.23.0",
     "pg-types": "^4.1.0",
     "postgres-array": "^3.0.4",
@@ -71,15 +71,15 @@
     "react": "19.2.5",
     "react-dom": "19.2.5",
     "rss-parser": "^3.13.0",
-    "sanitize-html": "^2.17.7",
+    "sanitize-html": "^2.18.2",
     "vaul": "^1.1.2"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.5",
-    "@next/eslint-plugin-next": "^16.3.6",
+    "@next/eslint-plugin-next": "^16.4.6",
     "@tailwindcss/postcss": "^4.3.3",
     "@types/jsdom": "^21.1.7",
-    "@types/node": "^24",
+    "@types/node": "^26",
     "@types/pg": "^8.21.0",
     "@types/react": "19.2.14",
     "@types/react-dom": "19.2.3",

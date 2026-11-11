@@ -322,7 +322,12 @@ export async function fetchArticleContent(url: string): Promise<ReaderResult> {
             error: "Access denied by publisher",
           } as ReaderError;
         }
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        // statusText is empty over HTTP/2 (Node 26 fetch negotiates it)
+        throw new Error(
+          response.statusText
+            ? `HTTP ${response.status}: ${response.statusText}`
+            : `HTTP ${response.status}`,
+        );
       }
 
       const rawHtml = await response.text();
