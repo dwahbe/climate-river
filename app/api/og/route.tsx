@@ -56,7 +56,7 @@ export async function GET(request: NextRequest) {
     const logoUrl = new URL("/ClimateRiver.png", request.url);
     const logoResponse = await fetch(logoUrl);
     const logoData = await logoResponse.arrayBuffer();
-    // Convert ArrayBuffer to base64 (Edge runtime compatible)
+    // Convert ArrayBuffer to base64
     const logoBase64 = btoa(String.fromCharCode(...new Uint8Array(logoData)));
 
     return new ImageResponse(

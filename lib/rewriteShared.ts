@@ -1,5 +1,6 @@
 // lib/rewriteShared.ts — Single source of truth for rewrite prompts, validation patterns, and shared utilities.
-// Used by both scripts/rewrite.ts (production pipeline) and scripts/rewrite-eval.ts (benchmarking CLI).
+// Used by scripts/rewrite.ts (production pipeline), scripts/rewrite-eval.ts (the eval harness behind
+// rewrite-bakeoff.ts), the headline fact-check and the health report.
 
 import type { PromptVariant } from "@/config/evalProfiles";
 
@@ -655,7 +656,7 @@ export const VAGUE_PATTERNS = [
   /\bciting ongoing\b/i,
   /\bbuild(s|ing)? (new )?momentum\b/i,
   /\bgain(s|ing)? traction\b/i,
-  /\bmake(s|ing)? progress\b/i,
+  /\bmak(e|es|ing) progress\b/i,
   /\bhealth implications\b/i,
   /\bbroader implications\b/i,
   /\bongoing research\b/i,

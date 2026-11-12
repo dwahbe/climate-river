@@ -3,7 +3,10 @@ import { NextResponse } from "next/server";
 import { getArticleContent } from "@/lib/services/readerService";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 10; // Vercel timeout (10s on hobby, can increase on Pro)
+// Seconds. Must stay above the 12s fetch timeout in
+// lib/services/readerService.ts so a slow publisher gets the route's own
+// "timeout" response instead of a platform kill.
+export const maxDuration = 15;
 
 type Params = {
   params: Promise<{

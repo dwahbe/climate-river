@@ -90,7 +90,8 @@ export function buildFailedNotes(
   return `failed_validation:${reason}${contentNote}`;
 }
 
-// Below this much budget a call can't complete, so it isn't started.
+// Timeout floor for a model call. With less budget than this left, the
+// fallback model isn't tried.
 const MIN_CALL_MS = 1500;
 // Below this much budget the retry prompt is skipped; the article is picked
 // up again next run with its first failure recorded.
@@ -649,12 +650,14 @@ async function dryRun(limit = 10) {
 
     const llm = await generateHeadline(promptInput);
     const draft = llm.text || "";
-    // Mirror production retry semantics exactly: retry only on validation
-    // failure, never on transport error.
+    // Mirror production semantics: a truncated answer fails like a validation
+    // failure and is retried; a transport error never is.
     const check: HeadlineCheck =
-      llm.text !== null
-        ? validateHeadline(r.title, draft, validationContext)
-        : { ok: false, reason: "llm_error" };
+      llm.text === null
+        ? { ok: false, reason: "llm_error" }
+        : llm.truncated
+          ? { ok: false, reason: "truncated" }
+          : validateHeadline(r.title, draft, validationContext);
     const pass1 = check.ok;
 
     let finalDraft = draft;
@@ -666,7 +669,10 @@ async function dryRun(limit = 10) {
         systemPrompt: buildRetrySystemPrompt("legacy"),
       });
       const retryDraft = retryLlm.text || "";
-      finalPass = passesChecks(r.title, retryDraft, validationContext);
+      finalPass =
+        retryLlm.text !== null &&
+        !retryLlm.truncated &&
+        passesChecks(r.title, retryDraft, validationContext);
       if (finalPass) {
         finalDraft = retryDraft;
         wasRetry = true;

@@ -172,10 +172,10 @@ describe("validateHeadline — reason codes", () => {
 });
 
 /* ================================================================== */
-/*  Documented false positive (see eval report)                        */
+/*  Former false positives and numeric-guard cases (now fixed)         */
 /* ================================================================== */
 
-describe("validateHeadline — numeric guard (unit/magnitude aware)", () => {
+describe("validateHeadline — clickbait 'rip' fix and numeric guard (unit/magnitude aware)", () => {
   // /\brip/i was tightened to /\brips?\b/i, so a grounded headline that merely
   // contains "ripe" is no longer wrongly rejected as clickbait.
   it("accepts a clean headline containing the word 'ripe' (rip false-positive fixed)", () => {

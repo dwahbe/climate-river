@@ -628,7 +628,8 @@ export function parseGoldLabels(reviewRows: Array<Record<string, string>>): {
 
 /**
  * Score one arm against the labels. A failed call counts as a wrong answer in
- * every accuracy figure; precision and recall use successful calls only.
+ * every accuracy figure and as missed labels in multi-label recall; relevance
+ * precision and recall use successful calls only.
  */
 export function scoreArm(
   armId: string,

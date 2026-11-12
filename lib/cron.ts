@@ -113,6 +113,21 @@ export async function safeRun<R = unknown>(
   }
 }
 
+// ---------- Job staleness ----------
+
+// Hours after which a cron job with no logged run counts as stale on the
+// admin health dashboard. Each is the longest gap in its vercel.json schedule
+// plus a margin, so a healthy job never reads as stale between runs
+// (lib/__tests__/cron-schedule.test.ts pins this against vercel.json).
+export const JOB_STALE_AFTER_HOURS: Record<string, number> = {
+  refresh: 9, // longest gap 8h (04:00→12:00 UTC)
+  full: 11, // longest gap 10h (10:00→20:00 UTC)
+  rewrite: 5, // longest gap 4h (overnight)
+  cleanup: 26, // daily
+  health: 26, // daily
+  feeds: 170, // weekly
+};
+
 // ---------- Pipeline run tracking ----------
 
 let _tableChecked = false;

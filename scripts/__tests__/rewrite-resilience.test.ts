@@ -177,7 +177,7 @@ describe("buildFailedNotes", () => {
     assert.ok(notes.endsWith(":error"));
   });
 
-  it("keeps contentNote suffix for validation failures", () => {
+  it("adds no suffix when contentNote is empty", () => {
     const notes = buildFailedNotes(
       "missing_attribution",
       "success:title_only",

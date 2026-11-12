@@ -4,16 +4,17 @@
 // (see lib/domSelectorCompat.ts). Cleared articles refetch on next reader
 // open or prefetch run, going through the fixed extraction pipeline.
 //
-// --all clears every cached extraction, not just link-dense ones — density
-// can't catch full-page fallbacks diluted by long articles, or bodies
-// truncated by the old stripLeadingImage. Run it once after deploying the
-// extraction fix; until then refetches re-cache through the broken code.
+// --all clears cached extractions whether or not they are link-dense (still
+// capped by --limit, newest first) — density can't catch full-page fallbacks
+// diluted by long articles, or bodies truncated by the old stripLeadingImage.
+// It was the one-off flush after the extraction fix shipped (2026-06-12).
 //
 //   bun run reader:invalidate              # dry-run
-//   bun scripts/invalidate-reader-junk.ts --apply --limit 2000
-//   bun run reader:invalidate:apply --all  # post-deploy full flush
+//   bun scripts/invalidate-reader-junk.ts --apply --limit=2000
+//   bun run reader:invalidate:apply --all  # ignore link density (newest --limit)
 
 import { query, endPool } from "@/lib/db";
+import { parseNumberFlag } from "@/lib/evalCli";
 import { linkTextDensity } from "@/lib/services/readerService";
 
 const LINK_DENSITY_LIMIT = 0.5;
@@ -94,14 +95,10 @@ export async function run(
 // --- CLI ---
 if (import.meta.url === `file://${process.argv[1]}`) {
   const argv = process.argv.slice(2);
-  const flag = (name: string) => {
-    const hit = argv.find((a) => a.startsWith(`--${name}=`));
-    return hit ? Number(hit.split("=")[1]) : undefined;
-  };
   run({
     apply: argv.includes("--apply"),
     all: argv.includes("--all"),
-    limit: flag("limit"),
+    limit: parseNumberFlag(argv, "limit"),
     closePool: true,
   }).catch((err) => {
     console.error(err);

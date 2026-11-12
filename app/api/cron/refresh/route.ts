@@ -85,12 +85,13 @@ export async function GET(req: Request) {
       }
     }
 
-    // 4) Light web discovery - only during business hours to control costs
+    // 4) Light web discovery - only during business hours. Runs the free
+    // Google News site: tier only (paidOutletSweep: false below).
     let webDiscoverResult: unknown = { skipped: "off_hours" };
     const currentHour = new Date().getUTCHours();
     const isBusinessHours = currentHour >= 12 && currentHour <= 22; // 12-22 UTC = 8am-6pm ET
 
-    // 6) Prefetch for web-discovered articles
+    // 5) Prefetch for web-discovered articles
     let prefetchDiscoveredResult: unknown = { skipped: "not_run" };
 
     if (isBusinessHours && hasTime()) {
@@ -138,7 +139,7 @@ export async function GET(req: Request) {
       );
     }
 
-    // 7) Rescore LAST so newly discovered/merged clusters get a real score this
+    // 6) Rescore after discovery so new/merged clusters get a real score this
     // run instead of sitting at their interim score-0 metadata row.
     console.log("🔢 Running rescore...");
     const rescoreResult = await safeRun(import("@/scripts/rescore"), {
@@ -146,7 +147,7 @@ export async function GET(req: Request) {
     });
     console.log("✅ Rescore completed:", rescoreResult);
 
-    // 8) Rewrite-at-ingest: give fresh leads a rewritten headline within this
+    // 7) Rewrite-at-ingest: give fresh leads a rewritten headline within this
     // run when budget allows; the rewrite cron sweeps whatever's left.
     let inlineRewriteResult: unknown = { skipped: "timeout" };
     {

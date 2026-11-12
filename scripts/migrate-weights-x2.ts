@@ -65,7 +65,9 @@ async function run() {
   }
 
   console.log("\n🔄 Doubling all weights and coercing column to int…");
-  // Single transaction so we never end up half-migrated.
+  // Wrapped in begin/commit so we don't end up half-migrated. query() takes a
+  // pooled client per call, so this holds only while the pool hands back the
+  // same connection.
   await query("begin");
   try {
     await query(

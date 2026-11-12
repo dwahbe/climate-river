@@ -22,7 +22,7 @@ import {
 
 const HOUR = 3600;
 // Optimized decay for dynamic, fresh content (data-driven analysis)
-const HL_ARTICLE_H = 6; // 6h half-life: articles lose 50% score every 6 hours
+const HL_ARTICLE_H = 6; // 6h half-life: an article's freshness term halves every 6 hours
 // Cluster half-life (HL_CLUSTER_H) lives in lib/scoring.ts — it's shared with
 // get_river_clusters, which recomputes the freshness term at read time.
 
@@ -34,8 +34,9 @@ const ACTIVE_DAYS = 10;
 // Normalization constants — divide each blend term by its practical maximum so
 // the documented weights (30% fresh / 35% velocity / 15% coverage / 15%
 // authority / 5% pool) are the real contribution shares. coverage max =
-// ln(101)+0.8·ln(11)+0.4·ln(16); velocity max = ln(1+10 distinct sources);
-// pool max = ln(1+50). avg_w is divided by the max tier (10).
+// ln(101)+0.8·ln(11)+0.4·ln(16); velocity max = ln(1+10), 10 being the cap on
+// trust-weighted velocity (ten tier-10 outlets); pool max = ln(1+50).
+// Authority (max_w) is divided by the max tier (10).
 const COVERAGE_MAX = Math.log(101) + 0.8 * Math.log(11) + 0.4 * Math.log(16);
 const VELOCITY_MAX = Math.log(11);
 const POOL_MAX = Math.log(51);
@@ -195,7 +196,8 @@ export async function run(opts: { closePool?: boolean } = {}) {
         -- hosts) at or above the trusted-weight floor (shared SQL, lib/scoring.ts)
         ${strongSourceCountSql("a.host_norm", "a.src_weight")}          AS strong_sources,
         -- raw velocity = distinct sources publishing in the last 4h (kept in
-        -- why (JSON) for debugging; the score uses the trust-weighted v4w below).
+        -- why (JSON) for debugging; the score uses the trust-weighted vw from
+        -- the velw CTE below).
         -- Counting DISTINCT sources (not raw articles) stops one outlet
         -- live-blogging from inflating velocity; the bounded window also
         -- excludes future-dated articles.
@@ -290,7 +292,7 @@ export async function run(opts: { closePool?: boolean } = {}) {
         cluster_id,
         size,
         latest_pub,
-        -- Decay-free base (stored): velocity/coverage/avg-weight/pool blend plus
+        -- Decay-free base (stored): velocity/coverage/authority/pool blend plus
         -- the small additive novelty boost. The freshness term is applied at
         -- read time in get_river_clusters (shared math in lib/scoring.ts).
         (${SCORE_WEIGHTS.velocity} * velocity_norm)

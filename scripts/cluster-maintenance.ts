@@ -1,8 +1,11 @@
 // scripts/cluster-maintenance.ts
 // Maintenance script to fix clustering issues:
-// 1. Retroactively cluster unclustered articles (centroid-based)
-// 2. Merge similar clusters (centroid-to-centroid comparison)
-// 3. Create singleton clusters for remaining orphans
+// 1. Refresh stale cluster centroids
+// 2. Retroactively cluster unclustered articles (centroid-based)
+// 3. Merge similar clusters (centroid-to-centroid comparison)
+// 4. Split oversized clusters
+// 5. Create singleton clusters for remaining orphans
+// Cluster metadata is refreshed afterwards if anything changed.
 import { query, endPool } from "@/lib/db";
 import {
   CLUSTER_CONFIG,
@@ -321,7 +324,8 @@ async function splitOversizedClusters(): Promise<number> {
 
 /**
  * Create singleton clusters for articles that are still unclustered
- * after retroactive clustering. Ensures every article enters the display pipeline.
+ * after retroactive clustering, so every embedded, recently fetched article
+ * enters the display pipeline. Articles without an embedding stay unclustered.
  */
 async function createSingletonClusters() {
   console.log("\n🫧 Creating singleton clusters for remaining orphans...");

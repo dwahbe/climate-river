@@ -14,7 +14,7 @@ Climate River is a news aggregator focused exclusively on climate change coverag
 ## Content Freshness
 
 - Content is updated multiple times per day via automated cron jobs
-- Homepage shows top stories from the past 48 hours
+- Homepage shows top stories from the past 72 hours
 - RSS feed available at: https://climateriver.org/feed.xml
 
 ## Attribution

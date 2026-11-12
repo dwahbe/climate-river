@@ -1,8 +1,9 @@
 // lib/jev.ts
-// The one place that calls Jev (TypeSafe's typed-question model) through
-// AI Gateway. `experimental_evaluate` is an experimental AI SDK call and the
+// The production path to Jev (TypeSafe's typed-question model) through AI
+// Gateway. `experimental_evaluate` is an experimental AI SDK call and the
 // gateway model ID is unversioned, so keeping the call here limits what an SDK
-// upgrade or a model release can break.
+// upgrade or a model release can break. (The `evaluation` bakeoff arms in
+// scripts/categorize-eval.ts call the SDK directly.)
 
 import {
   experimental_evaluate as evaluate,

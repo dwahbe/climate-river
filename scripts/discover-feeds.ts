@@ -8,9 +8,10 @@
 //
 //   bun run feeds:discover          # dry-run, top 15 hosts
 //   bun run feeds:discover:apply    # apply
-//   bun scripts/discover-feeds.ts --apply --limit 30
+//   bun scripts/discover-feeds.ts --apply --limit=30
 
 import { query, endPool } from "@/lib/db";
+import { parseNumberFlag } from "@/lib/evalCli";
 import { isLowValueHost } from "@/lib/aggregators";
 import { DISABLED_FEED_PREFIX } from "@/lib/utils";
 import { safeFetch } from "@/lib/urlSafety";
@@ -255,10 +256,9 @@ export async function run(
 // --- CLI ---
 if (import.meta.url === `file://${process.argv[1]}`) {
   const argv = process.argv.slice(2);
-  const limitFlag = argv.find((a) => a.startsWith("--limit="));
   run({
     apply: argv.includes("--apply"),
-    limit: limitFlag ? Number(limitFlag.split("=")[1]) : undefined,
+    limit: parseNumberFlag(argv, "limit"),
     closePool: true,
   }).catch((err) => {
     console.error(err);

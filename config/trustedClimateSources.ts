@@ -4,18 +4,19 @@
 // feeds; on climate-only outlets it is pure loss (live check 2026-08-21: it
 // dropped ~20% of Grist, 17% of Heatmap, 40–50% of Volts/Heated items —
 // "Amtrak's cleaner new trains", "California's tire efficiency rules",
-// "Why can't utilities innovate?"). Ingest and web discovery consult this
-// module and bypass the gate for trusted sources.
+// "Why can't utilities innovate?"). Ingest, web discovery and backfill
+// categorization consult this module and bypass the gate for trusted sources.
 //
 // Two kinds of trust, mirroring how outlets publish:
 //   - TRUSTED_CLIMATE_HOSTS: the whole outlet is climate/energy (Grist,
 //     Heatmap, Carbon Brief…). Matched by host, walking up parent domains
 //     like config/sourceTiers.ts (news.example.com → example.com).
 //   - TRUSTED_CLIMATE_FEED_PATTERNS: climate *section* feeds of general
-//     outlets (Guardian environment, NYT Climate, Vox climate). The same
-//     outlet's all-topics feed stays gated.
+//     outlets (Guardian climate/energy subsections, Vox climate, Nature
+//     Climate Change…). The same outlet's all-topics feed stays gated, and so
+//     do broad environment desks (see the note on the list).
 //
-// Dependency-free on purpose (imported by scripts and lib alike).
+// Depends only on config/sourceTiers.ts (for normalizeHost).
 
 export const TRUSTED_CLIMATE_HOSTS: readonly string[] = [
   // Climate newsrooms
@@ -60,7 +61,7 @@ export const TRUSTED_CLIMATE_FEED_PATTERNS: readonly RegExp[] = [
   // Guardian climate/energy subsections only. The broad environment desk
   // (environment/rss, us/environment/rss) and NYT Climate.xml also carry
   // wildlife/outdoors items ("otter spotted in the Bronx", "wild swimming
-  // spots") that would become weight-9 leads — those feeds stay gated.
+  // spots") that would become top-tier leads — those feeds stay gated.
   /theguardian\.com\/environment\/(?:climate-crisis|climate-change|energy|fossil-fuels|renewableenergy|carbon-emissions|wind-power|solarpower|oil|gas|coal)(?:\/|\?|$)/i,
   /vox\.com\/rss\/climate/i,
   /nature\.com\/(?:nclimate|nenergy)\.rss/i,

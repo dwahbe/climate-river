@@ -118,7 +118,6 @@ function bestDek(it: RssItem) {
   return raw ? oneLine(raw) : null;
 }
 
-// Removed SourceRaw type - no longer needed since we fetch from database
 type SourceDef = {
   name: string;
   homepage: string;
@@ -198,7 +197,6 @@ async function ensureSchema() {
 }
 
 // ---------- DB helpers ----------
-// Removed upsertSources function - sources are now managed directly in database
 
 async function sourceMap(): Promise<Record<string, { id: number }>> {
   const { rows } = await query<{ id: number; feed_url: string }>(
@@ -262,7 +260,7 @@ async function insertArticle(
     return null;
   }
 
-  // DEDUPLICATION (before embedding, to avoid wasted OpenAI calls): shared
+  // DEDUPLICATION (before embedding, to avoid wasted embedding calls): shared
   // rule in lib/articleDedupe.ts — same URL, or same title within 7 days.
   // Either way the article already exists — return an isExisting marker so the
   // caller skips re-clustering and re-categorizing it. Feeds keep items in the
@@ -320,9 +318,6 @@ async function insertArticle(
   return { id, embedding: embeddingJson, isExisting };
 }
 
-// Update cluster metadata (lead article, size) when new articles are added
-// NOTE: Does NOT update score - that's handled by rescore.ts which has the
-// proper scoring algorithm with freshness decay, source weights, etc.
 // ---------- Source health tracking ----------
 async function updateSourceHealth(
   sourceId: number,

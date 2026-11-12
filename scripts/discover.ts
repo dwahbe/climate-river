@@ -167,10 +167,10 @@ async function insertArticle(
   language?: LanguageDetection,
   publisher?: { name: string | null; homepage: string | null },
 ) {
-  // Skip duplicates before generating embedding to avoid wasted OpenAI API calls
+  // Skip duplicates before generating embedding to avoid wasted embedding calls
   if ((await findRecentDuplicate({ title, url })) !== null) return undefined;
 
-  // Validate the date before spending an OpenAI embedding call. Mirrors
+  // Validate the date before spending an embedding call. Mirrors
   // ingest.ts / discover-web.ts; discover.ts previously inserted unvalidated
   // dates, so a null/future published_at could waste an embed and (for future
   // dates) inflate cluster freshness in rescore.
@@ -433,7 +433,7 @@ export async function run(
   };
 }
 
-// CLI: npx tsx scripts/discover.ts
+// CLI: bun --env-file=.env.local scripts/discover.ts
 if (import.meta.url === `file://${process.argv[1]}`) {
   run({ closePool: true })
     .then((r) => {

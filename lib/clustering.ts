@@ -1,5 +1,6 @@
 // lib/clustering.ts
-// Shared clustering constants and utilities used by ingest, discover, maintenance, and split scripts.
+// Shared clustering constants and utilities used by ingest, discover, discover-web,
+// cluster-maintenance (merge + split), rescore, the categorizer and search.
 
 import { embed, gateway } from "ai";
 import { openai } from "@ai-sdk/openai";

@@ -161,9 +161,9 @@ export async function GET(req: Request) {
       );
     }
 
-    // 7) Rescore clusters LAST so it scores everything maintenance merged and
-    // web discovery just created — otherwise new/merged clusters sit at score 0
-    // (their interim metadata score) until the next run, up to 6h later.
+    // 7) Rescore clusters after maintenance and web discovery, so it scores
+    // everything they merged or created — otherwise new/merged clusters sit at
+    // score 0 (their interim metadata score) until the next run, up to 6h later.
     console.log("🔢 Running rescore...");
     const rescoreResult = await safeRun(import("@/scripts/rescore"), {
       closePool: false,
@@ -171,8 +171,9 @@ export async function GET(req: Request) {
     console.log(`✅ Rescore completed (${elapsed()}s):`, rescoreResult);
 
     // 8) Rewrite-at-ingest: rescore just elected leads for newly discovered /
-    // merged clusters — rewrite them now (deadline-aware) instead of waiting up
-    // to an hour for the rewrite cron, which becomes a sweeper.
+    // merged clusters — rewrite them now (deadline-aware) instead of waiting
+    // for the next rewrite cron (up to 2h away overnight), which becomes a
+    // sweeper.
     let inlineRewriteResult: unknown = { skipped: "timeout" };
     {
       const remainingMs = t0 + timeoutMs - Date.now();

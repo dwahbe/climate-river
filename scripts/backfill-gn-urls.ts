@@ -7,9 +7,10 @@
 // cleanup removes any orphaned cluster).
 //
 //   bun run gn:backfill            # dry-run, newest 50
-//   bun scripts/backfill-gn-urls.ts --apply --limit 200 --days 7
+//   bun scripts/backfill-gn-urls.ts --apply --limit=200 --days=7
 
 import { query, endPool } from "@/lib/db";
+import { parseNumberFlag } from "@/lib/evalCli";
 import { resolveGoogleNewsUrl } from "@/lib/googleNews";
 import { canonical } from "@/lib/utils";
 import { resolveTier } from "@/config/sourceTiers";
@@ -140,14 +141,10 @@ export async function run(
 // --- CLI ---
 if (import.meta.url === `file://${process.argv[1]}`) {
   const argv = process.argv.slice(2);
-  const flag = (name: string) => {
-    const hit = argv.find((a) => a.startsWith(`--${name}=`));
-    return hit ? Number(hit.split("=")[1]) : undefined;
-  };
   run({
     apply: argv.includes("--apply"),
-    limit: flag("limit"),
-    days: flag("days"),
+    limit: parseNumberFlag(argv, "limit"),
+    days: parseNumberFlag(argv, "days"),
     closePool: true,
   }).catch((err) => {
     console.error(err);

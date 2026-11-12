@@ -13,7 +13,7 @@ export type WebSearchProfile = {
   maxOutputTokens: number;
   /** OpenAI web_search tool context size: "low" | "medium" | "high" */
   searchContextSize?: "low" | "medium" | "high";
-  /** Prompt variant — "v1" mirrors current production verbatim. */
+  /** Prompt variant — production (scripts/discover-web.ts) uses "v4"; "v1" is the original baseline. */
   promptVariant: WebSearchPromptVariant;
 };
 
@@ -45,7 +45,7 @@ export type PromptInputs = {
   resultLimit: number;
 };
 
-/** v1: production prompt verbatim (scripts/discover-web.ts:2036). */
+/** v1: the original production prompt, kept as the eval baseline. */
 function buildSystemPromptV1(inputs: PromptInputs): string {
   return `You are ClimateRiver's climate outlet curator. For each outlet you must issue at least one precise site:domain query that reflects the outlet's specialty while keeping total tool calls as low as possible. Only keep ${ENGLISH_LANGUAGE_PROMPT_CONSTRAINT} original articles published in the past ${inputs.freshHours} hours. Reject syndicated content, opinion newsletters, or aggregator redirections. Double-check that every URL's hostname belongs to the allowed domain list and drop any entry without a confirmed ISO timestamp. Respond with a JSON array sorted newest to oldest containing title, url, snippet (why the story matters), publishedDate (ISO), and source.`;
 }
@@ -219,7 +219,7 @@ export function buildUserPrompt(
 }
 
 export const DEFAULT_WEB_SEARCH_PROFILES: WebSearchProfile[] = [
-  // Baseline: production prompt
+  // Baseline: the original (v1) production prompt
   {
     id: "gpt-4.1-mini-v1",
     provider: "openai",

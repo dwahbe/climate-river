@@ -138,7 +138,9 @@ function failValidation(
 // reporting codes so eval failure buckets stay stable while the actual gate is
 // IDENTICAL to production (lib/rewriteShared.validateHeadline). Previously this
 // file carried a drifted copy with a digits-only numeric check and different
-// codes, so the bakeoff silently stopped measuring the real gate.
+// codes, so the bakeoff silently stopped measuring the real gate. `truncated`
+// is set by the caller (validateDraft's `truncated` option), as in production;
+// `llm_error` is only set by scripts/rewrite.ts and is never hit here.
 const REASON_TO_CODE: Record<HeadlineFailureReason, RewriteFailureCode> = {
   empty: "empty_output",
   length: "length",
@@ -164,7 +166,16 @@ export function validateDraft(
   original: string,
   draft: string,
   context: ValidationContext,
+  opts: { truncated?: boolean } = {},
 ): RewriteValidationResult {
+  // Production fails an answer cut off at the token limit before validating it.
+  if (draft && opts.truncated) {
+    return failValidation(
+      REASON_TO_CODE.truncated,
+      "Rejected (truncated)",
+      draft,
+    );
+  }
   const result = validateHeadline(original, draft, context);
   if (result.ok) return { ok: true, code: null, message: null };
   const code = REASON_TO_CODE[result.reason];
@@ -322,6 +333,7 @@ export async function executeRewriteProfile(
     prepared.row.title,
     firstDraft,
     prepared.validationContext,
+    { truncated: firstGeneration.finishReason === "length" },
   );
   const firstAttempt: RewriteAttempt = {
     retry: false,
@@ -353,6 +365,7 @@ export async function executeRewriteProfile(
     prepared.row.title,
     retryDraft,
     prepared.validationContext,
+    { truncated: retryGeneration.finishReason === "length" },
   );
   const retryAttempt: RewriteAttempt = {
     retry: true,

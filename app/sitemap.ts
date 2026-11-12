@@ -37,7 +37,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     },
     {
       url: `${baseUrl}/about`,
-      lastModified: new Date("2025-11-25"), // About page rarely changes
+      lastModified: new Date("2026-04-23"), // Bump when the About page changes
       changeFrequency: "monthly",
       priority: 0.8,
     },

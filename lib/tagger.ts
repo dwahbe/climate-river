@@ -354,7 +354,6 @@ export const CATEGORIES = [
       /(analysis shows|findings show|evidence shows|data reveals)/i,
       /(climate model|simulation|peer.?reviewed|scientific study)/i,
       /(ipcc report|science journal|nature journal|research paper|academic)/i,
-      // Removed: negative lookahead pattern was flawed (only worked if weather terms came after)
     ],
   },
 ] as const;
@@ -421,7 +420,10 @@ export function normalizeArticleForCategorization(
  * Check if an article is climate-relevant by requiring at least one climate-related term.
  * This prevents non-climate political/business news from slipping through.
  *
- * TODO: This is prone to both false positives and false negatives. A simple way to improve this is to use LLMs to check the article + summary.
+ * Prone to both false positives and false negatives. A model check runs in
+ * shadow mode (lib/articleJudgment.ts via scripts/judge.ts), and
+ * lib/gateRejections.ts samples this gate's rejections to measure its misses;
+ * this keyword gate is still the live one.
  */
 export function isClimateRelevant(article: ArticleLike): boolean {
   const normalized = normalizeArticleForCategorization(article);
@@ -431,9 +433,9 @@ export function isClimateRelevant(article: ArticleLike): boolean {
     // Core climate terms
     /\b(climate|carbon|carbon dioxide|co2|emissions?|greenhouse|warming|global warming)\b/i,
 
-    // Energy & renewables (bare "wind"/"energy" are handled via the
-    // ambiguous-term + climate-context gate below to avoid false positives like
-    // "wind blows away parade balloons" / "energy drink")
+    // Energy & renewables (bare "wind"/"energy" are handled further down: they
+    // count as relevant unless a non-climate phrase matches, e.g. "wind blows
+    // away parade balloons" / "energy drink")
     /\b(renewables?|fossil|solar|hydroelectric|geothermal|biomass)\b/i,
     /\b(wind (?:farm|farms|turbine|turbines|power|energy)|offshore wind|onshore wind)\b/i,
     // Unambiguous climate-tech / energy-transition terms

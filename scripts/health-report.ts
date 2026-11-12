@@ -57,8 +57,9 @@ export interface HealthReport {
   metrics: HealthMetrics;
 }
 
-// Thresholds are regression guards calibrated to the 2026-06 baseline; raise
-// them as the pipeline improves (see tmp/improvement-plan-2026-06.md).
+// Thresholds are regression guards. The first set was calibrated to the
+// 2026-06 baseline (tmp/improvement-plan-2026-06.md, local only); later ones
+// carry their own dated notes. Raise them as the pipeline improves.
 const THRESHOLDS = {
   rewriteLlmErrorShareMax: 0.1, // min 20 attempts
   // The primary model failing over to the fallback is silent per attempt:

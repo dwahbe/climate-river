@@ -55,7 +55,8 @@ async function handle(req: Request) {
     (url.searchParams.get("discover") || "").toLowerCase() === "true";
   const discoverLimit = getIntParam(url, "discoverLimit", { min: 1, max: 50 });
 
-  // Default to a conservative batch size when called by cron without an explicit limit
+  // Default to a conservative batch size for a Vercel cron call without an
+  // explicit limit (no cron in vercel.json targets this route today)
   if (isCron && ingestLimit === undefined) ingestLimit = 25;
 
   const t0 = Date.now();
@@ -68,13 +69,13 @@ async function handle(req: Request) {
       result.ingest = await run({ limit: ingestLimit });
     }
 
-    // Optional discovery pass (if you have scripts/discover.ts)
+    // Optional discovery pass (scripts/discover.ts)
     if (wantDiscover) {
       try {
         const { run } = (await import("@/scripts/discover")) as DiscoverMod;
         result.discover = await run({ limitPerQuery: discoverLimit });
       } catch (e: unknown) {
-        // If discover module isn't present or fails, return a soft error but keep 200
+        // If discovery fails, return a soft error but keep 200
         const message = e instanceof Error ? e.message : String(e);
         result.discover = { ok: false, error: message };
       }

@@ -1,5 +1,7 @@
 // lib/evalCli.ts
-// Shared helpers for CLI eval scripts (rewrite-bakeoff.ts, web-search-eval.ts).
+// Shared CLI helpers for the eval scripts (rewrite-bakeoff, web-search-eval,
+// categorize-bakeoff), for judge, judge-report and headline-check, and for the
+// maintenance scripts' numeric flags.
 
 import path from "node:path";
 
@@ -20,6 +22,29 @@ export function parseCliArg(
     return { value: arg.slice(flag.length + 1), skip: 0 };
   }
   return null;
+}
+
+/**
+ * Numeric value of `--name N` or `--name=N`; undefined when the flag is absent.
+ * Throws when the value is missing or not a number, so a mistyped flag can't
+ * silently fall back to a script's default.
+ */
+export function parseNumberFlag(
+  argv: string[],
+  name: string,
+): number | undefined {
+  const flag = `--${name}`;
+  for (let i = 0; i < argv.length; i++) {
+    const match = parseCliArg(argv, i, flag);
+    if (!match) continue;
+    const value = match.value.trim();
+    const parsed = Number(value);
+    if (value === "" || !Number.isFinite(parsed)) {
+      throw new Error(`${flag} needs a number, got "${match.value}"`);
+    }
+    return parsed;
+  }
+  return undefined;
 }
 
 /** ISO timestamp safe for use as a directory name. */

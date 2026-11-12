@@ -41,6 +41,7 @@ const OUTLET_GROUPS: OutletGroup[] = [
       "bloomberg.com",
       "bbc.com",
       "politico.com",
+      "semafor.com",
     ],
   },
   {
@@ -57,6 +58,8 @@ const OUTLET_GROUPS: OutletGroup[] = [
       "carbon-pulse.com",
       "yaleclimateconnections.org",
       "eenews.net",
+      "desmog.com",
+      "drilled.media",
     ],
   },
   {
@@ -100,6 +103,17 @@ export default function SourcesPage() {
     CURATED_CLIMATE_OUTLETS.map((o) => [o.domain, o]),
   );
 
+  // Outlets added to the config but not yet placed in a group still show up,
+  // so this page can't silently fall behind config/climateOutlets.ts.
+  const grouped = new Set(OUTLET_GROUPS.flatMap((group) => group.domains));
+  const ungrouped = CURATED_CLIMATE_OUTLETS.map((o) => o.domain).filter(
+    (domain) => !grouped.has(domain),
+  );
+  const groups: OutletGroup[] =
+    ungrouped.length > 0
+      ? [...OUTLET_GROUPS, { label: "More Outlets", domains: ungrouped }]
+      : OUTLET_GROUPS;
+
   return (
     <div className="mx-auto max-w-3xl pt-1 sm:pt-1.5 pb-10">
       <h1 className="text-xl font-semibold tracking-tight">Sources</h1>
@@ -117,7 +131,7 @@ export default function SourcesPage() {
         original reporting.
       </p>
 
-      {OUTLET_GROUPS.map((group) => (
+      {groups.map((group) => (
         <section key={group.label} className="mt-8">
           <h2 className="text-base font-semibold text-zinc-900 mb-3">
             {group.label}

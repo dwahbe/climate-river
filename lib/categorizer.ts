@@ -19,7 +19,7 @@ const categoryEmbeddingsCache = new Map<string, number[]>();
  * Get or generate category embedding with multi-tier caching:
  * 1. In-memory Map (warm instance)
  * 2. Database categories.embedding column (persists across cold starts)
- * 3. Generate via OpenAI and store in both tiers
+ * 3. Generate via embedText (lib/clustering.ts) and store in both tiers
  */
 async function getCategoryEmbedding(
   categorySlug: CategorySlug,
@@ -218,7 +218,7 @@ export function filterStorableCategoryScores(
  * aren't overridden by semantic similarity to other categories.
  *
  * When articleId is provided, reuses the stored embedding from the DB
- * instead of making a redundant OpenAI API call.
+ * instead of making a redundant embedding call.
  */
 export async function categorizeArticleHybrid(
   title: string,
@@ -269,7 +269,7 @@ export async function categorizeArticleHybrid(
       normalized.summary ?? undefined,
     );
     // Persist it: every retry used to regenerate this embedding and throw it
-    // away, paying the OpenAI call again. Only fills a NULL slot — a stored
+    // away, paying for the embedding call again. Only fills a NULL slot — a stored
     // embedding (from ingest) is built from title+dek and stays authoritative.
     if (articleId && articleEmbedding && articleEmbedding.length > 0) {
       try {
@@ -401,7 +401,8 @@ export async function storeArticleCategories(
       return 0;
     }
 
-    // Find primary category (highest confidence)
+    // Primary category: first in rankHybridCategoryScores order (rule signal
+    // before combined confidence), which filterStorableCategoryScores preserves
     const primaryCategory = validScores[0];
 
     // Insert new categories

@@ -153,7 +153,7 @@ function makeDescriptor(domain: string): string {
 /**
  * Scenarios mirror the per-batch shape of the production OpenAI fallback:
  * a small group of outlets that the outlet sweep often misses, asked to return
- * combined articles. Each scenario is run once per profile.
+ * combined articles. Each scenario is run once per profile (times --repeat).
  */
 function buildScenarios(): Scenario[] {
   const sweepOftenMisses: Scenario[] = [
@@ -241,7 +241,7 @@ function looksLikeEmptyResponseText(text: string): boolean {
 }
 
 function countToolCalls(response: unknown): number {
-  // Mirror production accounting (scripts/discover-web.ts:853-858):
+  // Mirror production accounting (callOpenAIWebSearch in scripts/discover-web.ts):
   // prefer toolResults.length, fall back to toolCalls.length.
   const r = response as {
     toolResults?: unknown[];

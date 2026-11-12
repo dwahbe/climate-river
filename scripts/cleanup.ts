@@ -1,9 +1,11 @@
 // scripts/cleanup.ts
-// Delete articles older than RETENTION_DAYS to keep Supabase data usage in check.
+// Delete articles older than the retention window (DEFAULT_RETENTION_DAYS, or
+// --days N) to keep Supabase data usage in check.
 // Cascade deletes handle article_clusters, article_categories, and cluster_scores.
 // Orphaned clusters (with no remaining articles) are cleaned up afterward.
 
 import { query, endPool } from "@/lib/db";
+import { parseNumberFlag } from "@/lib/evalCli";
 
 const DEFAULT_RETENTION_DAYS = 45;
 // Sampled keyword-gate rejections (lib/gateRejections.ts). Their judgments
@@ -142,11 +144,9 @@ export async function run(
 
 // --- CLI ---
 if (import.meta.url === `file://${process.argv[1]}`) {
-  const dryRun = process.argv.includes("--dry-run");
-  const daysFlag = process.argv.find((a) => a.startsWith("--days="));
-  const retentionDays = daysFlag
-    ? Number(daysFlag.split("=")[1])
-    : DEFAULT_RETENTION_DAYS;
+  const argv = process.argv.slice(2);
+  const dryRun = argv.includes("--dry-run");
+  const retentionDays = parseNumberFlag(argv, "days") ?? DEFAULT_RETENTION_DAYS;
 
   run({ retentionDays, dryRun, closePool: true }).catch((err) => {
     console.error(err);

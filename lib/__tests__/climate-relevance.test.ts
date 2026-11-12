@@ -7,8 +7,8 @@ import { isClimateRelevant } from "../tagger";
  * isClimateRelevant() is the gate that decides what enters the river at
  * ingestion (scripts/ingest.ts) and what is rewritten/categorized. It is a
  * pure regex keyword gate; the source code itself flags it as prone to false
- * positives/negatives. These tests pin its behavior and document the known
- * false positives empirically observed against production data.
+ * positives/negatives. These tests pin its behavior, including false positives
+ * observed against production data that have since been fixed.
  */
 
 describe("isClimateRelevant — true positives", () => {
@@ -69,16 +69,17 @@ describe("isClimateRelevant — true negatives", () => {
 });
 
 describe("isClimateRelevant — formerly false positives, now rejected", () => {
-  // After moving bare ambiguous words (heat/mining/gas/oil/energy/wind) behind a
-  // required climate-context cue, these unrelated stories are correctly excluded.
+  // Bare heat/mining/gas/oil now need a climate-context cue, and wind/energy
+  // are excluded when a non-climate phrase matches ("wind blows", "energy
+  // drink"), so these unrelated stories are correctly excluded.
   const rejected = [
     "Miami Heat win in overtime thriller", // dropped bare "heat"
     "Mining stocks rally on strong demand", // "mining" w/o climate context
     "Gas station prices tick up ahead of holiday travel", // bare "gas"
     "Oil prices jump on Middle East tensions", // bare "oil"
     "Bitcoin mining firm reports record quarter", // "mining" w/o context
-    "Wind blows away parade balloons downtown", // bare "wind"
-    "New energy drink launches nationwide", // bare "energy"
+    "Wind blows away parade balloons downtown", // non-climate "wind blows"
+    "New energy drink launches nationwide", // non-climate "energy drink"
   ];
   for (const title of rejected) {
     it(`rejects: "${title.slice(0, 48)}..."`, () => {

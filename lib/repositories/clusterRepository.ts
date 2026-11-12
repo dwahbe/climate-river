@@ -36,7 +36,7 @@ export async function getClustersForRiver(
       throw new Error(`Failed to fetch clusters: ${error.message}`);
     }
 
-    // The function returns JSON, parse if needed
+    // The RPC returns table rows; normalise a single row to an array
     const clusters = Array.isArray(data)
       ? (data as Cluster[])
       : data

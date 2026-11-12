@@ -201,10 +201,11 @@ ORDER BY started_at DESC
 LIMIT 20;
 
 -- =============================================================================
--- 8) Did the v4 prompt + 4.1-mini change land? (track over time)
+-- 8) Daily stale-reject % and cost per insert, by provider and model
 -- =============================================================================
--- Run before vs after deploy to compare. Look for: (a) lower stale-reject %,
--- (b) similar or higher accept_pct, (c) similar or lower cost_per_insert.
+-- Compare providers over time, or before vs after a prompt/model change (it
+-- was written to check the v4 prompt + gpt-4.1-mini switch, shipped 2026-05).
+-- Exa rows have no model.
 WITH search_rollup AS (
   SELECT
     date_trunc('day', created_at) AS day,
@@ -254,11 +255,12 @@ LEFT JOIN candidate_rollup c
 ORDER BY 1 DESC, 2;
 
 -- =============================================================================
--- 9) Prefetch catchup verification (after deploying the prefetch fix)
+-- 9) Prefetch coverage by origin (last 14 days)
 -- =============================================================================
--- Answers: "Did the catchup pass actually pick up the never-attempted
---          backlog? The 84% NULL rate for web-discovered articles should
---          drop sharply after a few full-cron cycles."
+-- Answers: "How many recent articles has prefetch never attempted?" Written to
+-- verify the catch-up pass (shipped 2026-05; the NULL rate for web-discovered
+-- articles was 84% before it). 'rss' is everything that is not web-discovered,
+-- including discover:// Google News sources.
 SELECT
   CASE
     WHEN s.feed_url LIKE 'web://%' OR s.feed_url LIKE 'web-discovery://%'

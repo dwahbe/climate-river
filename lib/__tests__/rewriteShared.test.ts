@@ -267,7 +267,7 @@ describe("buildSourceQuantContext", () => {
 });
 
 /* ================================================================== */
-/*  Validator regex patterns — coverage + documented false positives   */
+/*  Validator regex patterns — coverage + former false positives       */
 /* ================================================================== */
 
 describe("CLICKBAIT_PATTERNS", () => {
@@ -335,6 +335,14 @@ describe("VAGUE_PATTERNS", () => {
 
   it("does not flag concrete action phrasing", () => {
     assert.equal(vague("EU cuts truck CO2 limits by 45% by 2030"), false);
+  });
+
+  // The pattern was /\bmake(s|ing)? progress\b/, which matched "makeing" and
+  // so missed "making progress", the form headlines actually use.
+  it("flags every form of 'make progress'", () => {
+    assert.equal(vague("Talks make progress on a loss and damage fund"), true);
+    assert.equal(vague("Summit makes progress on methane"), true);
+    assert.equal(vague("Countries making progress on coal phase-out"), true);
   });
 });
 

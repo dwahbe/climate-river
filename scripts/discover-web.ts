@@ -7,6 +7,7 @@ import { isClimateRelevant } from "@/lib/tagger";
 import { recordGateRejection } from "@/lib/gateRejections";
 import { isTrustedClimateSource } from "@/config/trustedClimateSources";
 import { isLowValueUrl } from "@/lib/aggregators";
+import { findRecentDuplicateMatch } from "@/lib/articleDedupe";
 import { resolveTier, UNKNOWN_SOURCE_WEIGHT } from "@/config/sourceTiers";
 import {
   EXA_MONTH_TO_DATE_SPEND_SQL,
@@ -145,8 +146,8 @@ const EXA_WINDOW_HOURS = parseEnvInt("EXA_WINDOW_HOURS", 72);
 const EXA_MONTHLY_BUDGET_USD = parseEnvFloat("EXA_MONTHLY_BUDGET_USD", 10);
 // Paid OpenAI web-search fallback. OFF by default: Exa (budget-capped) and the
 // free Google News `site:` tier carry outlet discovery. Set WEB_SEARCH_ENABLED=1
-// to re-enable the paid serendipity channel (each forced tool call ~$0.01,
-// capped by WEB_SEARCH_MAX_CALLS_PER_RUN).
+// to re-enable it as a gap-filler for outlets both tiers missed (each forced
+// tool call ~$0.01, capped by WEB_SEARCH_MAX_CALLS_PER_RUN).
 const WEB_SEARCH_ENABLED = process.env.WEB_SEARCH_ENABLED === "1";
 const WEB_SEARCH_MODEL = process.env.WEB_SEARCH_MODEL || "gpt-4.1-mini";
 const WEB_SEARCH_MAX_OUTPUT_TOKENS = parseEnvInt(
@@ -293,8 +294,9 @@ function normalizeDomain(domain: string): string {
 
 // Static fallback only — the live answer comes from the sources table (see
 // resolveDiscoveryOutlets): an outlet is feed-covered when it has an http feed
-// that fetched OK/empty in the last 48h. The old hardcoded list wrongly
-// excluded Reuters/AP/WaPo/Bloomberg (no working feed) from every sweep.
+// that produced an article in the last FEED_COVERAGE_DAYS. The old hardcoded
+// list wrongly excluded Reuters/AP/WaPo/Bloomberg (no working feed) from every
+// sweep.
 const STATIC_RSS_COVERED_DOMAINS = new Set([
   "bbc.com",
   "bbci.co.uk",
@@ -1598,8 +1600,8 @@ export function buildGoogleNewsSiteFeedUrl(domain: string): string {
 }
 
 /**
- * Free outlet discovery via Google News site: RSS queries (replaces paid
- * paid sweeps). Links resolve to publisher URLs through
+ * Free outlet discovery via Google News site: RSS queries (tier 2: runs for
+ * the outlets the Exa sweep didn't cover). Links resolve to publisher URLs through
  * resolveGoogleNewsUrl, capped per run; candidates left on news.google.com
  * are returned separately so callers reject them instead of inserting
  * aggregator URLs.
@@ -2037,39 +2039,10 @@ async function findDuplicate(
       articleId: number;
     }
 > {
-  // Check if we already have this article by URL
-  const existingByUrl = await query<{ id: number }>(
-    "SELECT id FROM articles WHERE canonical_url = $1",
-    [url],
-  );
-
-  if (existingByUrl.rows.length > 0) {
-    return {
-      duplicate: true,
-      reason: "duplicate_url",
-      articleId: existingByUrl.rows[0].id,
-    };
-  }
-
-  // Check for similar title (basic duplicate detection)
-  const normalizedTitle = title.trim().toLowerCase();
-
-  if (normalizedTitle) {
-    const existingByTitle = await query<{ id: number }>(
-      "SELECT id FROM articles WHERE LOWER(title) = $1 AND fetched_at > NOW() - INTERVAL '48 hours'",
-      [normalizedTitle],
-    );
-
-    if (existingByTitle.rows.length > 0) {
-      return {
-        duplicate: true,
-        reason: "duplicate_title",
-        articleId: existingByTitle.rows[0].id,
-      };
-    }
-  }
-
-  return { duplicate: false };
+  // Shared rule (lib/articleDedupe.ts): same URL, or same title within 7 days.
+  const match = await findRecentDuplicateMatch({ title: title.trim(), url });
+  if (!match) return { duplicate: false };
+  return { duplicate: true, reason: match.reason, articleId: match.id };
 }
 
 /**
@@ -2875,8 +2848,9 @@ async function searchViaExa(
  * Primary paid outlet sweep (2026-08): Exa over the curated outlets that have
  * no live feed. High-volume outlets get one call each; the rest are batched
  * EXA_LOW_VOLUME_BATCH domains per call. Month-to-date spend + in-run spend
- * must stay under EXA_MONTHLY_BUDGET_USD. Returns the domains that produced
- * at least one candidate so the free GN `site:` tier only runs for the gaps.
+ * must stay under EXA_MONTHLY_BUDGET_USD. Returns the domains where Exa found
+ * something the river keeps (accepted, or already present) so the free GN
+ * `site:` tier only runs for the gaps.
  */
 async function runExaOutletSegment({
   fallbackSourceId,
@@ -3130,9 +3104,10 @@ export async function run(
     // outlets/batches/queries once it passes, so a time-budgeted cron can call
     // this without risking a hard kill at maxDuration.
     deadlineAt?: number;
-    // Paid outlet sweeps (Exa, OpenAI) run only when true — the full
-    // cron (3×/day) passes true, refresh passes false, so spend is bounded to
-    // ~24 Exa calls/day regardless of cron cadence. Free GN site: still runs.
+    // Paid outlet sweeps (Exa, OpenAI) run unless this is false. The full
+    // cron (3×/day) leaves it unset and refresh passes false, so spend is
+    // bounded to ~24 Exa calls/day regardless of cron cadence. Free GN site:
+    // still runs.
     paidOutletSweep?: boolean;
   } = {},
 ) {
@@ -3238,7 +3213,7 @@ export async function run(
     if (totalBrowseCost > 0) {
       console.log(
         `Estimated search spend: ~$${totalBrowseCost.toFixed(4)} ` +
-          `(${EXA_ENABLED ? "Exa + " : ""}OpenAI${totalBrowseToolCalls > 0 ? `, ${totalBrowseToolCalls} tool calls` : ""})`,
+          `(${[EXA_ENABLED ? "Exa" : "", WEB_SEARCH_ENABLED ? "OpenAI" : ""].filter(Boolean).join(" + ")}${totalBrowseToolCalls > 0 ? `, ${totalBrowseToolCalls} tool calls` : ""})`,
       );
     }
 

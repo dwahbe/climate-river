@@ -1,20 +1,11 @@
 // app/api/admin/health/route.ts
-// Pipeline health dashboard — shows recent runs, staleness, and costs
+// Pipeline health dashboard — shows recent runs, staleness, and feed health
 export const dynamic = "force-dynamic";
 
 import { NextResponse } from "next/server";
 import { DISABLED_FEED_PREFIX } from "@/lib/utils";
-import { authorized } from "@/lib/cron";
+import { authorized, JOB_STALE_AFTER_HOURS } from "@/lib/cron";
 import { query } from "@/lib/db";
-
-// Expected intervals per job (in hours). If a job hasn't run within
-// this window, it's flagged as stale.
-const EXPECTED_INTERVALS: Record<string, number> = {
-  refresh: 5, // runs every 4h, stale after 5h
-  full: 9, // runs every ~7h, stale after 9h
-  rewrite: 2, // runs ~hourly, stale after 2h
-  cleanup: 26, // runs daily, stale after 26h
-};
 
 type JobHealth = {
   job: string;
@@ -55,7 +46,7 @@ export async function GET(req: Request) {
       });
     }
 
-    const jobs = ["refresh", "full", "rewrite", "cleanup"];
+    const jobs = Object.keys(JOB_STALE_AFTER_HOURS);
     const jobHealths: JobHealth[] = [];
 
     for (const job of jobs) {
@@ -89,7 +80,7 @@ export async function GET(req: Request) {
       const hoursSince = lastRun
         ? (Date.now() - new Date(lastRun.started_at).getTime()) / 3_600_000
         : null;
-      const threshold = EXPECTED_INTERVALS[job] ?? 24;
+      const threshold = JOB_STALE_AFTER_HOURS[job] ?? 24;
 
       jobHealths.push({
         job,

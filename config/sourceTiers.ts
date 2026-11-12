@@ -1,8 +1,9 @@
 // Source-weight tiers used by ranking (see scripts/rescore.ts).
 // Higher weight → higher editorial trust, larger contribution to cluster score.
 //
-// Scale: integer 1–10. Default for new RSS-discovered sources is 2;
-// web-discovery seeds at 4 (default) or 8 (curated).
+// Scale: integer 1–10. Sources not listed here default to
+// UNKNOWN_SOURCE_WEIGHT (2), web-discovered ones included; only the catch-all
+// "Web Discovery" source row is seeded at 8.
 
 // Weight assumed when a source row is missing or has no weight. This is the
 // single source of truth — rescore, clustering, and cluster-maintenance all
@@ -62,7 +63,7 @@ export const SOURCE_TIERS: Record<string, number> = {
   "weforum.org": 6,
   "project-syndicate.org": 6,
 
-  // Tier 6 (cont.) — climate newsletters, trackers, policy primaries, journals
+  // Tiers 5–6 (cont.) — climate newsletters, trackers, policy primaries, journals
   // (added 2026-08-21 source audit)
   "volts.wtf": 6,
   "theclimatebrink.com": 6,

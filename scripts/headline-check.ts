@@ -62,7 +62,7 @@ async function tableExists(): Promise<boolean> {
   return rows[0]?.name != null;
 }
 
-/** Live rewritten headlines, newest first, in a fixed pseudo-random order. */
+/** Live rewritten headlines from the look-back window, in a fixed pseudo-random order. */
 async function selectHeadlines(
   opts: Options,
   skipChecked: boolean,

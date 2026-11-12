@@ -139,8 +139,8 @@ describe("passesChecks — length", () => {
     assert.equal(passesChecks("Original title here", long, noContent), false);
   });
 
-  it("accepts headline between 200-220 chars", () => {
-    // Build a 205-char headline with enough words
+  it("accepts a long headline (180-220 chars)", () => {
+    // A 186-char headline with enough words
     const words =
       "EPA finalizes landmark emissions reduction rule for power plants across the nation requiring significant cuts to greenhouse gas pollution from coal and natural gas facilities by deadline";
     assert.ok(words.length >= 180 && words.length <= 220);
@@ -170,17 +170,18 @@ describe("passesChecks — word count", () => {
     assert.equal(passesChecks(original, draft, ctx(false)), true);
   });
 
-  it("rejects too-short rewrite without content (<6 words)", () => {
+  it("rejects too-short rewrite without content", () => {
+    // 21 chars: rejected by the 50-char minimum before the 6-word rule applies
     const original = "Some original headline about climate";
     const draft = "Short words only five";
     assert.equal(passesChecks(original, draft, ctx(false)), false);
   });
 
   it("allows 50% compression with content", () => {
-    // 12-word original
+    // 13-word original
     const original =
       "The International Energy Agency Releases New Report On Global Coal Demand Decline Projection";
-    // 7-word rewrite = 58% of 12 words, above 50% threshold
+    // 12-word rewrite = 92% of 13 words, above 50% threshold
     const draft =
       "IEA projects sharp global coal demand decline through end of decade period";
     assert.ok(draft.length >= 60);
@@ -188,10 +189,10 @@ describe("passesChecks — word count", () => {
   });
 
   it("rejects below 50% compression with content", () => {
-    // 20-word original
+    // 21-word original
     const original =
       "A very long and detailed original headline with many many words that goes on and on about climate change impacts worldwide";
-    // 6-word rewrite = 30% of 20 words
+    // 8-word rewrite = 38% of 21 words
     const draft =
       "Climate change worldwide short rewrite here placeholder text";
     assert.equal(passesChecks(original, draft, ctx(true)), false);
@@ -199,7 +200,7 @@ describe("passesChecks — word count", () => {
 });
 
 /* ================================================================== */
-/*  passesChecks — vague filler patterns (NEW)                         */
+/*  passesChecks — vague filler patterns                               */
 /* ================================================================== */
 
 describe("passesChecks — rejects vague filler", () => {

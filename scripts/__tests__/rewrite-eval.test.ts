@@ -113,4 +113,22 @@ describe("rewrite-eval validation", () => {
     assert.equal(result.ok, false);
     assert.equal(result.code, "vague_topic_summary");
   });
+
+  // Production fails an answer cut off at the token limit before validating
+  // it; the harness has to do the same or it over-credits a model.
+  it("fails a truncated draft that would otherwise pass", () => {
+    const source =
+      "The Environmental Protection Agency finalized a rule on Monday that repeals limits on carbon emissions from coal and gas power plants";
+    const draft =
+      "EPA finalizes rule repealing carbon emission limits for coal and gas power plants";
+    const args = ["EPA repeals power plant emission limits", draft] as const;
+
+    assert.equal(validateDraft(...args, ctx(true, source)).ok, true);
+
+    const truncated = validateDraft(...args, ctx(true, source), {
+      truncated: true,
+    });
+    assert.equal(truncated.ok, false);
+    assert.equal(truncated.code, "length");
+  });
 });

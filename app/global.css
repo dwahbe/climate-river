@@ -87,7 +87,7 @@ summary::-webkit-details-marker {
   box-sizing: border-box;
 }
 
-/* Reusable focus ring helper (used via focus-visible:focus-ring) */
+/* Reusable focus ring helper (currently unused) */
 .focus-ring {
   outline: none;
   box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.25);

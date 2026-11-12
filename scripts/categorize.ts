@@ -71,8 +71,8 @@ export async function run(
   const start = Date.now();
   console.log("🏷️  Starting bulk categorization...");
 
-  // Get all articles that need categorization
-  // Either articles with no categories, or all articles if limit is specified
+  // Uncategorized articles by default; every article from the last 30 days
+  // when recategorizeAll is set. `limit` only caps the batch.
   const limit = opts.limit || 1000; // Default to 1000 articles
 
   // Build query based on options

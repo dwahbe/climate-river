@@ -36,7 +36,8 @@ function stripLeadingImage(html: string, leadImage?: string): string {
  * Allows semantic article elements while stripping noise
  */
 function sanitizeContent(html: string, leadImage?: string): string {
-  // First strip any leading image that matches the extracted lead image
+  // First strip a leading image when a lead image was extracted (it would
+  // otherwise show twice: once as hero, once in content)
   const withoutLeadingDupe = stripLeadingImage(html, leadImage);
 
   const cleaned = sanitize(withoutLeadingDupe, {
@@ -260,10 +261,10 @@ function detectBlocked(text: string): boolean {
   return BLOCKED_INDICATORS.some((pattern) => text.match(pattern));
 }
 
-// Module-scoped import promises. Resolving them at module init (instead of
-// per-call) avoids a race condition where concurrent fetches each trigger
-// dynamic ESM evaluation in parallel, leaving @asamuzakjp/dom-selector in a
-// temporal-dead-zone state ("Cannot access 'DOMSelector' before initialization").
+// Module-scoped import promises, resolved once at module init instead of
+// per-call. Added to stop concurrent fetches racing on dynamic ESM evaluation
+// of @asamuzakjp/dom-selector under a newer jsdom; the pinned jsdom 22.1.0
+// uses nwsapi instead, but one shared import is still what we want.
 const jsdomModule = import("jsdom");
 const defuddleModule = import("defuddle/node");
 
